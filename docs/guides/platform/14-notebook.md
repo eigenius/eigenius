@@ -1,0 +1,221 @@
+# 14. Notebook
+
+The Eigenius notebook is the most accessible way to use the platform. It is a single-page React app served by the orchestrator at `/notebooks/`; cells run ESL, EigenQL, TypeScript, program invocations, and form-based charts against the live kernel via Connect-RPC; outputs auto-render as typed inspectors, result tables, layer-stack diagrams, program-trace trees, and Fluent charts.
+
+If you have the docker stack up (`docker compose up -d`), you already have the notebook — it is bundled into the orchestrator image at build time and serves alongside the RPC endpoints. Open [http://localhost:8080/notebooks/](http://localhost:8080/notebooks/) in a browser.
+
+![The Eigenius notebook — a chart cell of the kinase-institutions demo](../assets/eigenius_notebook_ux.png)
+
+This chapter is the operational reference for the notebook UX. Chain operations get their own chapters — see [chapter 15 — Tags, branches, and history](15-tags-branches-history.md) for the workspace panels that drive them and [chapter 16 — Merge resolution](16-merge-resolution.md) for the merge surface. The TypeScript SDK that powers the notebook (and that you can use programmatically from outside it) is documented in [chapter 17](17-typescript-sdk.md).
+
+## 14.1. What's in a notebook
+
+A notebook is an ordered sequence of typed cells. Seven cell types are supported:
+
+| Type | What it does | Run dispatch |
+|---|---|---|
+| `markdown` | Render-only prose (Github-flavoured Markdown). Click the eye/edit toggle to switch to source view. | None — it just renders. |
+| `esl` | Eigenius Surface Language. Compiles + commits a layer on Run; output shows resource count + the new layer ID, with an expandable "View layer stack" accordion. | `eigen.load(source, "application/x-esl")` |
+| `eigenql` | EigenQL query against the active layer chain. Output renders in a Fluent `DataGrid` with column types from the synthesized Property metadata. | `eigen.query(source)` |
+| `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", "console", "React", "h", "charts", "nb", source)` — seven injected names, not two: the SDK client, the previous cells' outputs, a captured `console`, `React` and its `createElement` as `h`, the chart components, and `nb` notebook helpers (`nb.rows(document)` decodes a ResultSet). A cell may return a React element and the auto-renderer mounts it. |
+| `program-run` | Form-based program invocation: program IRI + one or more input IRIs. Single input renders as inspector + trace; multiple inputs render as a results table. | `eigen.runProgramByIri(programIri, inputIri)` per input |
+| `chart` | Form-based chart: pick a chart kind (`grouped-bar` / `vertical-bar` / `horizontal-bar` / `donut` / `line` / `area`), write an EigenQL query, bind axis columns by `RETURN` short-name. Output is the corresponding Fluent `@fluentui/react-charts` component. | `eigen.query(query)` then pivot rows into the kind's data shape |
+| `formalize` | **Prose, not code** (D71). Runs the formalization service over the cell's text and renders the per-unit outcome: claims, the `DecisionPoint` recording which reading was chosen against which runners-up, the `AnaphorBinding`s, and an `enc:CutItem` for every unit that did not encode. ASYNCHRONOUS — a document costs minutes and several LLM round-trips, so the cell starts a task and polls it; watch it in the Tasks panel with kind `Formalize`. **The artifact is NOT committed**: generation stays decoupled from commitment, so you read and diff it, then land it with an explicit `esl` cell. `Document id` names the run's `doc-<id>` working branch, which holds the document glossary and the run's recorded proposer draws — keep it stable and a re-run replays those instead of re-asking the model. | `eigen.formalizeDocument(prose, docId)` → poll `getTaskStatus` → `getFormalizationResult` |
+
+Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete).
+
+Notebook-level toolbar (top), left to right: editable title (required — `Export…` and `Publish` are disabled while it is empty) · an edit-metadata pencil · cell count and last-modified · `New` (empty notebook) · `Open…` (**opens the published-notebook dialog**, listing notebooks in the chain — not a file picker) · `Import…` (the file picker, `<input type="file">`) · `Export…` (browser download) · `Collapse all` / `Expand all` (one button, label follows state) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
+
+Note the split: **`Open…` is the chain, `Import…` is the filesystem.** An older version of this guide described `Open…` as the file picker and `Save` as the download button; those are now `Import…` and `Export…`.
+
+Source: [`notebooks/`](../../../notebooks/).
+
+## 14.2. Running the notebook
+
+### Production (docker stack)
+
+```bash
+docker compose up -d --build
+# open http://localhost:8080/notebooks/
+```
+
+The orchestrator image ([`deploy/Dockerfile.orchestration`](../../../deploy/Dockerfile.orchestration)) is multi-stage: stage 1 builds the SPA with `vite build`; stage 2 is the Deno orchestrator runtime with `EIGENIUS_NOTEBOOK_STATIC=/app/notebooks` set so the notebook serves alongside the RPC paths on port 8080. Single origin, no CORS, no separate dev server.
+
+The orchestrator drops the notebook route when `EIGENIUS_NOTEBOOK_STATIC` is unset — useful for headless deployments where the notebook isn't needed.
+
+### Development (live HMR)
+
+```bash
+cd notebooks
+npm install
+npm run dev
+# open http://localhost:5173/notebooks/
+```
+
+`vite dev` serves the SPA on port 5173 with hot-module reload. Connect-RPC traffic is proxied to the orchestrator on `localhost:8080` ([`vite.config.ts`](../../../notebooks/vite.config.ts)), so you still need a kernel + orchestrator running. The proxy paths are `/eigenius.v1.EigeniusKernel/*` and `/eigenius.v1.NotebookService/*`.
+
+This is the path to use when iterating on the notebook itself.
+
+## 14.3. Bundled example notebooks
+
+The stats-and-reasoning demo is what loads on first start; the others are importable via the **Import…** button.
+
+### Stats-and-reasoning demo
+
+[`notebooks/examples/stats-and-reasoning.json`](../../../notebooks/examples/stats-and-reasoning.json), titled *Statistics + Reasoning — composition through the witness index*. Twenty cells — eight markdown, nine esl, three eigenql — and no cell calls a model:
+
+1. **Part A** (cells 2–3) — the esl cell declares the predicates `HasLowIC50` and `StrongInhibitor`, both marked `stats:PopulationLevel`, and the linking predicate `sample_for`.
+2. **Part B** (cells 4–11) — esl cells commit six raw IC₅₀ reads of compound `EIG_0291` against CDK2 as a sample set, an `ImpossibilityWitness` that licenses a one-sided test, and a `StatisticalAnalysisPlan`. The plan's commit fires the statistics institution's AutoOnLoad gate (D52), which recomputes a one-sample t-test against the 100 nM threshold from the raw reads and emits a `Holds` verdict; cell 9 (eigenql) queries it. Cell 10 commits the plan's reproducibility declaration.
+3. **Part C** (cells 12–20) — esl cells commit a literature classification rule (`∀c. HasLowIC50(c) → StrongInhibitor(c)`), a `sample_for` witness, a statistical-to-domain bridge, and a `justification:Conclusion` that composes them with the statistical result. The reasoning institution (D39) checks the conclusion on commit; cell 18 queries its verdict and cell 20 returns both verdicts.
+
+Click **Run all**. The step-by-step walkthrough is [composition guide chapter 7](../composition/07-stats-and-reasoning-walkthrough.md).
+
+### Kinase-institutions demo
+
+[`notebooks/examples/kinase-institutions.json`](../../../notebooks/examples/kinase-institutions.json). The end-to-end showcase for the runtime substrate ([chapter 11](11-runtime-substrate.md)) — five Julia institutions installed, three cross-institution comorphisms registered, two storylines (Catalyst → DiffEq forward simulation; Symbolics → JuMP parameter fit). Setup script: [`notebooks/examples/kinase-institutions-setup.sh`](../../../notebooks/examples/kinase-institutions-setup.sh) (run once, ~30–60 minutes cold for the five Julia env builds; subsequent runs are fast due to the buildah cache).
+
+Cells 13–18 exercise both surfaces of the comorphism chain-reinsertion contract (D14 §9.3):
+
+- ESL `program` invocation as a qualified-name function call (`comorphisms:symbolics_to_jump(input)`) — output commits at a deterministic content-hash IRI.
+- EigenQL `FIBER ... AS ?var INTO "<iri>"` — output commits at a caller-named IRI.
+
+See [chapter 8 §8.2](08-demos.md#82-kinase-institutions--multi-institution-julia-stack) for the storyline overview and the per-institution walkthroughs under [`platform/julia-institutions/`](julia-institutions/) for one-at-a-time slow-walks.
+
+### Lean-verification demo
+
+[`notebooks/examples/lean-verification.json`](../../../notebooks/examples/lean-verification.json). The showcase for the platform's first verification institution. Walks the closed audit chain D28 §5.7 promises — verdict → proof term → mirror anchor → mirrored class — for a real Lean 4 proof of `∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10`. Setup script: [`notebooks/examples/lean-verification-setup.sh`](../../../notebooks/examples/lean-verification-setup.sh) (fast — the Lean institution runs in-process so no Docker / Lake / env-image build is needed at notebook-load time).
+
+Ten cells alternating markdown (audit-chain narrative) and EigenQL (one query per step backward through the chain). The first EigenQL cell finds the `Verdict::Holds` resource AutoOnLoad produced; subsequent cells trace the cross-references back to the chain-side Patient class declaration.
+
+See [chapter 8 §8.3](08-demos.md#83-lean-verification--lean-4-verification-audit-chain) for the storyline overview and [`platform/lean-institution/`](lean-institution/) for the in-process verification-side slow-walk.
+
+### Formalizing prose (D71)
+
+[`notebooks/examples/d71-formalize-prose.json`](../../../notebooks/examples/d71-formalize-prose.json). The showcase for the `formalize` cell: prose in, typed kernel-checked claims out. Uses the WRN paragraph from the `prose-to-formulas-v2` demo deliberately — that paragraph's expected output is a committed, byte-compared fixture, so the cell's result can be checked against a known-correct artifact rather than eyeballed.
+
+Six cells: intro → prerequisites → **the formalize cell** → how to read the output → how to land it → an EigenQL query over the landed claims. The markdown carries the three things that are otherwise easy to get wrong — that the artifact is not committed, that the `doc-<id>` branch is prunable scaffolding whose draws make a re-run free, and that an `enc:CutItem` is a recorded *result* rather than a failure.
+
+**Prerequisites: a lexicon snapshot, and nothing else to load.** The encoding contract is in the kernel's bootstrap chain and the claim-kind alignment is layered into the aligned snapshot (see the repo README, *Building the lexicon image*). A first run on a fresh `Document id` asks the model, so it needs a kernel built `--features use-llm` (`just up-llm`) and an `ANTHROPIC_API_KEY`; every later run on the same id replays the recorded draws for free.
+
+### Markdown maths
+
+Markdown cells render `$inline$` and `$$display$$` LaTeX via [remark-math](https://github.com/remarkjs/remark-math) + [rehype-katex](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex). The kinase notebook uses this extensively to render the Michaelis–Menten / competitive-inhibition equations alongside the FormulaTerm encodings of the same expressions, so the surface and the chain payload align visually.
+
+## 14.4. The notebook file format
+
+Notebooks are versioned JSON with a discriminated cell-type union. Schema in [`notebooks/src/persistence/notebook-format.ts`](../../../notebooks/src/persistence/notebook-format.ts):
+
+```typescript
+{
+  format_version: 1,
+  meta: {
+    title?, description?, created?, modified?, eigenius_version?
+  },
+  cells: [
+    // Source-bearing cell:
+    { id: "<uuid>", type: "markdown" | "esl" | "eigenql" | "typescript", source: "..." },
+    // Program-run cell:
+    { id: "<uuid>", type: "program-run", program_iri: "...", input_iris: ["...", ...] },
+    // Chart cell:
+    { id: "<uuid>", type: "chart", query: "...",
+      chart_kind: "grouped-bar" | "vertical-bar" | "horizontal-bar" | "donut" | "line" | "area",
+      x_column: "...", y_column: "...",
+      series_column?: "...", title?: "..." }
+  ]
+}
+```
+
+`meta.title` is **required** and must be non-empty — `parseNotebook` rejects a document without it, and the toolbar disables `Export…` and `Publish` until one is set. The other `meta` fields are optional.
+
+`Export…` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the export time) and triggers a browser download. `Import…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
+
+## 14.5. Publish to layer
+
+Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's twenty-layer boot chain (14th, after `statistics`), so publish succeeds without first registering anything.
+
+IRIs are content-addressed:
+
+- **Cell IRI** = `urn:eigenius:notebook:cell:<sha256>` over the cell's structural form: `{cell_type, source}` for source-bearing cells, `{cell_type, program_iri, input_iris}` for program-run cells, `{cell_type, query, chart_kind, x_column, y_column, series_column, title}` for chart cells
+- **Notebook IRI** = `urn:eigenius:notebook:<sha256>` over `{format_version, title, description, cells:[<cellIri>...]}`. Excluded from the hash on purpose: timestamps and `eigenius_version`, so re-saving identical content yields the same Notebook IRI.
+
+Identical cells across notebooks share a single `Cell` resource — useful for tracking "find every notebook that contains this exact ESL load" and similar queries. The ontology supports queries like `MATCH ?n FROM Notebook WHERE ?n.title LIKE "%Statistics%"` or `MATCH ?c FROM Cell WHERE ?c.source LIKE "%StatisticalAnalysisPlan%"`.
+
+Translator source: [`clients/eigenius-ts/src/notebook.ts`](../../../clients/eigenius-ts/src/notebook.ts).
+
+## 14.6. Auto-rendering of cell outputs
+
+The notebook has type-driven renderers under [`notebooks/src/components/output/`](../../../notebooks/src/components/output/):
+
+- `ResultTable` — Fluent v9 `DataGrid` for `QueryResponse.document` (Eigon-CBOR ResultSet decoding)
+- `ResourceInspector` — `@id` + `is_a` tags + sorted property table for any CBOR-encoded resource
+- `LayerStackView` — vertical stack of layer boxes (head at top, root at bottom) with per-kind counts, walks `PARENT_LAYER` edges to recover the chain
+- `TraceTree` — collapsible tree for `ProgramTrace` resources; flattens right-leaning let-chains into siblings so the visual hierarchy matches dataflow order; surfaces input hashes, provider/model, and per-component latency
+- `TypeScriptValueView` — duck-typed dispatcher for TS-cell return values (Resource / ResultSet / RunProgramResponse / LoadResponse / Topology / DOM node / object / primitive). Also the mount point for chart-cell output: `executeChartCell` returns a Fluent chart React element, which `TypeScriptValueView` recognises via `isValidElement` and renders directly.
+
+The ESL-cell load output also has a "View layer stack" accordion that lazy-fetches the topology when expanded and renders it in `LayerStackView`.
+
+Chart cells handle one Fluent quirk worth knowing about: `LineChart` and `AreaChart` only support numeric or `Date` x-axes natively. When the EigenQL query returns categorical x values (target names, compound IDs, …), `renderChart` maps each unique label to an integer index in encounter order — so the EigenQL `ORDER BY` controls layout — and labels each tick via the chart's `xAxis.tickText` array. Per-point `xAxisCalloutData` carries the original label into hover callouts. ISO date strings (`YYYY-MM-DD`) are detected separately and converted to `Date` objects so date-axis charts render correctly without a categorical index.
+
+## 14.7. Where it lives
+
+```
+notebooks/
+├── src/
+│   ├── App.tsx                  # FluentProvider + EigenProvider + WorkspaceShell
+│   ├── components/
+│   │   ├── workspace/WorkspaceShell.tsx  # App root: chrome + panels, renders Notebook
+│   │   ├── Notebook.tsx          # Toolbar + cell list
+│   │   ├── Cell.tsx              # Per-cell shell (toolbar + body + output)
+│   │   ├── CellInsertGap.tsx     # Hover-revealed "+" between cells
+│   │   ├── cells/                # MarkdownCell, ProgramRunCell, ChartCell form editors
+│   │   ├── editors/              # CodeMirror wrapper + ESL/EigenQL language modes
+│   │   └── output/               # The renderers listed in §14.6
+│   ├── persistence/notebook-format.ts   # NotebookJson + parseNotebook validator
+│   └── runtime/
+│       ├── EigenProvider.tsx     # React context for the SDK client
+│       ├── notebookStore.ts      # Zustand: cells, meta, run state, run actions
+│       ├── resultDocument.ts     # Eigon-CBOR ResultSet decoder
+│       └── traceResource.ts      # ProgramTrace decoder
+├── examples/
+│   ├── stats-and-reasoning.json        # Seeded on first load
+│   ├── kinase-institutions.json        # Three-part walkthrough: flat data → institutions → chain reinsertion
+│   └── kinase-institutions-setup.sh    # Installs five Julia institutions + three comorphisms
+├── e2e/
+│   ├── stats-and-reasoning.spec.ts     # Playwright golden flow
+│   └── kinase-charts.spec.ts           # Chart-cell coverage (Part A of the kinase-institutions notebook)
+├── playwright.config.ts
+├── vite.config.ts                # /notebooks/ base + Connect-RPC proxy in dev
+└── package.json                  # @eigenius/client + Fluent UI v9 + CodeMirror
+```
+
+The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) — see [chapter 17](17-typescript-sdk.md).
+
+## 14.8. CI
+
+Two Playwright specs cover the notebook end-to-end:
+
+- [`notebooks/e2e/stats-and-reasoning.spec.ts`](../../../notebooks/e2e/stats-and-reasoning.spec.ts) — the golden flow: open `/notebooks/`, assert the demo title and the markdown / ESL / EigenQL cell types render, click `Run all`, assert an ESL load output (`Loaded N resources`) appears, assert the first EigenQL grid shows the statistics verdict `Holds`.
+- [`notebooks/e2e/kinase-charts.spec.ts`](../../../notebooks/e2e/kinase-charts.spec.ts) — chart-cell regression coverage: opens the consolidated kinase-institutions demo via the `Open…` file picker, runs Part A's cells (1–13) individually, asserts that `.fui-cart__root` × 4 (cartesian charts), `.fui-hbc__root` × 1 (horizontal-bar), and `.fui-donut__root` × 1 are mounted, and that no Part-A cell surfaced a `Cell failed` MessageBar. Parts B/C are skipped because they require the Julia institutions setup, which CI does not run. This catches regressions in the categorical-x → numeric-index → tickText mapping that line/area charts depend on.
+
+Both are wired up in [`.github/workflows/notebooks-tests.yml`](../../../.github/workflows/notebooks-tests.yml) — brings the docker stack up with `docker compose up -d --no-build kernel orchestrator`, runs Playwright, uploads the report on failure.
+
+Run locally:
+
+```bash
+cd notebooks
+npx playwright install chromium  # one-time
+npm run test:e2e
+```
+
+The test assumes the orchestrator stack is already up at `http://localhost:8080`.
+
+## 14.9. Design references
+
+- [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — the spec this guide describes
+- [**chapter 15** — Tags, branches, and history](15-tags-branches-history.md) — the workspace panels that drive named refs + chain navigation
+- [**chapter 16** — Merge resolution](16-merge-resolution.md) — picking a per-conflict strategy, the cascade gate, and the resolution flow
+- [**chapter 17** — TypeScript SDK](17-typescript-sdk.md) — the programmatic API the notebook is built on, also usable from your own code
+
+---
+
+Next: **[15. Tags, branches, and history →](15-tags-branches-history.md)**

@@ -1,0 +1,749 @@
+// ════════════════════════════════════════════════════════════════════
+// The lexicon SCHEMA — the reusable categorial-lexicon ontology (D62 §8).
+// ════════════════════════════════════════════════════════════════════
+//
+// This is the schema half of D62: the category algebra (`lexicon:Cat`), the
+// lexical-entry record (`lexicon:LexicalEntry`), and the composed-sentence
+// record (`lexicon:Sentence`). It carries NO domain vocabulary — domain types,
+// predicates, and entries live in layers built ON this one (the worked demo in
+// `experiments/lexicon/lexicon.esl`; the imported general lexicon under `wn:`
+// from `crates/eigenius-wordnet`).
+//
+// The D62 thesis: we need no new term language for the lexicon — the kernel's
+// EigenTT already is one. A category is a kernel-checked `type_expr` value of
+// the inductive `lexicon:Cat`; an entry's `sem` is native semantic content (a
+// class / axiom / resource); the homomorphism ⟦cat⟧ → sem_type is a recursor
+// (`denote_cat`, kernel/src/lexicon.rs), and the kernel type-checker is the
+// felicity oracle (`gate_entry`).
+
+namespace core       = "urn:eigenius:core";
+namespace normalizers = "urn:eigenius:core:normalizers";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace lexicon    = "urn:eigenius:lexicon";
+namespace units      = "urn:eigenius:units";
+
+// ── The entity top (D63 §8.3, decision ii) ────────────────────────────
+// The single foundational entity type — the universe a general predicate's
+// SUBJECT ranges over, and the type the determiners' `E` points at. CN-as-types
+// stays many-sorted on the noun/object side (a determiner is polymorphic in the
+// noun type `T:Set`); only the verb-subject position uses this one top, with
+// specific types reaching argument slots by coercive subtyping (Luo 2012). This
+// is the schema-resident, domain-independent home for what the demo called
+// `lexicon:Entity` and what the WordNet importer roots at `entity.n.01`
+// (`wn:n00001740`, the noun-lattice root) — see D63 §8.3. Both reference systems
+// converge here: lightblue quantifies over one built-in `Entity`; Luo's MTT uses
+// a maximal type for cross-sortal breadth.
+class lexicon:Entity {
+    description = "The foundational entity type: the universe a general predicate's subject ranges over and the determiners' subject top. Domain entity types are subclasses (the WordNet importer roots entity.n.01/wn:n00001740 here); specific types reach argument slots by coercive subtyping.";
+}
+
+// ── The category algebra: categorial types as an inductive ────────────
+// A category is structured, not a string: Atom | A/B | A\B. Making it an
+// inductive means (a) it cannot be malformed — the kernel checks it; (b)
+// the composition rules pattern-match on it; (c) the homomorphism
+// ⟦cat⟧ → sem_type is a *recursor* over this type — realized as `denote_cat`
+// (D62 §8.6 / D63), which makes the felicity check `typeof(sem) = ⟦cat⟧`
+// mechanical (D62 §2 stage 5). The entity atom `cat_np(T, _)` is **type-indexed**
+// (carries its class T — Luo's DCG move), so ⟦·⟧ is self-contained:
+//   ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ; ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧.
+// `fwd(A,B)` = A/B (seeks a B on the right → A); `bwd(A,B)` = A\B.
+//
+// ── Features (D63 §5.1) ───────────────────────────────────────────────
+// Atoms are parametrized by morphosyntactic features. **Mood** is the only
+// feature that alters ⟦·⟧ (a declarative is a Prop; question/imperative are
+// deferred to D63 Slice 5). **Num** (number) and **Fin** (verb form) are
+// *syntactic routing only* — fully erased by ⟦·⟧, used by the parser's
+// feature-meet to gate composition (agreement, subcategorization). `*_any` is
+// the underspecified top (WordNet imports carry it; morphology refines it).
+// Both `cat_n` and `cat_np` carry the noun/entity **type** `T` (denotation-erased
+// — `⟦cat_n(T,_)⟧ = Set`, `⟦cat_np(T,_)⟧ = T`). `cat_n`'s `T` is load-bearing for
+// the **polymorphic determiner** (D63 §8.2).
+//
+// ── Polymorphic categories: `cat_forall` ──────────────────────────────
+// `cat_forall` is the **dependent forward slash over a common-noun type** — the
+// determiner constructor (D63 §8.2, Option 2). It binds the noun's type `T` and
+// yields the result category `R[T]` *after* consuming the noun: a determiner is
+// `cat_forall(λT:Set. R[T])` where `R[T] = S/(S\NP_T)`. Its denotation is the Π
+// that mirrors the polymorphic determiner sem: `⟦cat_forall(λT. R)⟧ = ΠT:Set. ⟦R⟧`
+// (e.g. `ΠT:Set. (T→Prop)→Prop`). The HOAS body (`Set -> lexicon:Cat`) keeps the
+// stored category a CLOSED, kernel-checked `lexicon:Cat` value — a free-variable
+// open term would be rejected by the commit-time felicity check (Rule 21). The
+// reflexive constructor is strictly positive, hence sound.
+// Mood — the clause type of a sentence. One of the two features that alter ⟦·⟧ (the other is
+// `Reading`, D95):
+// declaratives denote a `Prop`; questions / imperatives denote distinct things
+// (deferred to D63 Slice 5, where ⟦·⟧ fails closed rather than denoting `Prop`).
+data lexicon:Mood {
+    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and one of the two places where the categorial denotation branches (a measure phrase's `Reading` is the other): ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
+
+    dcl,   // declarative — "a gene affects a cell line" (⟦S[dcl,_]⟧ = Prop)
+    q,     // interrogative — "does a gene affect a cell line?" (Slice 5)
+    imp,   // imperative — "affect the cell line" (Slice 5)
+}
+
+// Num — grammatical number. A *syntactic* feature (erased by ⟦·⟧): it routes
+// determiner/noun agreement at composition via the feature-meet, nothing more.
+data lexicon:Num {
+    description = "Grammatical number — a SYNTACTIC feature, erased by ⟦·⟧. It routes determiner/noun agreement at composition through the feature-meet and does nothing else. `num_any` is the underspecified top that meets both `sg` and `pl`; WordNet imports carry it, because a lexical entry taken from a sense inventory has no number of its own.";
+
+    sg,       // singular — "gene", "every gene"
+    pl,       // plural — "genes", "all genes"
+    num_any,  // underspecified ⊤: meets sg AND pl. WordNet imports carry this;
+              // the lookup bridge refines it to the surface number.
+    mass,     // mass / uncountable (D62 CNL) — "MSI", "DNA", "apoptosis": used BARE as an argument
+              // (no determiner) and grammatically singular. Does not meet sg/pl (so `*a MSI` /
+              // `*two MSI` fail); the bare-singular-mass shift gives it an argument NP reading.
+    name,     // PROPER NAME OF A KIND (D70) — "Lynch syndrome", "MMR deficiency", "Turcot syndrome":
+              // stands BARE like `mass` and denotes its KIND, but makes NO mass claim. Same
+              // distribution as `mass` in the flat feature lattice (meets `name` and `num_any` only,
+              // so `*a Lynch syndrome` / `*two Lynch syndromes` fail) and takes the same bare shift.
+              //
+              // Split out from `mass` because that value bundled two independent things: "stands
+              // bare" and "is an uncountable substance". A named condition needs the first and not
+              // the second, and conflating them made bare standing depend on whether the concept's
+              // UMLS preferred name happened to end in an uncountable head — so C1333990
+              // «Hereditary Nonpolyposis Colorectal Cancer» could stand bare and C4552100 «Lynch
+              // Syndrome», the SAME DISEASE, could not, and every bare use of the term denoted the
+              // wrong concept. See d70-named-entities-syntax-vs-denotation.md §1b/§1d.
+}
+
+// Fin — clause/predicate form (finiteness / non-finite shape + the adjectival
+// predicate form). Syntactic (erased by ⟦·⟧); used for subcategorization (which
+// form a slot demands) — ≈ CCG's `S[…]` feature.
+data lexicon:Fin {
+    description = "Clause and predicate form — finiteness, non-finite shape, and the adjectival predicate form. SYNTACTIC, erased by ⟦·⟧: it exists so a slot can subcategorize for the form it demands (`does` takes `bse`, `to` takes `inf`), which is CCG's `S[…]` feature.";
+
+    fin,      // finite — "affects", "affected" (tensed; heads a clause)
+    bse,      // base / bare infinitive — "affect" (after "does", "to")
+    inf,      // to-infinitive — "to affect"
+    ger,      // gerund / present participle — "affecting"
+    pss,      // past participle (active/perfect transitive) — "affected" (in "has
+              // affected …"); the importer emits verbs in this form, and the short
+              // passive consumes it unsaturated (D63 §8.9 Slice 6-aux).
+    pass,     // PASSIVE participle VP — the agentive long passive "affected by HeLa"
+              // (patient-subject), a voice-distinct result so `*X is affected Y` stays
+              // out (D63 §8.9 Slice 6-aux, agentive passive).
+    adj,      // predicative adjective — "primary" (after the copula `is`/`are`);
+              // distinct from `bse` so the copula selects adjectives, do-support
+              // selects base verbs, and attributive `adj`+noun is recognizable.
+    pred,     // PREDICATE NOMINAL — "a drug target" in "WRN is a drug target". The
+              // copula takes it exactly where it takes `adj`, but it is PREDICATIVE
+              // ONLY: English has no bare attributive predicate nominal (*"a
+              // drug-target cancer"), while a genuine adjective is attributive by
+              // default. Distinct from `adj` BECAUSE that is the only difference that
+              // matters, and encoding it anywhere else has already failed —
+              // `mod_lifts` may inspect a category and a provenance, and the
+              // predicative article `a_pred` defeats both (its category WAS the
+              // adjective category, its provenance is ordinary application), so the
+              // `NotKindRaised` guard never saw it. The measured cost of that: the
+              // compound "MSI cancers" split so `cancers` could head a noun refined
+              // by the predicate nominal to its left, yielding `is_a(WRN, cancer)` —
+              // 7 of the adjudication ledger's 15 `invalid` rows (d44dfda).
+    fin_any,  // underspecified ⊤: meets any form.
+}
+
+// Conn — the connective of a coordinated NP group (D63 §8.4 Phase 6). Syntactic
+// (erased by ⟦·⟧ — a group denotes `List C` regardless), but load-bearing for how
+// a predicate combines OVER the group: `conn_and` distributes ∧ (and supports the
+// collective/reciprocal readings), `conn_or` distributes ∨. Carried on `cat_group`
+// because distribution is *deferred* to a later combination (the group meets its
+// predicate downstream), so the connective must travel with the phrase.
+data lexicon:Conn {
+    description = "The connective of a coordinated NP group. SYNTACTIC, erased by ⟦·⟧ — a group denotes `List C` whichever connective built it — but load-bearing for how a predicate combines OVER the group: `conn_and` distributes ∧ and licenses the collective and reciprocal readings, `conn_or` distributes ∨. Keeping it on the group rather than in the denotation is what lets one `List C` serve every reading.";
+
+    conn_and,     // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
+    conn_or,      // "X or Y"  — disjunctive group (distributive ∨)
+    conn_but_not, // "X but not Y" (D62 §2 #8) — contrastive ellipsis: distributes ASYMMETRICALLY,
+                  // the first member positive and the rest negated (`P(m₀) ∧ ¬P(m₁) ∧ …`), so a
+                  // shared predicate applies affirmatively to X and negatively to the elided Y.
+    conn_list,    // "X, Y, … and Z" — the NEUTRAL list connective a bare COMMA contributes (D63 §8.4
+                  // Phase 3, the list-with-operator model). A comma does not yet say which operator the
+                  // list takes, so it builds the group/`cat_coord` under `conn_list` and the TRAILING
+                  // `and`/`or` rebinds the whole list to `conn_and`/`conn_or` (which is why `A, B, C or
+                  // D` is all-∨, not `(A ∧ B ∧ C) ∨ D`). A list never finalized by an explicit
+                  // connective defaults to conjunction (`complete_coord` / `group_conn_op`).
+                  //
+                  // The parser has always CONSTRUCTED this constructor (`category.rs`, `LIST_CONN`);
+                  // it was simply never declared here. That was live but invisible: `⟦·⟧` erases the
+                  // connective, so a `Cat` carrying it never reaches the type-checker — and `check`
+                  // rejects an undeclared constructor outright ("no constructor `conn_list` in `Conn`",
+                  // nbe/check/inductive.rs). Declaring it makes the term the parser builds a term the
+                  // kernel would actually accept, closing the gap before something type-checks a `Cat`.
+}
+
+// Prep — the governing preposition of an oblique **argument** PP (D63 §5.3
+// C3-precision, d63-comparative-phrasal.md). A *syntactic* feature (erased by ⟦·⟧,
+// exactly like Num/Fin): it routes which preposition an `cat_pp_arg`-seeking functor
+// accepts, via the feature-meet. A gloss-governed adjective selects its specific prep
+// (`dependent` → `prep_on`, so `*dependent to` fails); a preposition-agnostic verb
+// frame (WordNet "----s PP") carries the `prep_any` wildcard (meets any marker). The
+// concrete ctors are every preposition a governed frame names: WordNet's convention and
+// SPECIALIST's complements (D97 decision 3), listed for the importers by the kernel's
+// `dcg::category::GOVERNED_PREPOSITIONS`, which a test keeps equal to this enum.
+data lexicon:Prep {
+    description = "The governing preposition of an oblique ARGUMENT PP. SYNTACTIC, erased by ⟦·⟧ exactly as Num and Fin are: it routes which preposition a `cat_pp_arg`-seeking functor accepts, through the feature-meet. This is what makes *dependent to* ungrammatical while *dependent on* composes — a precision the grammar could not express while a PP was untyped.";
+
+    prep_to,      // "dependent to"? no — "addicted to", "proportional to"
+    prep_on,      // "dependent on", "based on"
+    prep_in,      // "interested in", "results in"
+    prep_with,    // "consistent with", "associated with"
+    prep_from,    // "results from", "different from"
+    prep_for,     // "responsible for", "essential for"
+    prep_at,      // "good at"
+    prep_upon,    // "dependent upon", "contingent upon"
+    prep_about,   // "concerned about"
+    prep_against, // "protective against"
+    prep_into,    // "differentiate into"
+    prep_of,      // "consists of", "composed of" — added 2026-07-26; `of` had a noun-post-modifier
+                  // entry but no governed-arg one, so "MSI consists of repeats." gave 0 readings
+    prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
+    // Every other preposition a SPECIALIST frame names (D97 decision 3, `references/specialist/LEXICON`
+    // release 2026; `than` stays the comparative's), most frequent first; a multiword preposition's
+    // constructor joins its words with `_` (`out of` → `prep_out_of`).
+    prep_by,
+    prep_between,
+    prep_over,
+    prep_onto,
+    prep_through,
+    prep_per,
+    prep_off,
+    prep_out_of,
+    prep_after,
+    prep_due_to,
+    prep_among,
+    prep_around,
+    prep_towards,
+    prep_under,
+    prep_out,
+    prep_toward,
+    prep_up,
+    prep_round,
+    prep_down,
+    prep_during,
+    prep_across,
+    prep_along,
+    prep_as_to,
+    prep_without,
+    prep_before,
+    prep_following,
+    prep_according_to,
+    prep_behind,
+    prep_until,
+    prep_concerning,
+    prep_like,
+    prep_plus,
+    prep_regarding,
+    prep_till,
+    prep_with_regard_to,
+    prep_within,
+    prep_above,
+    prep_amongst,
+    prep_via,
+    prep_away_from,
+    prep_below,
+    prep_beside,
+    prep_by_comparison_with,
+    prep_from_among,
+    prep_in_behalf_of,
+    prep_in_favor_of,
+    prep_in_relation_to,
+    prep_in_terms_of,
+    prep_off_of,
+    prep_on_behalf_of,
+    prep_past,
+    prep_unto,
+    prep_up_to,
+    prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
+                  // carry this; a specific marker refines it at composition.
+}
+
+// Reading — how a measure phrase is read (D95 implementation plan, decision 5): a measured VALUE
+// (`incubated at 37 °C`, `for 2 h`) or a DIFFERENCE between two (`5 °C warmer`, `rose 5 °C`). Unlike
+// Num/Fin/Prep it changes the denotation — ⟦cat_mp(u, value)⟧ = units:Quantity(u),
+// ⟦cat_mp(u, difference)⟧ = units:Difference(u) — so, like Mood, it is not erased and has no wildcard:
+// every consumer takes one.
+data lexicon:Reading {
+    description = "How a measure phrase is read: a measured value or a difference. It changes the denotation, so it is not erased and has no wildcard.";
+    value,
+    difference,
+}
+
+// Mode — the SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5, Figure 5.1
+// p. 102; the notation table is OpenCCG's `docs/guide/guide.tex` Table "Slash
+// modes"). A *syntactic* feature, erased by ⟦·⟧ exactly like Num/Fin/Prep — it
+// does NOT change what a slash denotes (`⟦fwd(m,A,B)⟧ = ⟦B⟧→⟦A⟧` for every `m`),
+// it restricts WHICH COMBINATORY RULES may consume that slash.
+//
+// The seven modes form an INHERITANCE HIERARCHY in Baldridge's orientation, "in
+// which a modality has all the powers of its supertypes". A rule is KEYED to a
+// modality and accepts a slash bearing that modality **or any subtype**:
+//
+//                          m_app  (⋆)              root: application only
+//              ┌─────────────┼─────────────┐
+//         m_cross_left   m_harm      m_cross_right
+//             (◁×)        (⋄)             (×▷)
+//              └──────┬────┴─────┬─────────┘
+//                m_perm_left  m_perm_right
+//                    (◁)          (▷)
+//                     └─────┬──────┘
+//                        m_all  (·)             bottom: all rules
+//
+// So application is keyed to the ROOT `m_app`, which is precisely why EVERY slash
+// can apply; harmonic composition is keyed to `m_harm` and therefore admits
+// `m_harm`/`m_perm_left`/`m_perm_right`/`m_all` but REFUSES `m_app` and both
+// crossed modes. `m_app` is the least permissive slash, `m_all` the most.
+//
+// Beware the orientation: as an inheritance hierarchy `⋆` is the ROOT (a supertype
+// of everything), while as an ordering on PERMISSIVENESS it is the least permissive
+// point. Both readings are in the literature; the arrows above are Baldridge's.
+//
+// Why Eigenius needs this (D63, "decide multimodal slashes vs. a coarser global
+// regime"): the coarse regime lets any slash compose, and each escape discovered
+// downstream has been answered with another `ProvGuard` variant. A governed
+// complement — `give rise TO`, `depend ON`, `associated WITH` — must not compose
+// away from its head, which core-en states categorially by marking that slash `*`
+// (`v.xsl`'s `tv.phrasal` is `iv /▷ np[acc] /★ prt`).
+//
+// Bare `x` (OpenCCG's "permutative") is deliberately ABSENT: it is a rule-class in
+// Baldridge's prose, not a node in Figure 5.1, so it has no place in the lattice.
+data lexicon:Mode {
+    description = "The SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5). SYNTACTIC and erased by ⟦·⟧: it does not change what a slash MEANS, only which combinatory rules may apply to it. The modes form a hierarchy rooted at `m_app` (application only — a governed particle or preposition), so a stricter slash admits strictly fewer rules and over-generation is a declaration rather than a special case in the parser.";
+
+    m_app,         // ⋆ — application only; the hierarchy ROOT. A governed particle/preposition
+                   // slash, a coordinator's slashes, punctuation. Composition CANNOT consume it.
+    m_harm,        // ⋄ — harmonic (order-preserving) composition. Baldridge's determiner: `np/⋄n`.
+    m_cross_left,  // ◁× — crossed composition, leftward only.
+    m_cross_right, // ×▷ — crossed composition, rightward only.
+    m_perm_left,   // ◁ — associative permutative left: subtype of BOTH m_cross_left and m_harm.
+    m_perm_right,  // ▷ — associative permutative right: subtype of BOTH m_harm and m_cross_right.
+                   // Baldridge's transitive verb is `(sᵢ\◁np)/▷np`.
+    m_all,         // · — all rules; the hierarchy BOTTOM. The MIGRATION DEFAULT: it reproduces the
+                   // pre-mode regime exactly (every slash composable), so introducing modes is a
+                   // behaviour-preserving no-op until a slash is deliberately tightened.
+}
+
+// Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
+// store a `Set`). The homomorphism ⟦·⟧ : Cat → EigenTT type is a recursor over
+// it (`denote_cat`): ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_,_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ;
+// ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧→⟦A⟧ ; ⟦cat_forall(_,λT.R)⟧ = ΠT:Set. ⟦R⟧.
+// The slash modality is denotation-transparent: ⟦fwd(m,A,B)⟧ ignores `m`.
+data lexicon:Cat : Type 1 {
+    description = "The categorial type, as an inductive rather than a string: `Atom | A/B | A\\B`, at Type 1 because `cat_n` and `cat_np` store a `Set`. Making it an inductive buys three things: a category cannot be malformed, because the kernel checks it; the composition rules pattern-match on it instead of parsing; and the homomorphism ⟦·⟧ : Cat → EigenTT type is an ordinary recursor (`denote_cat`) — ⟦cat_s(m,_)⟧ = ⟦m⟧, ⟦cat_n(_,_)⟧ = Set, ⟦cat_np(T,_)⟧ = T, ⟦A/B⟧ = ⟦A\\B⟧ = ⟦B⟧→⟦A⟧.";
+
+    // S[mood,fin] — a sentence/clause. Mood is semantic (drives ⟦·⟧); fin records
+    // the verb form the clause is built on.
+    cat_s  : lexicon:Mood -> lexicon:Fin -> lexicon:Cat,
+    // N[num](T) — a common noun of type T (CN-as-type: ⟦N⟧ = Set; T denotation-
+    // erased but carried so the polymorphic determiner can bind it — D63 §8.2).
+    cat_n  : Set -> lexicon:Num -> lexicon:Cat,
+    // NP[num](T) — a noun phrase / named entity of type T (⟦NP(T)⟧ = T).
+    cat_np : Set -> lexicon:Num -> lexicon:Cat,
+    // A/ₘB — forward slash: seeks a B on its RIGHT, yields A (e.g. a transitive
+    // verb (S\NP)/NP seeks its object rightward). `m` is the slash MODALITY: it
+    // restricts which combinatory rules may consume this slash, and is erased by
+    // ⟦·⟧ (`⟦fwd(m,A,B)⟧ = ⟦B⟧→⟦A⟧` for every `m`).
+    fwd : lexicon:Mode -> lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // A\ₘB — backward slash: seeks a B on its LEFT, yields A (e.g. a VP S\NP seeks
+    // its subject leftward). `m` as for `fwd`.
+    bwd : lexicon:Mode -> lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // Num·∀T:Set. R[T] — the polymorphic determiner: the dependent forward slash
+    // over a common-noun type. Consumes an N[Num] of type T (binding T, checking
+    // number agreement) and yields the result category R[T]; e.g. `every` is
+    // `cat_forall(sg, λT. S/(S\NP_T))` (D63 §8.2).
+    cat_forall : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // ∀f:Fin. R[f] / ∀n:Num. R[n] — FEATURE-polymorphic functors (D63 §8.10). A
+    // category that must PRESERVE a verb's finiteness / subject-number through
+    // composition (the object determiner: `(S[f]\NP[n]) \ ((S[f]\NP[n])/NP[T])`)
+    // binds the feature as a variable the unifier instantiates from the consumed
+    // verb, rather than the `*_any` wildcard (which meets anything AND erases it,
+    // laundering agreement). ⟦·⟧ ERASES features, so the binder is denotation-
+    // transparent: `⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧`. The parser strips the binder at
+    // seed time, leaving `f`/`n` as free vars bound (call-locally) during application.
+    cat_fin_forall : (lexicon:Fin -> lexicon:Cat) -> lexicon:Cat,
+    cat_num_forall : (lexicon:Num -> lexicon:Cat) -> lexicon:Cat,
+    // Group[conn,num](C) — a coordinated NP group of members sharing the common
+    // supertype C, joined by Conn (D63 §8.4 Phase 6). Unlike `cat_np` (an
+    // individual, ⟦NP(T)⟧ = T), a group denotes the **member-retaining list**
+    // ⟦Group(C)⟧ = List C (conn + num erased) — so the plural readings are
+    // operations *over* the group: distributive (`pred` mapped + ∧/∨-folded per
+    // Conn), reciprocal, and collective (verb typed over the whole `List C`).
+    // Arises from `and`/`or` coordination of NPs.
+    cat_group : Set -> lexicon:Conn -> lexicon:Num -> lexicon:Cat,
+    // Q(T) — a wh-question over the queried type T (D63 §8.5, Slice 5). A question
+    // denotes its **answer-property**: ⟦Q(T)⟧ = T → Prop (the predicate the answer
+    // must satisfy) — e.g. "what affects HeLa" → `λx:Entity. affects(hela, x)`,
+    // "which gene affects HeLa" → `λx:Gene. affects(hela, x)`. T is carried
+    // (CN-as-types) so the restrictor ("which GENE") narrows the answer type, exactly
+    // as determiners carry T. (Polar yes/no questions stay `cat_s(q, _)` with
+    // ⟦·⟧ = Prop — a distinct shape; D63 §8.5 Slice 5a.)
+    cat_q : Set -> lexicon:Cat,
+    // Kind(C) — a KIND-denoting NP: a bare-plural/generic noun ("genes") used as a
+    // subject denotes the **kind C as a type**, not an individual of C. So unlike
+    // `cat_np(T)` (⟦NP(T)⟧ = T, an individual), ⟦cat_kind⟧ = `Set` — the NP denotes a
+    // type-valued thing (`EigonClass(C) : Set`). The predicate over a kind is then
+    // `Set → Prop`, so "Genes are cell lines" → `subclass_of(Gene, CellLine)` (D63
+    // §8.5 Slice 3c, kind subjects). Arises from a bare-plural common noun.
+    cat_kind : lexicon:Cat,
+    // CP — an embedded **complement clause** ("that BRCA1 affects HeLa"), the argument a
+    // clause-taking verb selects (D63 §8.11 Slice 6-cl). ⟦cat_cp⟧ = Prop (the embedded
+    // proposition). NOT a clause root (the root filter checks `cat_s`), so a stray
+    // leading "that …" cannot parse as a standalone sentence. The complementizer `that`
+    // is `cat_cp / cat_s(dcl, fin)` (sem `λp.p`); the verb is `(S\NP)/cat_cp`, an opaque
+    // report axiom `Prop → Entity → Prop` (intensional — the complement is not asserted).
+    cat_cp : lexicon:Cat,
+    // PP[than] — the **than-phrase** of a comparative ("…than HeLa"), supplying the
+    // STANDARD entity (D63 §8.12 Slice 6-cmp). ⟦cat_pp_than⟧ = Entity. The marker `than`
+    // is `cat_pp_than / cat_np(Entity)` (sem `λy. y`); the comparative adjective is
+    // `(S[adj]\NP) / cat_pp_than`, sem `λy.λx. gt(deg_A(x), deg_A(y))` over the opaque
+    // float ordering `measurements:gt`. A distinct category (not a bare NP) forces the
+    // `than` — so `*HeLa is larger BRCA1` (no `than`) gets no parse.
+    cat_pp_than : lexicon:Cat,
+
+    // PP[arg](prep) — an **argument** (oblique-complement) prepositional phrase: the PP a verb or
+    // relational adjective *subcategorizes* for ("contributes **to** cancers", "dependent **on** WRN").
+    // ⟦cat_pp_arg(_)⟧ = Entity (the Prep feature is erased, like Num/Fin) — the marker is transparent,
+    // exposing the prep's object (sem `λy. y`), so an argument-PP verb `(S\NP) / cat_pp_arg(any)` binds
+    // it as its second entity argument (same Entity→Entity→Prop sem_type as a transitive verb). A
+    // category distinct from a bare NP forces the preposition — so a genuinely transitive verb
+    // `(S\NP)/NP` (e.g. `affect`) cannot absorb a stray `to X`: `*HeLa affects to BRCA1` has no parse.
+    // The **Prep feature** (D63 §5.3 C3-precision) is what rejects the WRONG preposition on a
+    // gloss-governed adjective: `dependent : cat_measure / cat_pp_arg(prep_on)` selects only the `on`
+    // marker (`cat_pp_arg(prep_on)`), so `*dependent to WRN` fails the feature-meet; a prep-agnostic
+    // verb frame carries `cat_pp_arg(prep_any)` and accepts any. (Mirrors `cat_pp_than`; D63 verb+PP.)
+    cat_pp_arg : lexicon:Prep -> lexicon:Cat,
+
+    // PP[mod] — a **noun-postmodifying** prepositional phrase ("…of WRN dependency"),
+    // supplying a predicate over the head noun's entities (D63 §8.13 Slice 6-mod).
+    // ⟦cat_pp⟧ = Entity -> Prop. A noun-modifier preposition is `cat_pp / cat_np(Entity)`
+    // (sem `λy.λx. prep_P(x, y)`); the post-nominal refine rule consumes `[cat_n(C)]
+    // [cat_pp]` → `Σx:C. pp(x)`. A category distinct from the VP-adjunct preposition
+    // (`(S\NP)\(S\NP)`) so the two attachments are separate parses (PP-attachment
+    // ambiguity carried in the forest), and distinct from a bare adjective (`S[adj]\NP`)
+    // so a post-nominal *adjective* never spuriously refines.
+    cat_pp : lexicon:Cat,
+
+    // Measure — a **1-place measure** ("(greater) dependence on WRN"), the degree/amount dimension a
+    // PHRASAL comparative quantifier ranges over (D63 §8.12 phrasal comparatives,
+    // `docs/notes/d63-comparative-phrasal.md`). ⟦cat_measure⟧ = Entity → core:float — it maps an entity
+    // to its value on that dimension's opaque float scale. A measure noun `dependence` is
+    // `cat_measure / cat_pp_arg` (sem `λg. μ_dep(g)`, μ parameterized on the ground); the comparative
+    // DEGREE operators `greater`/`less` (+ adjectival `more`/`less`) SELECT `cat_measure` (so `*greater
+    // cell line` — a non-measure noun —
+    // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
+    // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
+    cat_measure : lexicon:Cat,
+    // MP[u, reading] — a MEASURE PHRASE (D95): `37 °C`, `10 μg ml⁻¹`, `931g`. Indexed by its unit, a
+    // `core:unit` in base units, so a consumer that needs a dimension names it and a mismatch fails to
+    // compose; and by its reading. ⟦cat_mp(u, value)⟧ = units:Quantity(u), ⟦cat_mp(u, difference)⟧ =
+    // units:Difference(u). Not seeded from lexical entries: the preprocessor recognises the quantity and
+    // seeding builds its items (D95 implementation plan, decisions 1 and 5). Distinct from `cat_measure`,
+    // which is an opaque ordinal scale over entities.
+    cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPC[u, reading] — a MEASURE CONSTRAINT (D95 slice 6): `less than 37 °C`, `~100 mm3`. A bound
+    // constrains a measure phrase's value instead of stating one, so it denotes a predicate over the
+    // quantity: ⟦cat_mpc(u, value)⟧ = units:Quantity(u) → Prop, ⟦cat_mpc(u, difference)⟧ =
+    // units:Difference(u) → Prop. Indexed as `cat_mp` is. A consumer of `cat_mp(u, r)` takes it through
+    // the `unit_constraint` combinator, which quantifies the value the consumer would have taken.
+    cat_mpc : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPQ[u, reading] — a QUANTIFIED measure phrase (D95 slice 8e): `Four and seven days`, a list of
+    // values with the unit written once, which the preprocessor reads as one token. It denotes a
+    // quantifier over the slot a measure phrase fills: ⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop,
+    // `λk. And(k(4 d), k(7 d))`. A consumer of `cat_mp(u, r)` takes it through the `unit_constraint`
+    // combinators, as it takes a constraint.
+    cat_mpq : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // NUM — a BARE NUMBER (D95 slice 7): `5`, `1,000`, `two`, `2 × 10³`. D95 decided that bare
+    // numerals and quantities "share a carrier, not a category": ⟦cat_num⟧ = units:Quantity(u"1"),
+    // the carrier a dimensionless measure phrase has, but a number is not a measure phrase — `5 cells`
+    // counts cells, it does not give them a quantity. Cardinal determiners and the bounds on a count
+    // take it; the measure consumers, which take `cat_mp`, do not.
+    cat_num : lexicon:Cat,
+    // FACTOR — a MULTIPLIER (D95 slice 9, decision 1): `0.56-fold`, `two-fold`, which the preprocessor
+    // reads as one token. ⟦cat_factor⟧ = units:Quantity(u"1"), the carrier a bare number has, but a
+    // ratio is neither a number nor a measure phrase: before `fewer`, `10%` and `3` state differences.
+    // The factor comparatives (`0.56-fold fewer`) take it.
+    cat_factor : lexicon:Cat,
+    // STAT — a STATISTIC over a group's members (D95 slice 9, decision 3): `a median`. ⟦cat_stat⟧ =
+    // (Entity → core:float) → Entity → core:float, a measure to its summary over a group; the factor
+    // comparatives apply it to both measures they compare (`a median 0.56-fold fewer`).
+    cat_stat : lexicon:Cat,
+    // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
+    // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
+    // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since
+    // the unit appears in the denotation: ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧.
+    cat_unit_forall : (core:unit -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] as it meets a noun modifier whose head comes later (D95 slice 7d, decision
+    // 14): a quantifier determiner or a partitive (`15% of`), lifted; the `determiner_modifier`
+    // combinator is its one consumer. It has no denotation, so it neither coordinates nor closes.
+    cat_det_premod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] awaiting its head, with noun modifiers composed in (D95 slice 7d, decision
+    // 14): `five MSS` in `five MSS and five MSI cell lines`. Built by the `determiner_modifier`
+    // combinator from a lifted determiner and the modifiers after it, never lexical;
+    // coordinates as a determiner does, and applies to the shared head as a coordination.
+    // ⟦cat_detmod(n, λT. R)⟧ = ΠT:Set. ((T → Prop) → Set) → ⟦R⟧: the second argument builds the
+    // head's type from the modifiers' restrictor, conjoining the head's own.
+    cat_detmod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+}
+
+// ── The lexical-entry record ──────────────────────────────────────────
+class lexicon:LexicalEntry {
+    description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, and a grounding sense. The unit the D62 bootstrap loop (§8) produces.";
+    requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type;
+    recommends lexicon:sense, lexicon:in_lexicon;
+}
+
+property lexicon:form : core:string {
+    description = "The surface form / lemma (concrete side; GF's abstract/concrete split).";
+    domain lexicon:LexicalEntry;
+}
+// ── Exact form index (D65 §5 slice 1) ─────────────────────────────────
+// A declared `core:ValueIndex` on `lexicon:form` makes surface-form lookup an
+// indexed, lazy probe (build-time populated, committed and uncommitted alike)
+// instead of an eager full scan of the lexicon layer — the runtime substrate
+// for the lazy `LexicalIndex` (slice 2). The `lowercase` normalizer gives
+// case-insensitive matching (parser lower-cases its lookup key the same way),
+// so "HeLa"/"hela" and "Cell"/"cell" resolve identically. It is active for
+// every layer built on this schema (every lexicon layer), per D65 D2.
+resource lexicon:form_index : core:ValueIndex {
+    core:description     = "Exact-value index on lexicon:form for case-insensitive surface-form lookup (D65). Active for every lexicon layer; the lazy LexicalIndex probes it instead of scanning.";
+    core:target_property = lexicon:form;
+    core:value_normalizer = normalizers:lowercase;
+}
+// A declared `core:TextIndex` on `lexicon:form` makes surface-form OOV **grounding** a BM25/token
+// retrieval (D63 lexicon-augmentation §6a): the `LexiconBacked` resolver token-matches an OOV surface
+// (`recq`) to the multiword atoms that CONTAIN it (`recq family of dna helicases` → C0084304) — which the
+// exact `ValueIndex` above misses (`recq` ≠ the full form). Complements, does not replace, form_index
+// (exact lookup vs fuzzy grounding; different index kinds coexist on one property). The `en-stem-v1`
+// analyzer folds plural/singular (`helicases`↔`helicase`); non-words (`recq`) pass through unstemmed.
+resource lexicon:form_text_index : core:TextIndex {
+    core:description     = "BM25 text index on lexicon:form for token/fuzzy surface-form OOV grounding (D63 lexicon-augmentation §6a). Complements the exact form_index ValueIndex; active for every lexicon layer.";
+    core:target_property = lexicon:form;
+    core:text_analyzer   = "en-stem-v1";
+}
+// The SECONDARY OOV grounding signal — a `core:TextIndex` over `core:description` (concept glosses:
+// noun-class/instance definitions and, after the converter fix, verb/adjective `eigentt:Axiom` glosses)
+// — is NOT declared here: `core:description` is a universal core property, so its index lives with the
+// property in the core ontology (`core:description_text_index`), not in this domain layer. Grounding
+// eligibility (a lexicon concept vs an arbitrary description-bearing resource) is a resolver-side `is_a`
+// filter, not the index's concern (D63 lexicon-augmentation §6a index c).
+property lexicon:cat : core:inductive {
+    description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
+    class_types eigentt:Term;
+    expected_type lexicon:Cat;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem : core:resource {
+    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), a committed resource (named entity → a resource reference), or a `lexicon:SemTerm` holding an inline EigenTT λ-term (a function word → its λ-semantics, e.g. a determiner). `sem` is uniformly a reference; resolve_sem dispatches on what is referenced.";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem_type : core:inductive {
+    description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:Term). The machine-readable felicity obligation: typeof(sem) = this.";
+    class_types eigentt:Term;
+    is_a_type;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sense : core:string {
+    description = "Grounding / disambiguation key — a WordNet sense id or, for a named entity, the committed resource's IRI (sem and sense coincide there).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sense_rank : core:integer {
+    description = "Optional 0-based sense-FREQUENCY rank (D63 §8.7 Stage B): for a polysemous lemma, its senses in WordNet `index.<pos>` order are frequency-sorted (sense 1 = most frequent), so rank = sense index − 1. The parser sums leaf ranks into a parse COST and returns the forest lowest-cost-first, capped — so the most-frequent-sense readings rank first. Absent ⇒ 0 (closed-class / domain entries are unranked, hence never penalized).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:scope_bearing : core:boolean {
+    description = "The entry is a SCOPE-BEARING operator: applying it EMBEDS its argument under a connective and yields a new situation index, rather than decorating the argument's. Sentential negation, the modals, declarative do-support. Read once at seed time (dcg::lexicon::entry_to_item), which tags the leaf Combinator::ScopeOperator; the combinator then tags the operator's OUTPUT Combinator::Modal, and ProvGuard::LeftNotModal refuses a VP-adjunct that would attach ABOVE it — where it would land on the outer index and escape the operator's scope ('do not respond to X' must not mean 'do not respond, AND respond to X'). The distinction is core-en's: its Negation family (auxv.xsl, pos=V closed) is (s.1.from-6.E\\np)/(s.6.E2\\np), deriving a NEW index from its argument's, while its Adverb family (adv.xsl, pos=Adv) is s.1.E\\s.1.E with LF HasProp(E,P) — the SAME index, decorated. DECLARED rather than inferred from the category, because no category test separates negation over an adjectival VP from an adverb's adjective-modifier category: both are fwd(VP[adj], VP[adj]). Absent ⇒ false.";
+    domain lexicon:LexicalEntry;
+}
+// `lexicon:grade` was here, and it was the clearest case in the tree of the
+// conflation this refactor removes — at the largest cardinality, 2,641,713
+// stamps on the converted chain, every one of them `epistemic:declared`.
+//
+// A lexical entry carries no proposition. Warrant asks what evidence exists for
+// a proposition, so asking what warrants a lexical entry is a category error
+// rather than an unanswered question, and the test is mechanical: does the
+// resource carry a proposition. The property therefore graded 2.6M resources on
+// an axis that does not apply to them, and the single value it ever took says so
+// — nothing ever climbed, because there was nothing to climb.
+//
+// What the stamp actually recorded is provenance: somebody asserted this entry.
+// That is `prov:was_attributed_to` on the entry, which the importers already set.
+
+// ── Lexicon identity (D65 §3) ─────────────────────────────────────────
+// A lexicon is a first-class Resource with a STABLE IRI (e.g. lexicon:wordnet),
+// decoupled from the version-specific layer(s) that hold its entries: the logical
+// identity ("the WordNet lexicon") lives here; the physical version lives in the
+// layer, so re-importing doesn't change the IRI. "Available lexica" is an ordinary
+// EigenQL query over Lexicon instances; a parse SCOPE (slice 4) is a set of these
+// IRIs. Each LexicalEntry points back via `lexicon:in_lexicon` (membership is the
+// inverse of this property; enumerating a lexicon is one scan_predicate_object).
+class lexicon:Lexicon {
+    description = "A named lexicon — a coherent body of lexical entries (WordNet, a domain importer's output, …) — as a first-class Resource with a stable IRI, decoupled from the layer(s) holding its entries. Carries provenance metadata; entries bind back via lexicon:in_lexicon.";
+    requires   lexicon:source;
+    recommends lexicon:version, lexicon:language, lexicon:domain, lexicon:license;
+}
+property lexicon:source : core:string {
+    description = "Provenance of the lexicon — the upstream resource it derives from (e.g. \"WordNet 3.0, Princeton University\", a UMLS/NCBI release name).";
+    domain lexicon:Lexicon;
+}
+property lexicon:version : core:string {
+    description = "Version / release identifier of the source the lexicon was built from (e.g. \"3.0\").";
+    domain lexicon:Lexicon;
+}
+property lexicon:language : core:string {
+    description = "Primary natural language of the lexicon's surface forms, as a BCP-47 / ISO-639 tag (e.g. \"en\").";
+    domain lexicon:Lexicon;
+}
+property lexicon:domain : core:string {
+    description = "Subject domain the lexicon covers — \"general\" for a broad lexicon like WordNet, or a field (\"biomedical\", \"chemistry\") for a domain importer. A human label, not a class reference.";
+    domain lexicon:Lexicon;
+}
+property lexicon:license : core:string {
+    description = "License under which the lexicon (and its derived entries) may be used / redistributed.";
+    domain lexicon:Lexicon;
+}
+
+property lexicon:in_lexicon : core:resource {
+    description = "The Lexicon this entry belongs to (membership — the inverse of the lexicon's content). Read at resolve time for per-parse scope filtering (D65 §3.1/§4): a scope keeps only entries whose in_lexicon is in the scope set, and the entry's lexicon order feeds the rank. Absent ⇒ unscoped / always-available (e.g. the grammatical closed class).";
+    class_types lexicon:Lexicon;
+    domain lexicon:LexicalEntry;
+}
+
+// ── Lexicon profiles = named parse scopes (D65 §4.1) ──────────────────
+// A parse SCOPE is an ordered list of Lexicon IRIs (earlier = higher resolution
+// precedence, a soft rank — not shadowing). A `LexiconProfile` names such a list
+// so a scope can be selected by one IRI. Array order folds into the parse rank as
+// the primary key (D65 §4.2): an entry's position in the scope is its leaf
+// `lexicon_order`, summed across the parse, sorted before sense-frequency.
+class lexicon:LexiconProfile {
+    description = "A named, ordered parse scope: the lexica a parse draws from, in resolution-precedence order. Selectable as a scope by IRI; the parser folds each entry's lexicon position into the rank (primary key, before sense-frequency).";
+    requires lexicon:lexica;
+}
+property lexicon:lexica : core:resource_array {
+    description = "Ordered lexicon:Lexicon references — array order IS resolution precedence (D65 §4.1; earlier ranks first, later stay in the forest, no shadowing). resource_array is triple-indexable, so \"which profiles include WordNet?\" is one scan_predicate_object.";
+    class_types lexicon:Lexicon;
+    domain lexicon:LexiconProfile;
+}
+
+// ── Inline λ-term semantics (function words) ──────────────────────────
+// A committed EigenTT term the lexicon references from `sem` when the
+// semantics is a λ-term rather than a chain entity — e.g. a determiner's
+// `λA:Set. λV:A→Prop. ∀x:A. V(x)`. The term is carried as a `type_expr` and is
+// kernel-gated at commit (Rule 21 decodes + type-checks it). Because a Curry
+// `Lam` is unsynthesizable, the term is authored with a bidirectional
+// annotation `(λ… : T)` (`Exp::Ann`), which `check_infer` admits. This keeps
+// `sem` uniformly a reference (the 200k WordNet entries reference classes /
+// axioms / instances; a function word references one of these).
+class lexicon:SemTerm {
+    description = "A committed EigenTT term referenced as a lexical entry's `sem` (a function word's λ-semantics). Kernel-gated at commit.";
+    requires lexicon:term;
+}
+property lexicon:term : core:inductive {
+    description = "The EigenTT term, as a `type_expr` (eigentt:Term). For an unsynthesizable λ-term, author it annotated: `(fun … => … : T)`.";
+    class_types eigentt:Term;
+    domain lexicon:SemTerm;
+}
+
+// ── The composed-sentence record ──────────────────────────────────────
+class lexicon:Sentence {
+    description = "A composed sentence: a gloss + the EigenTT Prop its derivation assembles (the verb's sem applied to its argument NPs). The kernel checks the prop inhabits Prop — the felicity condition.";
+    requires lexicon:gloss, lexicon:prop;
+}
+property lexicon:gloss : core:string {
+    description = "Human-readable gloss of the sentence.";
+    domain lexicon:Sentence;
+}
+property lexicon:prop : core:inductive {
+    description = "The assembled proposition (eigentt:Term) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
+    class_types eigentt:Term;
+    expected_type Prop;
+    domain lexicon:Sentence;
+}
+
+// ── Reserved construct tokens (D63 §11 3g.3 / B10) ────────────────────
+// A grammatical function word that is NOT a lexical entry: a category-polymorphic
+// construct token (coordinator, relativizer, contrastive `but`, negator, reciprocal
+// `each`/`other`, list/appositive comma) the CKY keys reserved-word rules on. `⟦·⟧`
+// cannot denote these (they range over `Cat`), so they are not seeded as lexemes —
+// but the *form set* is data (this table), so a new coordinator/relativizer is added
+// without a code change. The construct *semantics* (which rule fires) stays the parser
+// engine; `construct_kind` is the tag it maps to its internal role. Loaded index-driven
+// at `LexicalIndex` build (`typed_resource_iris` over the `is_a` triple index — NOT a
+// full-chain resource scan), so it costs O(#reserved), not O(chain).
+class lexicon:ReservedConstruct {
+    description = "A reserved construct token (coordinator / relativizer / contrastive `but` / negator / reciprocal `each`·`other` / comma) keyed by a reserved-word CKY rule, not a lexical entry. The form set is data; the construct semantics is the parser engine.";
+    requires lexicon:construct_form, lexicon:construct_kind;
+}
+// A dedicated surface-form property (NOT `lexicon:form`, whose hard domain is `LexicalEntry`): a
+// reserved construct is not a lexical entry, and it is looked up by TYPE at build
+// (typed_resource_iris), never through the `lexicon:form` value index — so it neither belongs to that
+// domain nor should pollute that index.
+property lexicon:construct_form : core:string {
+    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …).";
+    domain lexicon:ReservedConstruct;
+}
+// ReservedKind — the CLOSED vocabulary of grammatical roles a reserved construct plays, as a
+// resource enum (core's own `then_recommends` for a `resource` property is `class_types` +
+// `allows_only`, the value-level type check; a free `string` would only recommend a `pattern`). The
+// parser maps each individual's IRI to its internal `ReservedKind`; a coordinator's connective IRI
+// (logic:And / logic:Or) is derived from the kind. Narrowing the set is a retroactively-checked
+// change, and a typo'd `construct_kind` is rejected at commit rather than silently dropped at load.
+class lexicon:ReservedKind {
+    description = "The grammatical role a lexicon:ReservedConstruct plays — a resource enum (allows_only-constrained). The parser keys its reserved-word CKY rules on this.";
+}
+resource lexicon:rk_coord_and : lexicon:ReservedKind {
+    core:description = "`and` — conjunction (the list comma reads as this too).";
+}
+resource lexicon:rk_coord_or : lexicon:ReservedKind {
+    core:description = "`or` — disjunction.";
+}
+resource lexicon:rk_comma : lexicon:ReservedKind {
+    core:description = "The list / appositive / fronted-modifier comma `,` (reads as conjunction for lists).";
+}
+resource lexicon:rk_relativizer : lexicon:ReservedKind {
+    core:description = "`that` — restrictive relativizer (its complementizer use is a lexical leaf).";
+}
+resource lexicon:rk_wh_relativizer : lexicon:ReservedKind {
+    core:description = "`which` — wh-relativizer: the which-relative AND the pied-piping / wh marker.";
+}
+resource lexicon:rk_contrastive_but : lexicon:ReservedKind {
+    core:description = "`but` — the contrastive (first token of `but not`); plain `but` is the `but_subord` lexeme.";
+}
+resource lexicon:rk_negator : lexicon:ReservedKind {
+    core:description = "`not` — the second token of `but not`.";
+}
+resource lexicon:rk_reciprocal_each : lexicon:ReservedKind {
+    core:description = "`each` — first token of the reciprocal `each other`.";
+}
+resource lexicon:rk_reciprocal_other : lexicon:ReservedKind {
+    core:description = "`other` — second token of the reciprocal `each other`.";
+}
+property lexicon:construct_kind : core:resource {
+    description = "The reserved construct's grammatical role the CKY keys on — a lexicon:ReservedKind individual. allows_only enforces the closed vocabulary at commit; the parser maps the referenced IRI to its internal ReservedKind.";
+    class_types lexicon:ReservedKind;
+    allows_only lexicon:rk_coord_and, lexicon:rk_coord_or, lexicon:rk_comma,
+        lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
+        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
+    domain lexicon:ReservedConstruct;
+}
+
+// ── Unit spellings (D95) ──────────────────────────────────────────────
+// The prose spellings of units that the units layer's strict symbols do not cover: a second sense
+// for a symbol (`g` as standard gravity beside the gram), a spelling the SI also accepts (`l` for the
+// litre), a word form (`days`), a typographic variant (`ºC`). Every `units:symbol` is a spelling of
+// its own unit without an entry here. Read by TYPE (`typed_resource_iris`) by the quantity recogniser
+// only, never through the `lexicon:form` value index: a unit spelling has no category and never
+// stands in the chart alone, so it is not a lexical entry (D95 implementation plan, decision 2).
+class lexicon:UnitSurface {
+    description = "A prose spelling of a named unit, beside the units layer's strict symbol. Case-sensitive: `M` is the molar and `m` the metre. A prefix combines with the spelling when the unit is prefixable (`ml` and `μl` through `l`).";
+    requires lexicon:unit_form, lexicon:unit;
+}
+// A dedicated form property for the reason `construct_form` is one: `lexicon:form`'s domain is
+// `LexicalEntry`, and its value index is the lexicon's.
+property lexicon:unit_form : core:string {
+    description = "The spelling, case-sensitive (`g`, `l`, `RCF`, `days`).";
+    domain lexicon:UnitSurface;
+}
+property lexicon:unit : core:resource {
+    description = "The named unit the spelling denotes.";
+    class_types units:NamedUnit;
+    domain lexicon:UnitSurface;
+}

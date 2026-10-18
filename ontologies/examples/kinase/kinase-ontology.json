@@ -1,0 +1,204 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:Compound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Compound",
+    "urn:eigenius:core:description": "A small-molecule compound under screening. Promoted from notebooks/examples/kinase-institutions.json so per-institution Phase-19 ontologies can ground their worked examples on the same shared compound identities.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:assay:compound_id",
+      "urn:eigenius:demo:assay:scaffold_class",
+      "urn:eigenius:demo:assay:molecular_weight"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:demo:assay:logp"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:compound_id",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "compound_id",
+    "urn:eigenius:core:description": "Internal compound identifier (e.g., EIG_0042).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Compound"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:scaffold_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "scaffold_class",
+    "urn:eigenius:core:description": "Chemical scaffold family (pyrimidine, indazole, quinazoline, pyrazolopyrimidine).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Compound"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:molecular_weight",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "molecular_weight",
+    "urn:eigenius:core:description": "Molecular weight in g/mol.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Compound"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:logp",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "logp",
+    "urn:eigenius:core:description": "Calculated logP (lipophilicity).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Compound"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:Target",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Target",
+    "urn:eigenius:core:description": "A protein kinase target.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:assay:target_name",
+      "urn:eigenius:demo:assay:target_family"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:target_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target_name",
+    "urn:eigenius:core:description": "Target gene/protein symbol (e.g., CDK2).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Target"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:target_family",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target_family",
+    "urn:eigenius:core:description": "Family the target belongs to (CDK, EGFR, Src, JAK, ...).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:Target"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:AssayProtocol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "AssayProtocol",
+    "urn:eigenius:core:description": "A kinase activity assay protocol.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:assay:protocol_name",
+      "urn:eigenius:demo:assay:incubation_minutes"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:protocol_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "protocol_name",
+    "urn:eigenius:core:description": "Protocol name (Kinase-Glo, ADP-Glo, TR-FRET).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayProtocol"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:incubation_minutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "incubation_minutes",
+    "urn:eigenius:core:description": "Incubation duration in minutes.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayProtocol"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:AssayResult",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "AssayResult",
+    "urn:eigenius:core:description": "A single assay measurement: compound vs. target via a protocol, with IC50 and 95% confidence interval.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:assay:compound",
+      "urn:eigenius:demo:assay:target",
+      "urn:eigenius:demo:assay:protocol",
+      "urn:eigenius:demo:assay:ic50_nm",
+      "urn:eigenius:demo:assay:replicate_count",
+      "urn:eigenius:demo:assay:measurement_date",
+      "urn:eigenius:demo:assay:passed_qc"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:demo:assay:ci_low_nm",
+      "urn:eigenius:demo:assay:ci_high_nm"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:compound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "compound",
+    "urn:eigenius:core:description": "The compound being measured.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:demo:assay:Compound"],
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:target",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target",
+    "urn:eigenius:core:description": "The kinase target being measured.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:demo:assay:Target"],
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:protocol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "protocol",
+    "urn:eigenius:core:description": "The assay protocol used.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:demo:assay:AssayProtocol"],
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:ic50_nm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "ic50_nm",
+    "urn:eigenius:core:description": "Half-maximal inhibitory concentration in nM.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:ci_low_nm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "ci_low_nm",
+    "urn:eigenius:core:description": "Lower bound of 95% confidence interval (nM).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:ci_high_nm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "ci_high_nm",
+    "urn:eigenius:core:description": "Upper bound of 95% confidence interval (nM).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:replicate_count",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "replicate_count",
+    "urn:eigenius:core:description": "Number of replicate measurements.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:measurement_date",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "measurement_date",
+    "urn:eigenius:core:description": "ISO 8601 date the measurement was taken.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:date",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:passed_qc",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "passed_qc",
+    "urn:eigenius:core:description": "Whether the result passed protocol-defined QC checks.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:assay:AssayResult"]
+  }
+]

@@ -1,0 +1,653 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! D46 §10 — axiom-as-Resource framework.
+//!
+//! Axioms are chain-resident `eigentt:Axiom` resources. Each carries an
+//! `axiom_statement` property whose value is an EigenTT type expression
+//! (encoded as `eigentt:Term` per D47). At environment-build time,
+//! the kernel walks the chain, collects `eigentt:Axiom` resources, decodes
+//! each statement back to an [`Exp`], type-checks it inhabits some sort
+//! (i.e. is a well-formed type), and registers the IRI → type binding.
+//!
+//! Voiding a layer that introduces an axiom removes the axiom from the
+//! resolved environment — the chain's audit-trail invariant for axioms
+//! is the chain's existing tombstone / layer-resolution machinery, with
+//! no special handling here.
+//!
+//! See `docs/design/d46-prop-universe-and-proof-irrelevance.md` §10.
+
+use crate::layer::Layer;
+use crate::nbe::term::Exp;
+use crate::nbe::val::Val;
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+/// IRI of the `eigentt:Axiom` class.
+const AXIOM_CLASS_IRI: &str = "urn:eigenius:eigentt:Axiom";
+
+/// IRI of the `eigentt:axiom_statement` property.
+const AXIOM_STATEMENT_IRI: &str = "urn:eigenius:eigentt:axiom_statement";
+
+/// An admitted axiom registered in [`AxiomEnv`]. Carries the IRI it was
+/// committed under, the decoded type it inhabits, and (optionally) the
+/// free-form justification note from the chain resource.
+#[derive(Debug, Clone)]
+pub struct AxiomEntry {
+    pub iri: Iri,
+    pub typ: Val,
+    pub justification: Option<String>,
+}
+
+/// Environment of admitted axioms collected from a layer chain.
+#[derive(Debug, Clone, Default)]
+pub struct AxiomEnv {
+    axioms: BTreeMap<Iri, AxiomEntry>,
+    /// Axioms that did not admit, with why — so a reference to one reports the reason instead of
+    /// "not registered".
+    failures: BTreeMap<Iri, AxiomEnvError>,
+}
+
+impl AxiomEnv {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Look up an admitted axiom by IRI.
+    /// Why `iri` did not admit, when it is an axiom that failed.
+    pub fn failure(&self, iri: &Iri) -> Option<&AxiomEnvError> {
+        self.failures.get(iri)
+    }
+
+    pub fn get(&self, iri: &Iri) -> Option<&AxiomEntry> {
+        self.axioms.get(iri)
+    }
+
+    /// Iterate over all admitted axioms in IRI order.
+    pub fn iter(&self) -> impl Iterator<Item = (&Iri, &AxiomEntry)> {
+        self.axioms.iter()
+    }
+
+    /// Number of admitted axioms.
+    pub fn len(&self) -> usize {
+        self.axioms.len()
+    }
+
+    /// Whether the environment is empty.
+    pub fn is_empty(&self) -> bool {
+        self.axioms.is_empty()
+    }
+}
+
+/// Errors raised when building an axiom environment from a chain.
+#[derive(Debug, Clone)]
+pub enum AxiomEnvError {
+    /// The axiom resource lacks an `axiom_statement` property value.
+    MissingStatement(Iri),
+    /// The `axiom_statement` value isn't a valid EigenTT type expression
+    /// (decoding failed via [`crate::program::eigentt_type_mirror::decode_type`]).
+    DecodeFailed { axiom: Iri, details: String },
+    /// The decoded statement fails to type-check as a well-formed type.
+    NotAWellFormedType { axiom: Iri, details: String },
+    /// The axiom's statement needs the axiom itself, directly or through other axioms. A
+    /// declaration's type is not in the scope of the declaration.
+    Cyclic(Iri),
+}
+
+impl std::fmt::Display for AxiomEnvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AxiomEnvError::MissingStatement(iri) => {
+                write!(f, "axiom `{iri}` has no axiom_statement value")
+            }
+            AxiomEnvError::DecodeFailed { axiom, details } => {
+                write!(f, "axiom `{axiom}` statement decode failed: {details}")
+            }
+            AxiomEnvError::NotAWellFormedType { axiom, details } => {
+                write!(
+                    f,
+                    "axiom `{axiom}` statement is not a well-formed type: {details}"
+                )
+            }
+            AxiomEnvError::Cyclic(axiom) => write!(
+                f,
+                "axiom `{axiom}` is needed by its own statement, directly or through other axioms"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AxiomEnvError {}
+
+/// Walk a layer chain, collect every `eigentt:Axiom` resource, decode its statement, type-check
+/// it, and evaluate it into the type any reference to the axiom inhabits.
+///
+/// **A statement may mention other axioms** — `ratio : … -> Quantity(units:mul(u, …))` mentions
+/// `units:mul` — and checking it needs their types. Those come from THIS construction, never from
+/// `layer.axiom_env()`: that accessor is a `OnceLock` whose initialiser is this function, and
+/// asking it for a type mid-construction re-entered its own initialisation and deadlocked, both
+/// threads parked in `futex_wait`. Nothing hit it while no axiom's statement mentioned another.
+///
+/// So axioms are admitted ON DEMAND: checking one that mentions another admits the other first
+/// (through [`axiom_type`]), in whatever order the chain lists them. A statement that needs its own
+/// axiom — directly, or through others — is refused, because a declaration's type is not in the
+/// scope of the declaration.
+pub fn build_axiom_env(layer: &Arc<Layer>) -> Result<AxiomEnv, AxiomEnvError> {
+    let axiom_class = wk::iri(AXIOM_CLASS_IRI);
+
+    // INDEX-DRIVEN enumeration of `eigentt:Axiom` instances (was a full-chain
+    // `iter_all_resources()` scan that eagerly materialised the ENTIRE merged chain into a
+    // BTreeMap — O(all resources) — to filter for the handful of axioms; over a 7.6M-resource
+    // lexicon chain that OOMs, and it is triggered lazily by the first `EigonAxiom` type-check in
+    // the DCG felicity gate). `typed_resource_iris` consults each layer's triple index
+    // (`scan_predicate_object(is_a, eigentt:Axiom)`) plus staged/pending entries, so this is
+    // O(#axioms). The post-`resolve` `is_axiom` guard is retained: a higher layer may tombstone or
+    // redefine an indexed subject so its *effective* resource is no longer an axiom.
+    let mut unstarted = BTreeMap::new();
+    for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
+        let Some(resource) = layer.resolve(&iri) else {
+            continue;
+        };
+        if is_axiom(&resource, &axiom_class) {
+            unstarted.insert(iri, resource);
+        }
+    }
+    let order: Vec<Iri> = unstarted.keys().cloned().collect();
+    let scope = ConstructionScope::enter(layer, unstarted);
+    for iri in &order {
+        admit(layer.id(), iri)?;
+    }
+    Ok(scope.finish())
+}
+
+/// Like [`build_axiom_env`], but an axiom that fails is dropped and recorded rather than failing the
+/// whole environment — what `Layer::axiom_env` caches.
+///
+/// It replaces `build_axiom_env(self).unwrap_or_default()`, which its own doc described as keeping
+/// the axioms that admit but which returned an EMPTY environment on the first failure: one bad axiom
+/// made every axiom reference on the chain fail as "not registered", and the reason was discarded.
+pub fn build_axiom_env_lenient(layer: &Arc<Layer>) -> AxiomEnv {
+    let axiom_class = wk::iri(AXIOM_CLASS_IRI);
+    let mut unstarted = BTreeMap::new();
+    for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
+        let Some(resource) = layer.resolve(&iri) else {
+            continue;
+        };
+        if is_axiom(&resource, &axiom_class) {
+            unstarted.insert(iri, resource);
+        }
+    }
+    let order: Vec<Iri> = unstarted.keys().cloned().collect();
+    let scope = ConstructionScope::enter(layer, unstarted);
+    for iri in &order {
+        // Recorded in the construction's `failed` either way; the lenient build keeps going.
+        let _ = admit(layer.id(), iri);
+    }
+    scope.finish()
+}
+
+/// The type an axiom inhabits, as seen from `layer`; `None` when `iri` names no axiom there.
+///
+/// While `layer`'s environment is being built on this thread, the answer comes from that
+/// construction, admitting `iri` first if it has not been; otherwise from the layer's cached
+/// environment. `check_infer` asks here and nowhere else, which is what keeps construction from
+/// asking the cache it is filling.
+pub(crate) fn axiom_type(layer: &Arc<Layer>, iri: &Iri) -> Result<Option<Val>, String> {
+    let constructing = CONSTRUCTIONS.with(|c| c.borrow().iter().any(|k| k.layer_id == *layer.id()));
+    if constructing {
+        return admit(layer.id(), iri).map_err(|e| e.to_string());
+    }
+    let env = layer.axiom_env();
+    if let Some(entry) = env.get(iri) {
+        return Ok(Some(entry.typ.clone()));
+    }
+    match env.failure(iri) {
+        Some(failure) => Err(failure.to_string()),
+        None => Ok(None),
+    }
+}
+
+/// One environment under construction on this thread.
+struct Construction {
+    layer_id: crate::layer::LayerId,
+    layer: Arc<Layer>,
+    /// Axioms not yet started.
+    unstarted: BTreeMap<Iri, Arc<Resource>>,
+    /// Axioms whose statements are being checked. Meeting one of these again is a cycle.
+    in_progress: std::collections::BTreeSet<Iri>,
+    /// Axioms that did not admit. Kept so a later reference reports the same failure rather than
+    /// finding the axiom neither started nor admitted.
+    failed: BTreeMap<Iri, AxiomEnvError>,
+    env: AxiomEnv,
+}
+
+thread_local! {
+    /// A STACK, because building one layer's environment may build another's — a different
+    /// `OnceLock`, so no re-entrancy — and each must find its own.
+    static CONSTRUCTIONS: std::cell::RefCell<Vec<Construction>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Pushes a construction for its lifetime and pops it on drop, so an early `?` return cannot leave
+/// a stale construction for a later check on this thread to find.
+struct ConstructionScope {
+    finished: bool,
+}
+
+impl ConstructionScope {
+    fn enter(layer: &Arc<Layer>, unstarted: BTreeMap<Iri, Arc<Resource>>) -> Self {
+        CONSTRUCTIONS.with(|c| {
+            c.borrow_mut().push(Construction {
+                layer_id: layer.id().clone(),
+                layer: Arc::clone(layer),
+                unstarted,
+                in_progress: std::collections::BTreeSet::new(),
+                failed: BTreeMap::new(),
+                env: AxiomEnv::new(),
+            })
+        });
+        ConstructionScope { finished: false }
+    }
+
+    fn finish(mut self) -> AxiomEnv {
+        self.finished = true;
+        let con = CONSTRUCTIONS.with(|c| c.borrow_mut().pop().expect("the scope pushed it"));
+        let mut env = con.env;
+        env.failures = con.failed;
+        env
+    }
+}
+
+impl Drop for ConstructionScope {
+    fn drop(&mut self) {
+        if !self.finished {
+            CONSTRUCTIONS.with(|c| c.borrow_mut().pop());
+        }
+    }
+}
+
+/// Admits `iri` into the construction for `layer_id` and returns its type; `None` when it is not an
+/// axiom of that chain.
+///
+/// The thread-local is borrowed only to read and to record — never across the check, which may
+/// admit further axioms through [`axiom_type`] and so re-enter this function.
+fn admit(layer_id: &crate::layer::LayerId, iri: &Iri) -> Result<Option<Val>, AxiomEnvError> {
+    enum Step {
+        Known(Option<Val>),
+        Failed(AxiomEnvError),
+        Cycle,
+        Start(Arc<Layer>, Arc<Resource>),
+    }
+    let step = CONSTRUCTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        let con = c
+            .iter_mut()
+            .rev()
+            .find(|k| k.layer_id == *layer_id)
+            .expect("admit is reached only through an active construction");
+        if let Some(entry) = con.env.get(iri) {
+            return Step::Known(Some(entry.typ.clone()));
+        }
+        if let Some(failure) = con.failed.get(iri) {
+            return Step::Failed(failure.clone());
+        }
+        if con.in_progress.contains(iri) {
+            return Step::Cycle;
+        }
+        match con.unstarted.remove(iri) {
+            Some(resource) => {
+                con.in_progress.insert(iri.clone());
+                Step::Start(Arc::clone(&con.layer), resource)
+            }
+            None => Step::Known(None),
+        }
+    });
+    let (layer, resource) = match step {
+        Step::Known(typ) => return Ok(typ),
+        Step::Failed(failure) => return Err(failure),
+        Step::Cycle => return Err(AxiomEnvError::Cyclic(iri.clone())),
+        Step::Start(layer, resource) => (layer, resource),
+    };
+    let result = admit_resource(iri, &resource, &layer);
+    CONSTRUCTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        let con = c
+            .iter_mut()
+            .rev()
+            .find(|k| k.layer_id == *layer_id)
+            .expect("the construction outlives its admissions");
+        con.in_progress.remove(iri);
+        match &result {
+            Ok(entry) => {
+                con.env.axioms.insert(iri.clone(), entry.clone());
+            }
+            Err(failure) => {
+                con.failed.insert(iri.clone(), failure.clone());
+            }
+        }
+    });
+    result.map(|entry| Some(entry.typ))
+}
+
+/// Decode, check and evaluate one axiom's statement.
+fn admit_resource(
+    iri: &Iri,
+    resource: &Resource,
+    layer: &Arc<Layer>,
+) -> Result<AxiomEntry, AxiomEnvError> {
+    let stmt_prop = wk::iri(AXIOM_STATEMENT_IRI);
+    let justification_prop = wk::iri("urn:eigenius:eigentt:axiom_justification");
+    let statement_value = resource
+        .get(&stmt_prop)
+        .ok_or_else(|| AxiomEnvError::MissingStatement(iri.clone()))?;
+    let exp =
+        crate::program::eigentt_type_mirror::decode_type(statement_value, layer).map_err(|e| {
+            AxiomEnvError::DecodeFailed {
+                axiom: iri.clone(),
+                details: e.to_string(),
+            }
+        })?;
+    let typ =
+        type_check_axiom_statement(&exp, layer).map_err(|e| AxiomEnvError::NotAWellFormedType {
+            axiom: iri.clone(),
+            details: e,
+        })?;
+    let justification = resource.get(&justification_prop).and_then(|v| match v {
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    });
+    Ok(AxiomEntry {
+        iri: iri.clone(),
+        typ,
+        justification,
+    })
+}
+
+fn is_axiom(resource: &Resource, axiom_class: &Iri) -> bool {
+    resource.is_a().iter().any(|c| c == axiom_class)
+}
+
+/// Type-check the decoded axiom statement (verifying it inhabits some
+/// sort, i.e. is a well-formed type) and return the statement
+/// **evaluated** as a `Val` — i.e., the type that any reference to
+/// this axiom inhabits.
+///
+/// The distinction matters: `check_infer(exp)` returns the universe
+/// the statement inhabits (e.g. `Sort(0)` for `string → Prop`), but
+/// what we want stored on `AxiomEntry.typ` is the type any *reference*
+/// to the axiom has — which is the statement itself, as a `Val`.
+/// Without the eval, `check_infer(Exp::EigonAxiom(iri))` would return
+/// `Sort(0)` instead of `Pi(string, Prop)`, and the App rule in
+/// `crate::nbe::check::check_infer` couldn't extract a Pi from it,
+/// blocking any proof term that applies the axiom to arguments.
+fn type_check_axiom_statement(exp: &Exp, layer: &Arc<Layer>) -> Result<Val, String> {
+    use crate::nbe::check::{check_type, CheckCtx};
+    use crate::nbe::env::Rho;
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
+    check_type(&mut ctx, exp).map_err(|e| e.to_string())?;
+    // Through the check context, so the axiom's statement is evaluated in the
+    // same environment it was checked in.
+    let rho = ctx.rho.clone();
+    ctx.eval(exp, &rho).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layer::LayerBuilder;
+    use crate::nbe::term::Patt;
+    use crate::ontology::well_known::iri;
+    use crate::program::eigentt_type_mirror::encode_type;
+
+    /// Build a chain on top of the bootstrap chain (which already has
+    /// `eigentt:Axiom` declared after Phase H) plus a top layer carrying
+    /// one or more `eigentt:Axiom` resources.
+    fn chain_with_axioms(axioms: Vec<(&str, Exp, Option<&str>)>) -> Arc<Layer> {
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
+        let mut top = LayerBuilder::new("test_axioms_top", Some(head));
+        for (axiom_iri, statement_exp, justification) in axioms {
+            let mut r = Resource::new(iri(axiom_iri));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::String(
+                    iri(AXIOM_CLASS_IRI).as_str().to_string(),
+                )]),
+            );
+            let encoded = encode_type(&statement_exp, crate::testing::codec_names())
+                .expect("encode statement");
+            r.set(iri(AXIOM_STATEMENT_IRI), encoded);
+            if let Some(j) = justification {
+                r.set(
+                    iri("urn:eigenius:eigentt:axiom_justification"),
+                    Value::String(j.to_string()),
+                );
+            }
+            top.add_resource(r).unwrap();
+        }
+        Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn bootstrap_env_has_only_expected_axioms() {
+        // Bootstrap chain ships three opaque-axiom families:
+        // - the D52 measurement parameter-symbol + ordering set
+        //   (`measurements:` — mean_of / variance_of / … / lt / le / gt / ge);
+        // - the D63 §8.5 3c ontology relations `ontology:is_a` / `ontology:subclass_of`
+        //   (predicate-nominal membership / subsumption); and
+        // - the D63 §8.9 6-aux modal operators `logic:Possible` / `logic:Necessary`
+        //   plus the future/conditional/deontic `logic:Will` / `Would` / `Should`
+        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`); and
+        // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
+        //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`); and
+        // - the D93 unit operators `units:mul` / `units:pow`, which the kernel reduces
+        //   (`nbe/unit_ext.rs`), and the D95 order relations `units:lt` / `le` / `approx` — named
+        //   one by one, so a further `units:` axiom must be listed here deliberately rather than
+        //   admitted by prefix.
+        // Every bootstrap axiom should be in one of those families.
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
+        let env = build_axiom_env(&head).unwrap();
+        let modal = [
+            "urn:eigenius:logic:Possible",
+            "urn:eigenius:logic:Necessary",
+            "urn:eigenius:logic:Will",
+            "urn:eigenius:logic:Would",
+            "urn:eigenius:logic:Should",
+            // D64 referent-hole placeholders + the deictic speaker + possession relation
+            // (open-parse carrier / possessive determiners / demonstratives, `closed-class.esl`;
+            // `anaphor_of` is the POLYMORPHIC restrictor-typed sibling — d64-demonstratives-as-holes.md)
+            "urn:eigenius:lexicon:anaphor",
+            "urn:eigenius:lexicon:anaphor_of",
+            // D95 slice 7d — a demonstrative before a numeral (`these two genetic events`).
+            "urn:eigenius:lexicon:anaphor_of_count",
+            "urn:eigenius:lexicon:speaker",
+            "urn:eigenius:lexicon:poss_of",
+            // D93 — reduced by the kernel, not opaque; see `nbe/unit_ext.rs`.
+            "urn:eigenius:units:mul",
+            "urn:eigenius:units:pow",
+            // D95 slice 6 — the order over quantities a bound states (`less than 37 °C`). Opaque:
+            // the parser states bounds, and deciding one on literals is checking work not yet built.
+            "urn:eigenius:units:lt",
+            "urn:eigenius:units:le",
+            "urn:eigenius:units:approx",
+        ];
+        let unexpected: Vec<&Iri> = env
+            .iter()
+            .map(|(iri, _)| iri)
+            .filter(|iri| {
+                let s = iri.as_str();
+                !s.starts_with("urn:eigenius:measurements:")
+                    && !s.starts_with("urn:eigenius:ontology:")
+                    // `card : Set→Entity→float` — the opaque cardinality functor for the `fewer`/`more`
+                    // count comparatives (d63-comparative-phrasal.md §5.1; closed-class.esl).
+                    && s != "urn:eigenius:lexicon:card"
+                    && !modal.contains(&s)
+            })
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "bootstrap axioms should be the D52 measurement set + the D63 ontology \
+             relations + the modal operators + the `lexicon:card` cardinality functor + the \
+             D93 unit operators + the D95 quantity order; \
+             unexpected axioms: {unexpected:?}"
+        );
+    }
+
+    #[test]
+    fn registers_propext_style_axiom() {
+        // propext : ∀ {P : Prop}, ∀ {Q : Prop}, ((P → Q) × (Q → P)) → Id Prop P Q
+        // Build the type, commit it as an axiom, verify the env.
+        let p_var = || Exp::Var("P".to_string());
+        let q_var = || Exp::Var("Q".to_string());
+        let prop = || Exp::sort(0);
+        let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
+        let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
+        let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
+        let id_prop = Exp::Id(Box::new(prop()), Box::new(p_var()), Box::new(q_var()));
+        let inner = Exp::Arrow(Box::new(iff), Box::new(id_prop));
+        let propext = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(prop()),
+            Box::new(Exp::Pi(
+                Patt::Var("Q".to_string()),
+                Box::new(prop()),
+                Box::new(inner),
+            )),
+        );
+
+        let chain = chain_with_axioms(vec![(
+            "urn:eigenius:test:propext",
+            propext,
+            Some("Propositional extensionality (D46 §10.1)"),
+        )]);
+        let env = build_axiom_env(&chain).unwrap();
+        // Bootstrap ships the D52 parameter-symbol + ordering axioms
+        // (10 entries) plus the one we just registered = 11 total.
+        let entry = env
+            .get(&iri("urn:eigenius:test:propext"))
+            .expect("propext should be registered alongside the bootstrap axiom set");
+        // `entry.typ` is the type a *reference* to propext has — i.e.,
+        // the statement evaluated as a `Val`. propext is universally
+        // quantified, so the top-level shape is `Val::Pi`. The
+        // statement's own universe inhabitation (Prop, via the
+        // impredicative Pi rule) is what `type_check_axiom_statement`
+        // verifies before evaluating, but it doesn't appear in
+        // `entry.typ`.
+        assert!(
+            matches!(entry.typ, Val::Pi(_, _)),
+            "a reference to propext has its statement as type — a Pi; got {:?}",
+            entry.typ
+        );
+        assert_eq!(
+            entry.justification.as_deref(),
+            Some("Propositional extensionality (D46 §10.1)")
+        );
+    }
+
+    #[test]
+    fn rejects_axiom_missing_statement() {
+        // An eigentt:Axiom resource with no axiom_statement should be
+        // rejected by build_axiom_env (it'd also fail the validator's
+        // required-property check, but build_axiom_env defends in depth).
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
+        let mut top = LayerBuilder::new("missing_stmt", Some(head));
+        let mut r = Resource::new(iri("urn:eigenius:test:no_stmt_axiom"));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                iri(AXIOM_CLASS_IRI).as_str().to_string(),
+            )]),
+        );
+        top.add_resource(r).unwrap();
+        let chain = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let err = build_axiom_env(&chain).unwrap_err();
+        assert!(matches!(err, AxiomEnvError::MissingStatement(_)));
+    }
+
+    /// End-to-end exercise of the D46 §10 reference-resolution path:
+    /// commit an axiom on chain, encode a proposition that references
+    /// the axiom, round-trip it through `decode_type`, and `check_infer`
+    /// the result. Without [`crate::nbe::term::Exp::EigonAxiom`] +
+    /// the layer's cached `axiom_env()` accessor, `decode_type` would
+    /// fail at `ConstRefWrongClass` and the bridge-resource fixture
+    /// pattern in `kernel/tests/fixtures/` would
+    /// have no path to compose statistical → domain propositions.
+    #[test]
+    fn axiom_reference_decodes_and_type_checks() {
+        use crate::nbe::check::{check_infer, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::program::eigentt_type_mirror::{decode_type, encode_type};
+
+        let core_string = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
+        let pred_type = Exp::Arrow(Box::new(core_string), Box::new(Exp::sort(0)));
+        let chain = chain_with_axioms(vec![(
+            "urn:eigenius:test:pred",
+            pred_type,
+            Some("test predicate :: string → Prop"),
+        )]);
+
+        let application = Exp::App(
+            Box::new(Exp::EigonAxiom(iri("urn:eigenius:test:pred"))),
+            Box::new(Exp::LitString("urn:eigenius:test:subject".to_string())),
+        );
+
+        let encoded =
+            encode_type(&application, crate::testing::codec_names()).expect("encode proposition");
+        let decoded = decode_type(&encoded, &chain).expect("decode round-trips");
+        assert_eq!(
+            decoded, application,
+            "decoded Exp should equal the original — axiom reference round-trips structurally"
+        );
+
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&chain));
+        let inferred =
+            check_infer(&mut ctx, &decoded).expect("check_infer succeeds for axiom application");
+        assert!(
+            matches!(&inferred, Val::Sort(l) if l.is_nat(0)),
+            "pred(\"urn:...\") should infer as Prop = Sort(0); got {inferred:?}"
+        );
+    }
+
+    #[test]
+    fn registers_id_axiom_inhabiting_prop() {
+        // Trivial axiom: ∀ (x : 1). ∀ (y : 1). Id 1 x y
+        // — Id over Var-references (no term-level literals needed; D47 is
+        // type-level only). Well-formed, inhabits Prop via the impredicative
+        // rule (codomain is Id which lives in Prop).
+        let id_xy = Exp::Id(
+            Box::new(Exp::One),
+            Box::new(Exp::Var("x".to_string())),
+            Box::new(Exp::Var("y".to_string())),
+        );
+        let inner_pi = Exp::Pi(
+            Patt::Var("y".to_string()),
+            Box::new(Exp::One),
+            Box::new(id_xy),
+        );
+        let outer_pi = Exp::Pi(
+            Patt::Var("x".to_string()),
+            Box::new(Exp::One),
+            Box::new(inner_pi),
+        );
+        let chain = chain_with_axioms(vec![("urn:eigenius:test:trivial_id_axiom", outer_pi, None)]);
+        let env = build_axiom_env(&chain).unwrap();
+        let entry = env.get(&iri("urn:eigenius:test:trivial_id_axiom")).unwrap();
+        // `entry.typ` is the statement evaluated as a `Val` — the
+        // outermost Pi binder is what a reference to the axiom
+        // exposes as its type.
+        assert!(matches!(entry.typ, Val::Pi(_, _)));
+    }
+}

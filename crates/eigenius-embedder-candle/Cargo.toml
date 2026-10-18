@@ -1,0 +1,43 @@
+[package]
+name = "eigenius-embedder-candle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure-Rust Embedder Component for D43 vector retrieval, backed by HuggingFace Candle. Default model: BGE-small-en-v1.5 (384-dim sentence embeddings, BERT architecture)."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+# Candle ML stack — pure-Rust BERT inference. Pinned to a recent
+# stable line; adding a new model architecture is a candle-transformers
+# version bump.
+candle-core = "0.10"
+candle-nn = "0.10"
+candle-transformers = "0.10"
+# Tokenizer (HuggingFace Rust). The `onig` regex backend is more
+# robust than `regex` for the rare BPE tokenizer patterns that have
+# unbounded lookarounds.
+tokenizers = "0.23"
+# Model-file fetcher from the HuggingFace Hub. First call downloads
+# safetensors + tokenizer.json + config.json into the HF cache (default
+# `~/.cache/huggingface/hub`); subsequent calls hit the cache.
+hf-hub = "0.4"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# Off by default — most consumers build CPU-only and `cargo build`
+# from a fresh checkout must not require CUDA. Enable with
+# `--features cuda` (or `--features metal`) on the consuming binary;
+# the Candle crates forward the flag to their cuda / metal backends.
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
+[dev-dependencies]
+# Real-recall integration test against the GO corpus: convert via
+# obograph, load into a RocksDB-backed kernel layer, sweep with the
+# Candle embedder, run `~` queries, assert expected GO IRIs surface.
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
+eigenius-obograph = { path = "../eigenius-obograph" }
+tempfile = "3"

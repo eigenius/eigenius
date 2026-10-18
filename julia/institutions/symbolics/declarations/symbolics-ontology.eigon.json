@@ -1,0 +1,326 @@
+[
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicExpression",
+    "urn:eigenius:core:description": "A symbolic-algebra expression. Carries its term as a `formulas:FormulaTerm` value (D32 §4) — the shared formula language across every numerical institution. The Symbolics institution decodes the FormulaTerm into Symbolics.Num via the generated mirror, performs the requested operation (simplify, substitute, …), and re-encodes the result.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:term"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "term",
+    "urn:eigenius:core:description": "The expression's typed term — a FormulaTerm value (D32 §4). The chain validator type-checks the value against FormulaTerm's ctor schema at commit time; the mirror generator emits a typed Julia field whose value the worker decodes via `decode_FormulaTerm`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicExpression"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SimplifiesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SimplifiesTo",
+    "urn:eigenius:core:description": "Claim that one symbolic expression simplifies to another under the institution's pinned rewriter configuration. Validated by re-running `Symbolics.simplify` on the source side and confirming the result equals the claimed simplified form. `Holds` when the simplifier converges to the claimed form; `Undecidable` otherwise (Symbolics 7's `simplify` is heuristic — D27 §4.1.1 — so non-equality of simplified-form representations does not imply algebraic non-equivalence).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:expr",
+      "urn:eigenius:symbolics:simplified"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr",
+    "urn:eigenius:core:description": "The SymbolicExpression at the source side of a claim or query — the term whose simplified / reduced form is asserted (`SimplifiesTo`, `SymbolicallyReducesTo`) or whose simplification is requested (`SimplifyRequest`).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:symbolics:SimplifiesTo",
+      "urn:eigenius:symbolics:SimplifyRequest",
+      "urn:eigenius:symbolics:SymbolicallyReducesTo"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:simplified",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "simplified",
+    "urn:eigenius:core:description": "Claimed simplified form of a SimplifiesTo claim — what the source expression is asserted to reduce to.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SimplifiesTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SimplifyRequest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SimplifyRequest",
+    "urn:eigenius:core:description": "OnDemand input class for `qc_symb_simplify`: wraps a `SymbolicExpression` whose term will be re-run through `Symbolics.simplify`. The handler returns the simplified form as a fresh `SymbolicExpression`. The wrapper class exists because FIBER's institution-runtime boundary is unary — passing a SymbolicExpression directly via FIBER would force the user to construct a FormulaTerm value inline, which EigenQL's textual surface doesn't support; referencing a chain-committed SymbolicExpression by IRI through this wrapper is the natural shape.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:expr"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:EquivalenceCheck",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "EquivalenceCheck",
+    "urn:eigenius:core:description": "Decidable input class for `qc_symb_check_equivalence`: pairs two `SymbolicExpression` resources and asks whether they are algebraically equivalent. The handler simplifies both sides under the institution's pinned rewriter and returns `Holds` on structural match, `Undecidable` otherwise (Symbolics' simplifier is heuristic — D27 §4.1.1). `Fails` is reserved for a future strict-decision path (groebner-basis / polynomial canonicalisation) that can refute equivalence on restricted fragments.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:lhs",
+      "urn:eigenius:symbolics:rhs"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:lhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lhs",
+    "urn:eigenius:core:description": "Left-hand symbolic expression of an equivalence check.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:EquivalenceCheck"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:rhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "rhs",
+    "urn:eigenius:core:description": "Right-hand symbolic expression of an equivalence check or equation.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:symbolics:EquivalenceCheck",
+      "urn:eigenius:symbolics:SymbolicEquation"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicEquation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicEquation",
+    "urn:eigenius:core:description": "A symbolic equation `lhs = rhs` between two SymbolicExpressions over a shared variable namespace. A first-class chain resource so claims (`SatisfiesEquation`, future `IsTautology`, …) can reference it by IRI rather than each carrying its own equation pair. The equation has no truth value on its own; it's the *subject* of claims. Equivalence (`lhs ≡ rhs` algebraically) is asserted by `SatisfiesEquation` with an empty `bindings` list, satisfaction-under-substitution by a non-empty list.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:lhs",
+      "urn:eigenius:symbolics:rhs"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:VariableBinding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "VariableBinding",
+    "urn:eigenius:core:description": "A typed substitution pair `(variable, expression)` carried in `SatisfiesEquation.bindings`. The variable name matches a `FormulaTerm_Var.name` somewhere in the equation's free-variable set; the expression is a chain-typed SymbolicExpression that gets substituted in. Carrying these as typed Resource shapes (rather than a JSON map) keeps the substitution chain-validated — every binding's expression goes through the same FormulaTerm type-check at commit time.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:symbolics:variable",
+      "urn:eigenius:symbolics:expression"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:variable",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable",
+    "urn:eigenius:core:description": "Free-variable name to substitute. Must match the `name` field of one or more `FormulaTerm_Var` ctors appearing in the surrounding expression — the equation's `lhs`/`rhs` for `VariableBinding`, or `target` for `Substitutes`. An unmatched name is harmless (`Symbolics.substitute` is a no-op on unknown variables), but the converse — a free variable with no binding — leaves the variable in the simplified residue and typically pushes the verdict to `Undecidable`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:symbolics:VariableBinding",
+      "urn:eigenius:symbolics:Substitutes"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expression",
+    "urn:eigenius:core:description": "The SymbolicExpression substituted in for the binding's `variable`. Free variables inside the expression itself remain free in the post-substitution residue.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:VariableBinding"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SatisfiesEquation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SatisfiesEquation",
+    "urn:eigenius:core:description": "Claim that under the given symbolic substitutions, the equation `lhs = rhs` holds algebraically — i.e., `simplify(lhs[bindings] - rhs[bindings]) ≡ 0`. AutoOnLoad re-runs Symbolics' substitute + simplify and produces the canonical Verdict tri-state (`Holds` on iszero residue, `Undecidable` otherwise — Symbolics' simplifier is heuristic, D27 §4.1.1; `Fails` reserved for a future strict-decision path). An empty `bindings` list is well-formed: it asserts unconditional algebraic equivalence of the equation's two sides.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:equation",
+      "urn:eigenius:symbolics:bindings"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:equation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "equation",
+    "urn:eigenius:core:description": "The SymbolicEquation whose satisfaction is being claimed.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicEquation"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SatisfiesEquation"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:bindings",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "bindings",
+    "urn:eigenius:core:description": "Ordered list of typed substitution pairs. Order doesn't affect the verdict — `Symbolics.substitute` builds a single substitution map and applies it atomically — but the chain shape preserves authored order for round-trips. Empty list is well-formed.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:VariableBinding"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SatisfiesEquation"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:Substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Substitutes",
+    "urn:eigenius:core:description": "Claim that substituting the free variable `variable` with the SymbolicExpression `replacement` in `target` yields `result`. AutoOnLoad re-runs `Symbolics.substitute(target, var => replacement)`, simplifies both the actual and claimed result under the institution's pinned rewriter, and compares structurally. `Holds` on match; `Undecidable` otherwise (Symbolics' simplifier is heuristic — D27 §4.1.1 — so disagreement of representations does not refute the claim). `Fails` is reserved for a future strict-decision path.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:target",
+      "urn:eigenius:symbolics:variable",
+      "urn:eigenius:symbolics:replacement",
+      "urn:eigenius:symbolics:result"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:target",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target",
+    "urn:eigenius:core:description": "The SymbolicExpression to substitute into.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:Substitutes"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:replacement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "replacement",
+    "urn:eigenius:core:description": "The SymbolicExpression substituted in for `variable` everywhere it appears free in `target`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:Substitutes"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:result",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "result",
+    "urn:eigenius:core:description": "Claimed result expression — what the source is asserted to reduce to under the institution's rewriter or a named strategy.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:symbolics:Substitutes",
+      "urn:eigenius:symbolics:SymbolicallyReducesTo"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:ReductionStrategy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "ReductionStrategy",
+    "urn:eigenius:core:description": "Named reduction strategy parameter for `SymbolicallyReducesTo`. Each ctor names a Symbolics rewriter operation the institution dispatches against. v1 ships `Simplify` (heuristic — `Symbolics.simplify`) and `Expand` (`Symbolics.expand`, polynomial-distributive). New strategies land as additional ctors on this InductiveType plus an entry in the handler's per-ctor dispatch table; the closed-set discipline of inductives enforces the kernel's allowed-strategies surface at chain-commit time. Same idiom as `Verdict` — a typed enum-like inductive with nullary constructors.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Simplify"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Expand"
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicallyReducesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicallyReducesTo",
+    "urn:eigenius:core:description": "Strategy-parametric reduction claim: under the named `ReductionStrategy`, the source SymbolicExpression reduces to `result`. Generalises `SimplifiesTo` (whose strategy is implicitly `Simplify`) by lifting the strategy into a typed parameter, so claims authored with `Expand` carry their canonicalisation discipline on the chain rather than as a comment. AutoOnLoad re-runs the strategy's Symbolics function and compares structurally; verdict semantics follow the strategy: `Simplify` yields Holds/Undecidable (heuristic, D27 §4.1.1); `Expand` is rigorous on polynomials but currently uses the same Holds/Undecidable policy — a strict-Fails-on-mismatch policy lands when the polynomial-canonicalisation surface is wired (`Fails` reserved).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:expr",
+      "urn:eigenius:symbolics:strategy",
+      "urn:eigenius:symbolics:result"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:strategy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "strategy",
+    "urn:eigenius:core:description": "The named ReductionStrategy under which the claim holds. Carried as a `core:inductive` value because the strategy set is closed: every supported strategy is a ctor of `ReductionStrategy`, and the chain validator's inductive-value check (Rule 16) refuses any non-ctor value at commit time.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:ReductionStrategy"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicallyReducesTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicsToJuMPInput",
+    "urn:eigenius:core:description": "Composite input to the `Symbolics → JuMP` Comorphism. Carries a Symbolics-side `SymbolicExpression` (the optimisation objective) plus the JuMP-side framing the chain author commits to: which variables are decision variables, what bounds apply, what constraints are imposed, which optimisation sense. The handler `frame_as_optimisation_problem` extracts the FormulaTerm from `objective.term` (identity on the chain's flat formula language — D32 §6) and packages it into a `jump:OptimisationProblem` ready for solver dispatch. Parallels `catalyst:CatalystToOdeInput`'s role in the Catalyst → DiffEq comorphism: a composite that combines a domain-side typed expression with the additional context the target institution requires. Constraints carry FormulaTerm LHS directly via `jump:Constraint` rather than a Symbolics-typed analogue — keeping a single chain-typed Constraint shape avoids forking the constraint vocabulary across institutions.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:objective",
+      "urn:eigenius:symbolics:variable_names",
+      "urn:eigenius:symbolics:sense"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:symbolics:framing_variable_bounds",
+      "urn:eigenius:symbolics:framing_constraints"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:objective",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective",
+    "urn:eigenius:core:description": "The optimisation objective as a `SymbolicExpression`. Free variables in the wrapped FormulaTerm must appear in the enclosing `SymbolicsToJuMPInput.variable_names` (the comorphism's framing). The handler reads `objective.term` to extract the chain-typed FormulaTerm payload — identity on FormulaTerm — and uses it as `jump:OptimisationProblem.objective`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:variable_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_names",
+    "urn:eigenius:core:description": "Decision-variable names in canonical positional order. Free `Var(name)` references in `objective.term` (and any `framing_constraints[*].lhs`) must appear here. Forwarded to the produced `jump:OptimisationProblem.variable_names` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:framing_variable_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "framing_variable_bounds",
+    "urn:eigenius:core:description": "Per-variable box constraints. Each entry is a `jump:VariableBound` resource — the JuMP-side type is reused directly so the chain has one bound vocabulary, not two. Forwarded to the produced `jump:OptimisationProblem.variable_bounds` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:VariableBound"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:sense",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "sense",
+    "urn:eigenius:core:description": "Optimisation sense — `Min` or `Max`. Forwarded to the produced `jump:OptimisationProblem.sense` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:framing_constraints",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "framing_constraints",
+    "urn:eigenius:core:description": "Ordered list of `jump:Constraint` resources framing the optimisation. Each constraint carries a FormulaTerm LHS, a `jump:ConstraintRelation` discriminator (`LE | GE | EQ`), and a Float64 RHS. May be empty. Forwarded to the produced `jump:OptimisationProblem.constraints` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:Constraint"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  }
+]

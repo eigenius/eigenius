@@ -1,0 +1,14 @@
+[
+  {
+    "@id": "urn:eigenius:test:d41-template:Animal",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Animal",
+    "urn:eigenius:core:description": "Redefined as InductiveType-only. Lower-layer Cat (is_a [Animal]) now fails ClassTypeMismatch; cascade should tombstone it.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Stub"
+      }
+    ]
+  }
+]

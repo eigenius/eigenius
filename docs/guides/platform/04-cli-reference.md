@@ -1,0 +1,835 @@
+# 4. CLI reference
+
+The `eigenius` CLI is the primary developer interface. The binary lives at [`cli/`](../../../cli/) and ships as one of the workspace's outputs (`target/debug/eigenius` after `cargo build`).
+
+```bash
+eigenius [--json] [--endpoint URL] <subcommand> [args...]
+```
+
+Two **global flags**:
+
+| Flag | Effect |
+|---|---|
+| `--json` | Emit machine-readable JSON instead of human-formatted output |
+| `--endpoint URL` | Connect to a remote kernel via gRPC instead of running in process |
+
+In-process commands operate against an in-memory layer chain bootstrapped from the embedded core ontologies. Remote commands (`--endpoint http://localhost:50051`) talk to a running `eigenius serve` instance and operate against its persistent or in-memory state.
+
+The full source of truth for command shapes is the `Commands` enum in [`cli/src/main.rs`](../../../cli/src/main.rs) (line 159). It declares 23 subcommands, ten of which are groups; counting leaves, 52 distinct invocations.
+
+**`--endpoint` is not a transport detail.** The entry point matches the command twice — once for remote mode, once for local — and the two matches do not cover the same set:
+
+| Available | Commands |
+|---|---|
+| Both | `load`, `query`, `inspect`, `reflect`, `lexicon parse`, `db consolidate`, `db merge` |
+| Local only | `validate`, `program-validate`, `compile`, `decompile`, `version`, `lexicon gate`, `db stats`, `db compact`, `db export`, `serve` |
+| Remote only | `run`, `list-institutions`, `get-schema`, `capability`, `mirror`, `env`, `script`, `data`, `institution`, `tasks`, `branch` |
+
+Because `--endpoint` is global it is accepted syntactically everywhere, so the local-only row is a trap: `eigenius --endpoint <url> version` does not print a version, it exits 1 with `Remote mode not yet supported for this command`, and so do `validate`, `program-validate`, `compile` and `decompile`. `serve` gets its own message, `Cannot use --endpoint with serve`.
+
+In the other direction, local `load` and `query` accept `--branch` and `--at-layer` and then discard them: the dispatch arms destructure both fields to `_` before calling an in-process handler that has no branch parameter. No diagnostic is printed and the exit status is 0.
+
+## 4.1. File commands (in-process)
+
+These commands operate on local files without needing a running kernel.
+
+### `validate <FILE>`
+
+Validate an Eigon-JSON or ESL file against the bootstrapped core ontology stack.
+
+```bash
+eigenius validate ontologies/examples/animals.json
+eigenius validate demo/document.esl
+```
+
+ESL files (extension `.esl`) are compiled to Eigon-JSON in memory before validation. The validator runs the numbered ontology rules ([D1](../../design/d1-eigon-serialization-format.md) §5.4) — the inventory is 25 slots, Rule 0 through Rule 24, driven from `kernel/src/validation/mod.rs` (Rule 20 is retired, absorbed into Rule 21) — and reports failures with rule names and resource IRIs.
+
+### `compile <FILE>`
+
+Compile an ESL file to Eigon-JSON, write to stdout.
+
+```bash
+eigenius compile demo/document.esl > demo/document.json
+```
+
+Surface-language transformation — no validation, and nothing is committed. It does bootstrap a layer first, so that constructor short names resolve through the chain's ctor table (`collect_ctors_from_layer`): a file citing `justification:Grounds`'s constructors compiles here rather than only inside a running server. Seeding the bootstrap layer only *adds* resolvable names, so it cannot make a previously-compiling file fail.
+
+<a id="decompile-file---verify---pretty"></a>
+### `decompile <FILE> [--verify] [--pretty]`
+
+Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`eigentt:proposition`, `justification:certificate`, `eigentt:axiom_statement`, `eigentt:proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
+
+```bash
+eigenius decompile chain/sentence.json
+eigenius decompile chain/sentence.json --verify --pretty
+```
+
+- `--verify` re-compiles the printed source and checks that every term is alpha-equal to the one in the input, under the same canonicalisation admission uses. A mismatch prints the offending `@id :: property` pairs and exits non-zero, rather than emitting source that would commit a different object. Like `compile`, verification runs against a bootstrapped layer so ctor short names resolve.
+- `--pretty` indents expression trees across lines; the default emits each term on one line. Layout is the only difference — the terms are identical either way.
+
+This is what keeps chain content inside the reach of the source language: a resource the kernel or an institution *generated* can be read back as ESL, and machine-minted IRIs must therefore have local names that are legal ESL identifiers (`…:assertion_trace`, not `…:assertion-trace`). A ctor with no ESL surface is refused rather than printed approximately.
+
+### `inspect <IRI> [--at-layer <LAYER_ID>] [--branch <NAME>]`
+
+Print a resource by IRI. Resolves through the in-process layer chain (or through a remote kernel's chain when combined with `--endpoint`).
+
+```bash
+eigenius inspect "urn:eigenius:core:Class"
+eigenius --endpoint http://localhost:50051 inspect "urn:example:Dog"
+
+# Pin to a feature branch's current head
+eigenius --endpoint http://localhost:50051 inspect "urn:example:Dog" --branch feature-x
+```
+
+`--at-layer` (remote mode only) resolves at a specific historical layer rather than the current top — useful for reaching a forked task result layer (D21 §3.6).
+
+`--branch` (remote mode only) pins reads to the named branch's current head. Mutually exclusive with `--at-layer`. Empty / omitted defaults to `main`.
+
+## 4.2. Knowledge-graph commands
+
+Read or modify the layer chain. In-process operations get a fresh in-memory chain each invocation; remote operations work against the running kernel's persistent state.
+
+### `load <FILE> [--branch <NAME>] [--commit-policy <reject|cascade>] [--max-violations <N>] [--explicit-tombstone <IRI>]...`
+
+Load an Eigon-JSON or ESL file as a new layer on top of the current chain. Validates first; rejects on validation failure unless cascade is requested.
+
+```bash
+eigenius --endpoint http://localhost:50051 load demo/document.json
+eigenius --endpoint http://localhost:50051 load demo/document.esl
+
+# Commit to a named branch instead of main
+eigenius --endpoint http://localhost:50051 load demo/document.esl --branch feature-x
+
+# Cascade-tombstone lower-layer resources that the new layer's
+# class redefinitions retroactively invalidate (D41 §3.3)
+eigenius --endpoint http://localhost:50051 load demo/redef.json --commit-policy cascade
+
+# Tombstone specific IRIs alongside the commit (D41 §10.1)
+eigenius --endpoint http://localhost:50051 load demo/marker.json \
+    --explicit-tombstone urn:eigenius:demo:to-suppress \
+    --explicit-tombstone urn:eigenius:demo:also-suppress
+```
+
+In-process `load` is mostly useful with `--json` for scripting; the new layer is in-memory and discarded when the command exits.
+
+`--branch` (remote mode only) commits the new layer to the named branch. Empty / omitted defaults to `main`. The branch must already exist — create it with `eigenius branch create` first.
+
+`--commit-policy reject` (default) fails the commit on any retroactive validation violation; up to `--max-violations` (default 100) errors are surfaced, with the full count in the JSON response's `total_violations` field. `--commit-policy cascade` tombstones violating lower-layer IRIs iteratively to fixpoint; the cascade aborts if it would have to tombstone an IRI the new layer itself defines.
+
+`--explicit-tombstone <IRI>` (repeatable) tombstones the given IRI as part of the same commit. Applied to the user-layer builder before retroactive validation; under `--commit-policy cascade` they combine with cascade-inferred tombstones. See D41 §10.1.
+
+JSON output (`--json`) carries `success`, `layer_id`, `resource_count`, `branch_advanced`, `cascade_tombstones` (count), `cascade_iterations`, and `total_violations`.
+
+### `query <EIGENQL> [--file <PATH>] [--at-layer <LAYER_ID>] [--branch <NAME>]`
+
+Execute an EigenQL query.
+
+```bash
+# Against the in-process bootstrap
+eigenius query 'USING "urn:eigenius:core:Class" MATCH Class(?c) { short_name: ?n } RETURN [] { name: ?n }'
+
+# Load a file first (in-process)
+eigenius query --file ontologies/examples/animals.json \
+    'MATCH "urn:eigenius:example:Dog"(?d) { "urn:eigenius:example:name": ?name } RETURN [] { name: ?name }'
+
+# Against a running kernel
+eigenius --endpoint http://localhost:50051 query \
+    'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?n } RETURN [] { name: ?n }'
+
+# Query against a feature branch's current head
+eigenius --endpoint http://localhost:50051 query \
+    'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?n } RETURN [] { name: ?n }' \
+    --branch feature-x
+```
+
+`--at-layer` (remote mode only) targets a specific historical layer. `--branch` (remote mode only) pins the read to the named branch's current head; mutually exclusive with `--at-layer`. Empty / omitted defaults to `main`.
+
+When `--file` is supplied, the load step accepts the same `--commit-policy`, `--max-violations`, and `--explicit-tombstone` flags as `load`. They're ignored when `--file` is omitted.
+
+EigenQL syntax: see the [EigenQL guide](../eigenql/README.md).
+
+## 4.3. Program commands
+
+### `program-validate <PROGRAM_FILE> [--ontology <FILE>]` (in-process)
+
+Run a program's static check: the body decodes to an EigenTT term with every referenced class resolved. The optional `--ontology` loads supporting class/property declarations first.
+
+This is not a type-check. The kernel runs no EigenTT check on a `program:Program` — the checker has no typing rule for `program:Component` references — so the printed `Declared type` is read off `input_type`/`output_type` and is not verified against the body.
+
+```bash
+eigenius program-validate ontologies/examples/simple-program.json \
+    --ontology ontologies/examples/animals.json
+```
+
+### `run <PROGRAM_FILE> <INPUT_FILE> [--branch <NAME>]` (requires `--endpoint`)
+
+Execute a program against an input. Requires a running kernel because programs may dispatch IO components to the orchestrator.
+
+```bash
+eigenius --endpoint http://localhost:50051 run program.json input.json
+
+eigenius --endpoint http://localhost:50051 run program.esl input.json
+
+# Commit the trace layer to a feature branch
+eigenius --endpoint http://localhost:50051 run program.esl input.json --branch feature-x
+```
+
+Both program and input may be Eigon-JSON or ESL — auto-detected by extension.
+
+`--branch` chooses the branch the trace layer commits into. Empty / omitted defaults to `main`.
+
+## 4.4. The server command
+
+### `serve [--port <N>] [--orchestrator <URL>] [--db <PATH>] [--cache-budget <ENTRIES>] [--morphy-dict <PATH>]`
+
+Start the gRPC server.
+
+```bash
+# In-memory, no orchestrator (file ops + queries only)
+eigenius serve
+
+# In-memory + orchestrator dispatch
+eigenius serve --orchestrator http://localhost:8080
+
+# Persistent + orchestrator dispatch
+eigenius serve --db /var/lib/eigenius --orchestrator http://localhost:8080
+
+# Custom port
+eigenius serve --port 9000
+```
+
+Default port: 50051. The orchestrator URL can also come from the `EIGENIUS_ORCHESTRATOR_ENDPOINT` env var; the database path from `EIGENIUS_DB`.
+
+| Flag | Default | Env var |
+|---|---|---|
+| `--port` | 50051 | — |
+| `--orchestrator` | none | `EIGENIUS_ORCHESTRATOR_ENDPOINT` |
+| `--db` | in-memory | `EIGENIUS_DB` |
+| `--cache-budget` | 250,000 entries | `EIGENIUS_CACHE_BUDGET` |
+| `--morphy-dict` | `references/WordNet-3.0/dict` | `EIGENIUS_MORPHY_DICT` |
+
+`--cache-budget` caps resident resource entries (D23 §5.3), not what the kernel can serve — cold reads page from the backend on demand. `--morphy-dict` points the `ParseSentence` RPC's Morphy lemmatizer at a WordNet dict directory; when it cannot be loaded the server logs the reason and falls back to the no-op `Identity` lemmatizer rather than failing.
+
+When `--db <path>` is provided, the kernel persists layers, traces, and institution registrations to RocksDB and survives restart. See [chapter 6](06-database-management.md).
+
+## 4.5. Database commands
+
+`db stats`, `db compact` and `db export` operate directly on a RocksDB database directory and take a path. The kernel server must be **stopped** for all three: with `--db` the running kernel holds RocksDB's exclusive directory lock, and a second process cannot open it. They are local-only — passing `--endpoint` exits 1.
+
+`db consolidate` and `db merge` are the opposite: they *require* `--endpoint`, because both serialise against the running kernel's branch lock.
+
+### `db stats <PATH>`
+
+Print storage statistics for the database.
+
+```bash
+eigenius db stats /var/lib/eigenius
+```
+
+Prints the database path, the layer count from the persisted topology, one line per layer with its resource count, the total resource count, and every branch ref with its current head. It does not report key counts or byte sizes.
+
+### `db compact <PATH>`
+
+Trigger a manual full compaction. Useful after large deletes or to defragment after extensive trace generation.
+
+```bash
+eigenius db compact /var/lib/eigenius
+```
+
+### `db export <DB_PATH> <OUTPUT_PATH>`
+
+Dump every resource in the database as Eigon-JSON files into a directory.
+
+```bash
+eigenius db export /var/lib/eigenius /tmp/eigenius-export
+```
+
+Useful for backup snapshots and for migrating between RocksDB versions. The output is round-trippable: there is no `db import` and no `db restore` — restoring an export means `eigenius load` over the exported files, which reconstructs an equivalent layer set.
+
+### `db consolidate <FROM..TO> [--branch <NAME>] [--max-walk-entries <N>] [--dry-run] [--preserve-history]` (requires `--endpoint`)
+
+Collapse the inclusive layer range `[from..to]` on a branch into one resolve-equivalent layer ([D25](../../design/d25-chain-consolidation.md)). Shipped — this is not future work, and it is not a substitute for re-loading.
+
+```bash
+# What would it cost, and what layer id would come out? Nothing commits.
+eigenius --endpoint http://localhost:50051 db consolidate <from-hex>..<to-hex> --dry-run
+
+# Do it, on a feature branch, keeping the pre-consolidation history readable
+eigenius --endpoint http://localhost:50051 db consolidate <from-hex>..<to-hex> \
+    --branch feature-x --preserve-history
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--branch <NAME>` | `main` | Branch to consolidate. |
+| `--max-walk-entries <N>` | the kernel value, `5_000_000` | Override the cost cap. |
+| `--dry-run` | off | Run `EstimateConsolidation` instead of `ConsolidateChain`: reports the cost and the predicted consolidated layer id without committing. |
+| `--preserve-history` | off | Below-head consolidation only. Keeps the source range alive so time-travel reads against intermediate layers keep resolving; GC will not reclaim them. |
+
+When `to` is the branch's current head, the branch ref advances to the new layer. When `to` is strictly below the head, a resolve redirect is installed at `to` (D25 §12.8) and the branch ref stays where it was — the response's `head_advanced` is `false`, and that is a success, not a failure.
+
+### `db merge preview | resolve` (require `--endpoint`)
+
+Reconcile a diverged head with a branch ([D20](../../design/d20-layer-reconciliation.md)). `preview` computes the cascade impact without committing; `resolve` applies the resolutions and CAS-advances the branch ref. Both take `--branch` (default `main`), `--candidate <LAYER_ID>` and `--resolutions <PATH>`; `resolve` additionally requires one `--acknowledge <ITEM_ID>` for every cascade item the preview printed.
+
+Full walkthrough, the four resolution strategies, and the resolution-file schema: [chapter 16](16-merge-resolution.md).
+
+## 4.6. Branch commands (require `--endpoint`)
+
+Branches are named pointers into the layer DAG (D23 §5.5). Every commit lands on a branch — `main` is the default for any `load` / `run` / `reflect` that omits `--branch`. Feature branches let you stage divergent work without touching `main`; trivial-merge auto-reconciles disjoint changes (D23 §5.4).
+
+All branch commands require `--endpoint` — branches require a persistent backend, which only the running kernel exposes.
+
+### `branch list`
+
+```bash
+eigenius --endpoint http://localhost:50051 branch list
+```
+
+Print every branch ref with its current head:
+
+```
+NAME                              HEAD
+feature-x                         abe85ea7d9b7f2bc4a32...
+main                              5b2d014a3c8e9f1d2b88...
+```
+
+### `branch show <NAME>`
+
+```bash
+eigenius --endpoint http://localhost:50051 branch show main
+```
+
+Show a single branch's current head. Exits non-zero if the branch doesn't exist.
+
+### `branch create <NAME> --from <LAYER_ID>`
+
+Create a new branch pointing at an existing layer. Branch names match `[A-Za-z0-9_-]+` (max 256 chars). Fails if a branch with the same name already exists or if the `from_layer` is unknown.
+
+```bash
+# Branch off main's current head
+MAIN_HEAD=$(eigenius --endpoint http://localhost:50051 branch show main --json | jq -r .head_layer)
+eigenius --endpoint http://localhost:50051 branch create feature-x --from "$MAIN_HEAD"
+```
+
+After creation, `eigenius load --branch feature-x ...` commits onto the new branch.
+
+### `branch delete <NAME> [--force]`
+
+Remove a branch ref. Layers reachable only through this branch are reclaimed by the next GC pass; the ref itself is gone immediately.
+
+```bash
+eigenius --endpoint http://localhost:50051 branch delete feature-x
+```
+
+By default, the kernel refuses to prune a branch whose head matches an active task pin (a running task pinned its `layer_head` here). Pass `--force` to delete unconditionally — task pins outlive the branch ref via the GC root system, so data isn't lost; only the branch label disappears.
+
+```bash
+# Force-delete even if a task is pinned to this branch's head
+eigenius --endpoint http://localhost:50051 branch delete feature-x --force
+```
+
+## 4.7. Mirror commands (require `--endpoint`)
+
+The `mirror` subcommand group operates on `RuntimePackageMirror` resources — auto-generated, language-specific source code that mirrors a slice of the chain into typed structs that a substrate-hosted worker can decode and dispatch on. Used as the first step of the substrate-institution install flow ([chapter 11](11-runtime-substrate.md)).
+
+### `mirror create [--filter <EIGENQL> | --filter-file <FILE>] [--institution-file <FILE>] --layer <IRI> --language <LANG> --output <DIR>`
+
+Generate a mirror against a layer; commit a `RuntimePackageMirror` resource and write the source files locally.
+
+`branch show` is itself remote-only, so a command substitution that resolves the head must carry `--endpoint` too — without it the inner command exits 1 and the outer `--layer` receives an empty string:
+
+```bash
+MAIN_HEAD=$(eigenius --endpoint http://localhost:50051 branch show main --json | jq -r .head_layer)
+
+eigenius --endpoint http://localhost:50051 mirror create \
+    --layer "urn:eigenius:layer:$MAIN_HEAD" \
+    --filter 'MATCH "urn:eigenius:core:Class"(?iri) {
+                "urn:eigenius:core:short_name": ?name
+              }
+              WHERE ?name IN ["BoundedBy", "BoundsRequest", "IntervalFunction"]
+              RETURN [] { iri: ?iri }' \
+    --institution-file julia/institutions/intervals/declarations/intervals-institution.eigon.json \
+    --language julia \
+    --output /tmp/intervals-mirror \
+    --json
+```
+
+| Flag | Use |
+|---|---|
+| `--layer <IRI>` | Layer the mirror anchors to (committed under `runtime:source_layer`). Pin to the head of the branch you'll install against. |
+| `--filter <EIGENQL>` | Inline EigenQL query selecting seed class IRIs. Mutually exclusive with `--filter-file`. The query must `RETURN [] { iri: ?iri }`. |
+| `--filter-file <FILE>` | Path to a file containing the filter query. |
+| `--institution-file <FILE>` | Optional path to the institution declaration file (the same file passed to `institution install`). When set, the seed is augmented with every class referenced by the file's `RuntimeMethodSignature.input_types` / `output_type` — closes the gap the closure walker can't reach (cross-institution return classes). The flag reads the file rather than querying the chain because the institution declaration commits *after* `mirror create` in the canonical install order. |
+| `--language <LANG>` | Target language. v1 supports `julia`. |
+| `--output <DIR>` | Directory the source files are written to (commits to the chain regardless). |
+| `--json` | JSON-formatted output (mirror IRI, file count, output dir). |
+
+**The closure walker.** From the seed classes, the mirror generator follows every `requires`, `class_types`, and inductive-type-ctor reference, recursively. `--institution-file` augments that closure with classes mentioned in the institution's typed method contracts — needed because cross-institution return classes (e.g. an `OptimisationProblem` returned from a Symbolics handler) aren't reachable by class-property walking from a Symbolics-rooted seed.
+
+### `mirror get --iri <MIRROR_IRI> --output <DIR>`
+
+Fetch a previously-committed mirror's source files. No commit.
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror get \
+    --iri urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --output /tmp/mirror-extract
+```
+
+### `mirror list [--language <LANG>]`
+
+List committed mirrors.
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror list --language julia
+```
+
+### `mirror inspect <MIRROR_IRI>`
+
+Inspect a mirror's metadata (source layer, seed classes, file count, language, source hash).
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror inspect \
+    urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c
+```
+
+## 4.8. Env commands (require `--endpoint`)
+
+The `env` subcommand group manages `RuntimeEnvironment` resources — pinned worker-image identities (image digest + runtime version + lockfile + lifecycle). Used as the second step of the substrate-institution install flow.
+
+### `env build --language <LANG> --mirror <MIRROR_IRI> [--package-path <DIR>] [--base-image <REF>] [--worker-source-dir <DIR>] [--depot <DIR>]`
+
+Build a worker container image from a handler package + a previously-committed mirror. Runs `buildah` on the host, then `docker load`s the result so the orchestrator's daemon can run it. Prints the resulting image digest and the runtime version captured from the built image. Does **not** commit a chain resource — pass the printed digest to `env create` for that.
+
+```bash
+eigenius --endpoint http://localhost:50051 env build \
+    --language julia \
+    --package-path julia/institutions/intervals/EigeniusIntervals \
+    --mirror urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --base-image docker.io/library/julia:1.12-bookworm \
+    --json
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--language <LANG>` | `julia` | Target language. |
+| `--package-path <DIR>` | cwd | Handler package directory (must contain `Project.toml` and `src/`). |
+| `--mirror <MIRROR_IRI>` | — | A previously-committed `RuntimePackageMirror` to bake in. |
+| `--base-image <REF>` | `julia:1.12-bookworm` | Override the language's default base image. Pin by digest in production. |
+| `--worker-source-dir <DIR>` | `julia/runtime-worker/` resolved against `$EIGENIUS_HOME` | Path to the language-runtime worker source. |
+| `--depot <DIR>` | fresh temp dir | Build context / depot path the buildah build reads from. |
+| `--json` | — | JSON output: `{image_digest, runtime_version, package_name, mirror_iri}`. |
+
+Cold builds take 30–90 seconds (most of it `Pkg.precompile`); subsequent rebuilds without input changes hit buildah's layer cache.
+
+**`--language oci` (D60, generic tool runtime).** Bakes a pinned Eigenius worker
+binary (no mirror, no handler package) into an image over `--base-image`, and emits a
+kernel-tracked `runtime:BuildRecipe` alongside the digest:
+
+```bash
+eigenius --endpoint http://localhost:50051 env build --language oci \
+    --worker-source-dir target/release/eigenius-schemaorg-worker \
+    --base-image debian:bookworm-slim
+# → Digest: sha256:…  +  BuildRecipe (Eigon-JSON: base_image, artifact_hashes,
+#   dockerfile, build_command, builder_version) — commit it with `env create`.
+```
+
+The worker binary must be the *same* one the orchestrator stages
+(`EIGENIUS_OCI_WORKER_BINARY_PATH`), or the boot cross-check (D26 §9.3) fails. See
+[chapter 11 §11.7](11-runtime-substrate.md) and
+[D60](../../design/d60-native-runtime-and-tracked-env-build.md).
+
+### `env create --language <LANG> --handler-package <DIR> --mirror <MIRROR_IRI> --as-iri <ENV_IRI> --image-digest <DIGEST> --runtime-version <VERSION> [--include-package <DIR> ...] [--base-image <REF>]`
+
+Commit a `RuntimeEnvironment` resource pinning the env image identity. Pass the digest and runtime version that `env build` printed.
+
+```bash
+eigenius --endpoint http://localhost:50051 env create \
+    --language julia \
+    --handler-package julia/institutions/intervals/EigeniusIntervals \
+    --mirror urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --as-iri urn:eigenius:intervals:env:v1 \
+    --image-digest sha256:1234... \
+    --runtime-version 1.12.6
+```
+
+| Flag | Use |
+|---|---|
+| `--as-iri <ENV_IRI>` | IRI to commit the `RuntimeEnvironment` under. |
+| `--image-digest <DIGEST>` | `sha256:` prefix; the digest `env build` printed. |
+| `--runtime-version <VERSION>` | Exact runtime version (e.g. `1.12.6`). Required by the chain ontology. |
+| `--include-package <DIR>` | Repeatable. Extra package directories to bake in as path-deps. |
+| `--base-image <REF>` | Override the language's default base image. |
+
+### `env list [--language <LANG>]`
+
+```bash
+eigenius --endpoint http://localhost:50051 env list --language julia
+```
+
+### `env inspect <ENV_IRI>`
+
+```bash
+eigenius --endpoint http://localhost:50051 env inspect urn:eigenius:intervals:env:v1
+```
+
+## 4.9. Institution commands (require `--endpoint`)
+
+Install and inspect institution declarations. Used as the third step of the substrate-institution install flow.
+
+Use `institution install` for substrate-hosted institutions whose declaration includes `Institution { runtime: external, requires_environment: ... }`. In-process institutions (`runtime: in_process`, e.g. Reasoning / Lean / Statistics) are linked into the kernel binary and register at startup — no install step.
+
+### `institution install --definition <FILE>`
+
+Submit an institution definition (Eigon-JSON or ESL) to the chain via `Load`. The file typically commits 5–10 resources in one shot — `Institution` + `RuntimeMethodSignature × N` + `QueryClass × N` + `ExportFormat` / `ImportFormat`.
+
+```bash
+eigenius --endpoint http://localhost:50051 institution install \
+    --definition julia/institutions/intervals/declarations/intervals-institution.eigon.json
+```
+
+### `institution list`
+
+```bash
+eigenius --endpoint http://localhost:50051 institution list
+```
+
+### `institution inspect <IRI>`
+
+Print an installed institution's full surface — `Institution` resource plus the QueryClasses, ExportFormats, ImportFormats, and signatures anchored on it.
+
+```bash
+eigenius --endpoint http://localhost:50051 institution inspect \
+    urn:eigenius:institutions:intervals
+```
+
+## 4.10. Capability commands
+
+Registered components and institutions are inspected through the
+`capability` subcommand. All require `--endpoint`.
+
+> **Note (2026-07-08):** `capability install` was removed with WASM
+> extensibility. Components and institutions are now declared as ontology
+> resources loaded via `load` (external / in-process backends), not
+> installed as WASM binaries.
+
+### `capability list`
+
+```bash
+eigenius --endpoint http://localhost:50051 capability list
+```
+
+List every registered component and institution with kind and capability level.
+
+### `capability inspect <IRI>`
+
+```bash
+eigenius --endpoint http://localhost:50051 capability inspect \
+    urn:example:institutions:Reasoning
+```
+
+Print details for a registered capability: input/output types (components), declared morphism/query/comorphism types (institutions), capability level.
+
+### `capability test <IRI> --input <FILE> [--mode query|discover]`
+
+Invoke a registered capability with test input.
+
+```bash
+eigenius --endpoint http://localhost:50051 capability test \
+    urn:example:components:DocValidator \
+    --input /tmp/doc.json
+```
+
+**Components only.** `capability test` detects institution-hood first and, for an institution, prints that institutions cannot be invoked directly and exits 1 — the per-RPC `FiberQuery` / `DiscoverMorphisms` primitives it once used were retired in Phase 12. `--mode` is accepted by the parser and discarded; it selects nothing. To exercise an institution's `QueryClasses`, write an EigenQL `FIBER` query and submit it through `query` (D2 v2 §3.5).
+
+Against a *component* the command works, by synthesising a one-expression program that applies the component to the input and running it through `RunProgram`.
+
+## 4.11. Task commands (require `--endpoint`)
+
+Inspect and control persisted tasks (D21).
+
+### `tasks list`
+
+```bash
+eigenius --endpoint http://localhost:50051 tasks list
+```
+
+List every task in the session with its **kind**, status (`Running`, `Completed`, `Failed`, `Cancelled`), and that kind's own subject — the program for a `ProgramRun`, the `doc-<id>` working branch for a `Formalize` (D71 §6).
+
+```
+TASK ID                               STATUS        KIND         SUBJECT
+2ae08b30-7571-48ec-87b0-7a81215cb2b4  Completed     Formalize    wrn-first-page
+9f31c0a4-...                          Completed     ProgramRun   urn:eigenius:demo:analyze
+```
+
+Tasks used to be program-bound, and a formalization would have shown a blank PROGRAM column reading like a broken task. `TaskRecord` carries a kind instead, so each row names what it actually is.
+
+### `tasks status <TASK_ID>`
+
+```bash
+eigenius --endpoint http://localhost:50051 tasks status <uuid>
+```
+
+Detailed status: kind, current checkpoint, elapsed time, last event, and the fields that kind has — program + input IRIs for a `ProgramRun`, doc branch + source sha256 for a `Formalize`. Fields belonging to another kind are omitted rather than shown empty.
+
+### `tasks cancel <TASK_ID>`
+
+```bash
+eigenius --endpoint http://localhost:50051 tasks cancel <uuid>
+```
+
+Request cooperative cancellation. The task transitions to `Cancelled` at its next checkpoint.
+
+## 4.12. Data commands (require `--endpoint`)
+
+The `data` subcommand group manages **external data files** — large dataset files (CRISPR dependency matrices, expression tables, GMT gene-set files, `.rds` blobs) that are too big, too binary, or too provenance-sensitive to inline into the chain. Each file is attached as a content-addressed `ingest:PinnedExternalFile` node ([D53](../../design/d53-large-data-tracking.md)): the **bytes stay off-chain**; only the durable `reference` (locator), the `content_hash` (sha256), and the `media_type` travel on the chain. The IRI is derived from the content hash, so byte-identical files converge to one node (idempotent attach).
+
+All `data` commands talk to a running kernel and require `--endpoint`.
+
+**Reference schemes.** A file is identified by a *reference* — the durable locator the substrate fetches from later:
+
+| Scheme | Example | Notes |
+|---|---|---|
+| local path | `data/depmap/crispr.parquet` | Canonicalised to a `file://` absolute path on attach. |
+| `file://` | `file:///var/lib/eigenius/depot/crispr.parquet` | A path on a volume the kernel can read directly — no provisioning needed. |
+| `oxen://` | `oxen://ml-datasets/depmap@main/crispr.parquet` | Versioned, content-addressed Oxen remote. Grammar: `oxen://[<host>/]<namespace>/<repo>@<revision>/<path>`. `<host>` is optional and defaults to `hub.oxen.ai`; `<revision>` is a branch name or commit id. The CLI fetches once (via the prebuilt `oxen` client) to compute the hash. |
+
+**Oxen auth.** Oxen access uses a per-host bearer token in `auth_config.toml` under the Oxen config dir (`$OXEN_CONFIG_DIR`). The token is a deployment secret held substrate-side; it never enters a worker image. Override the client binary with `EIGENIUS_OXEN_BIN` and the URL scheme with `EIGENIUS_OXEN_SCHEME` if needed.
+
+### `data attach <FILE_OR_REF> [--reference <REF>] [--media-type <MT>] [--name <NAME>]`
+
+Hash the bytes, mint the content-addressed IRI, and commit the `PinnedExternalFile` node. For an `oxen://` reference the CLI downloads once to compute the hash, then discards the temp copy.
+
+```bash
+# Local file — reference defaults to a file:// URL of the absolute path
+eigenius --endpoint http://localhost:50051 data attach \
+    data/depmap/crispr-gene-effect.csv
+
+# Oxen-backed — the oxen:// reference is stored verbatim as the locator
+eigenius --endpoint http://localhost:50051 data attach \
+    oxen://ml-datasets/depmap@main/crispr-gene-effect.parquet
+
+# Override the durable locator (e.g. attach from a local copy but record the
+# shared-volume path the kernel will read at recompute time)
+eigenius --endpoint http://localhost:50051 data attach /tmp/crispr.parquet \
+    --reference file:///var/lib/eigenius/depot/crispr.parquet
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--reference <REF>` | `file://` of the abs path (local), or the `oxen://` ref verbatim | The durable backend locator stored on the node — what the substrate fetches from later. Override when the bytes you're hashing live somewhere other than where the kernel will read them. |
+| `--media-type <MT>` | inferred from extension | Override the IANA media type (e.g. `text/csv`). Inference strips a trailing `.gz` and maps `.parquet`, `.arrow`, `.csv`, `.tsv`/`.gmt`, `.json`, `.xlsx`, `.h5`/`.hdf5`, `.rds`; anything else is `application/octet-stream`. |
+| `--name <NAME>` | the file name | Override the `short_name`. |
+
+JSON output (`--json`) carries `success`, `iri`, `content_hash`, `reference`, `media_type`.
+
+### `data list [--media-type <MT>]`
+
+List every attached `PinnedExternalFile` with its media type and reference.
+
+```bash
+eigenius --endpoint http://localhost:50051 data list
+eigenius --endpoint http://localhost:50051 data list --media-type text/csv
+```
+
+### `data inspect <DATA_IRI>`
+
+Print one pinned file's metadata — reference, content hash, media type, bound schema, source.
+
+```bash
+eigenius --endpoint http://localhost:50051 data inspect \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data verify <DATA_IRI>`
+
+Re-fetch the bytes by the node's `reference`, recompute the hash, and check it against the pinned `content_hash` (fail closed — D53 §5). Proves the off-chain bytes still match what was attached. Exits non-zero on a mismatch.
+
+```bash
+eigenius --endpoint http://localhost:50051 data verify \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data validate <DATA_IRI>`
+
+The D53 §4.1 checkable layout gate. Materializes the file (which also re-verifies the content hash), reads its header, and checks each bound `DatasetSchema`'s declared layout against the actual columns. Delimited text (CSV/TSV) is header-checked in process; columnar formats (Parquet/Arrow) and compressed files carry their schema in-file and defer to the worker. A file with no bound schema is reported valid (opaque file — nothing to check).
+
+```bash
+eigenius --endpoint http://localhost:50051 data validate \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data provision <DATA_IRI> [--cache-root <DIR>]`
+
+Materialize a pinned file into the local content-addressed cache (`<cache>/<sha256-hex>/<name>`) that the kernel reads for native file-backed `SampleSet` recompute (D53 §6.1 / §7). Fetches and content-verifies via the §5 resolver. Run this on the host whose depot the kernel reads.
+
+```bash
+eigenius --endpoint http://localhost:50051 data provision \
+    urn:eigenius:ingest:file:9b1c... \
+    --cache-root /var/lib/eigenius/substrate-depot/extfile-cache
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--cache-root <DIR>` | `$EIGENIUS_EXTFILE_CACHE_DIR` | The depot's extfile-cache directory the kernel reads. Required either via this flag or the env var. |
+
+A `file://` reference on a volume the kernel already reads needs no provisioning — the kernel reads it in place. Provision is for `oxen://` (and any reference you want warmed into the cache ahead of a recompute).
+
+## 4.13. Other commands
+
+### `list-institutions` (requires `--endpoint`)
+
+```bash
+eigenius --endpoint http://localhost:50051 list-institutions
+```
+
+List registered institutions, their declared morphism types, query types, and IRIs.
+
+### `get-schema <CLASS_IRI>` (requires `--endpoint`)
+
+```bash
+eigenius --endpoint http://localhost:50051 get-schema "urn:example:Document"
+```
+
+Generate JSON Schema for an ontology class. The MCP tool `eigenius_get_schema` wraps the same RPC.
+
+### `reflect <FILE>`
+
+```bash
+eigenius reflect path/to/trace.json
+```
+
+Record a reasoning trace from a JSON or ESL file. Used during testing of the trace-recording machinery.
+
+### `version` (local only)
+
+```bash
+eigenius version
+```
+
+Print `eigenius` followed by the crate version (`CARGO_PKG_VERSION`). No build metadata, no commit hash, no build date. With `--endpoint` it exits 1 rather than printing anything.
+
+## 4.14. Script commands (require `--endpoint`)
+
+The `script` subcommand group publishes and runs `RuntimeScript` resources — script source committed to the chain and executed by a substrate worker in a declared `RuntimeEnvironment` ([D26](../../design/d26-runtime-substrate.md) §6.2).
+
+### `script publish <FILE> --env <ENV_IRI> [--lang <LANG>] [--entry-point <NAME>] [--description <TEXT>]`
+
+Commit a script as a content-addressed `RuntimeScript`. Cheap — a graph commit, nothing executes. The language is inferred from the extension (`.r`, `.jl`, `.py`, `.lean`) unless `--lang` overrides it. Omit `--entry-point` for a top-level script (the common `RunRuntimeScript` case); set it only when the script exposes a typed entry point.
+
+```bash
+eigenius --endpoint http://localhost:50051 script publish analysis/limma.R \
+    --env urn:eigenius:runtime:env:r-bioc-3.20 \
+    --description "limma differential expression"
+```
+
+### `script list [--lang <LANG>]`
+
+List published runtime scripts, optionally filtered by language.
+
+### `script inspect <SCRIPT_IRI>`
+
+Print one script's metadata and source.
+
+### `script run <SCRIPT_IRI> --inputs <IRI>[,<IRI>...] [--branch <NAME>]`
+
+Run a published script against graph-resident input resources. The kernel resolves the script source and its environment from the graph at execution time. `--inputs` is comma-separated; v1 takes exactly one. The trace layer commits to `--branch`, default `main`.
+
+```bash
+eigenius --endpoint http://localhost:50051 script run \
+    urn:eigenius:runtime:script:9b1c... \
+    --inputs urn:project:expression_matrix
+```
+
+## 4.15. Lexicon commands
+
+The kernel-side, trusted half of the [D62](../../design/d62-encoding-engine-prose-to-trees.md) prose-to-trees engine. An untrusted tool (WordNet/VerbNet plus an LLM) drafts categorial lexical entries; these subcommands admit or reject them against the kernel, which is the felicity oracle.
+
+### `lexicon gate <FILE>...` (local only)
+
+Run the felicity gate over every `lexicon:LexicalEntry` in one or more ESL / Eigon-JSON files: for each entry, check that the interpretation of its category is convertible with its `sem_type`, and that its `sem` inhabits that type. Fail-closed — any rejection exits non-zero.
+
+All files load into one layer over the bootstrap chain, so an entry may reference a schema or domain declared in an earlier file. With `--endpoint` the command exits 1 with `'lexicon gate' is a local-only operation`.
+
+```bash
+eigenius lexicon gate domain/oncology-lexicon.esl domain/verbs.esl
+```
+
+### `lexicon parse <SENTENCE> [--scope <LEXICON_IRI>]... [--profile <PROFILE_IRI>] [--file <FILE>]...`
+
+Parse a natural-language sentence against the lexicon and print the typed parse forest. With `--endpoint` this calls the kernel's `ParseSentence` RPC over the committed chain; locally it builds the index over the bootstrap chain plus any `--file` domain layers.
+
+```bash
+# Against a running kernel
+eigenius --endpoint http://localhost:50051 lexicon parse \
+    "every Werner syndrome affects HeLa"
+
+# In process, over local domain files
+eigenius lexicon parse "every Werner syndrome affects HeLa" \
+    --file domain/oncology-lexicon.esl --file domain/verbs.esl
+```
+
+| Flag | Use |
+|---|---|
+| `--scope <LEXICON_IRI>` | Restrict the parse to these `lexicon:Lexicon` IRIs. Repeatable; order is resolution precedence, earlier ranks first. Omitted means the whole chain, unscoped. |
+| `--profile <PROFILE_IRI>` | A `lexicon:LexiconProfile` naming an ordered scope. Mutually exclusive with `--scope`. |
+| `--file <FILE>` | Local mode only. ESL / Eigon-JSON domain files to load over bootstrap before parsing. Ignored in remote mode. |
+
+### `formalize <FILE> [--doc-id <ID>] [--out <FILE>] [--format <MIME>] [--branch <NAME>] [--scope <IRI>]... [--profile <IRI>] [--ns <PREFIX>] [--source-ref <IRI>] [--model <ID>] [--strict] [--no-wait]` (requires `--endpoint`)
+
+Formalize prose into typed, kernel-checked claims (D71). The document-level sibling of `lexicon parse`.
+
+```bash
+# Wait for the run and write the artifact
+eigenius --endpoint http://localhost:50051 formalize paper-intro.txt --out claims.esl
+
+# Read it, then land it — the artifact is NOT committed by the run
+eigenius --endpoint http://localhost:50051 load claims.esl
+```
+
+The run is a **task**: a document costs minutes and several LLM round-trips. This waits by default and is the one surface that can — an MCP tool call cannot block that long, which is why the RPC is asynchronous at all. `--no-wait` prints the task id and returns; `tasks status` / `tasks cancel` take it from there.
+
+Counts go to stderr and the artifact to stdout, so `formalize x.txt > out.esl` yields the artifact and nothing else.
+
+| flag | why you would use it |
+|---|---|
+| `--doc-id` | Names the run's `doc-<id>` working branch, which holds the document glossary and this run's recorded proposer draws. **Re-using it replays those draws instead of re-asking the model** — a second run of the same prose is fast, free and deterministic. Defaults to the file stem, IRI-sanitised. |
+| `--branch` | What to parse over — this is how you say *which lexicon*. Vocabulary is not passed to this command: `load` it and name the branch. |
+| `--scope` / `--profile` | D65 §4 parse scope: ordered `lexicon:Lexicon` IRIs (array order IS resolution precedence), or a `lexicon:LexiconProfile` naming that list. Mutually exclusive, same as `lexicon parse`. |
+| `--format` | `text/x-esl` (default here — you are going to read it), `application/eigon+json`, or `application/cbor`. |
+| `--strict` | Abort on the first unit that does not encode, instead of recording it as an `enc:CutItem`. The default records: an artifact should state what did not encode rather than drop it silently. |
+| `--model` | The model this run's untrusted proposers call, and what each recorded draw names as its answerer. |
+| `--source-ref` | Cite an existing `reference:Reference` instead of minting a document-local one. It must resolve on the chain the artifact loads onto — Rule 22 verifies. |
+
+**A first run on a fresh `--doc-id` asks the model**, so it needs a kernel built `--features use-llm` and an `ANTHROPIC_API_KEY` (`just up-llm`). Without them it fails closed rather than parsing unranked — a cap-only run is a different experiment, not a quieter version of the same one.
+
+**Local mode is deliberately unsupported.** Formalization parses against the served lexicon chain. For a byte-reproducible in-process run over a snapshot — replaying draws from files rather than a branch, failing closed on anything that does not encode — use `prose-to-esl` in `crates/eigenius-encoding`, which is what the demos and the parse harness run.
+
+Other surfaces onto the same RPC: the notebook's `formalize` cell ([chapter 14](14-notebook.md)), and the MCP tools `eigenius_formalize_document` / `eigenius_get_formalization_result`.
+
+## 4.16. Output formatting
+
+The global `--json` flag switches output from human-formatted prose to a machine-readable JSON envelope, suitable for piping into `jq` or scripting:
+
+```bash
+eigenius --json query 'MATCH ?x {} RETURN [] { x: ?x }' | jq '.results[0]'
+```
+
+Without `--json`, output is colourised plain text intended for terminal display.
+
+## 4.17. Exit codes
+
+The CLI does **not** distinguish failure modes by exit code. Every one of the 230 `std::process::exit` calls under `cli/src/` passes `1`.
+
+| Code | Meaning |
+|---|---|
+| 0 | Success — also `--help` and `--version`, which clap prints and exits on |
+| 1 | Every failure the CLI reports itself: validation failure, type-check failure, runtime or dispatch failure, connection failure, an unsupported local/remote mode, a missing required flag the CLI checks by hand |
+| 2 | Argument-parsing error raised by clap before the CLI's own code runs — unknown subcommand, missing positional, unrecognised flag |
+
+A CI script cannot branch on the failure mode. To distinguish them, run with `--json` and read the error payload, or match on the message text on stderr.
+
+---
+
+Next: **[5. Running the platform locally →](05-running-locally.md)**

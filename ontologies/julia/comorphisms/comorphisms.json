@@ -1,0 +1,74 @@
+[
+  {
+    "@id": "urn:eigenius:julia:catalyst:component:compile_to_ode_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:short_name": "compile_to_ode_problem",
+    "urn:eigenius:core:description": "Institution-runtime Component owned by the Catalyst institution. Implements the leaf-of-evaluation for the Catalyst→DiffEq comorphism's transformation Lambda. Dispatched into the Catalyst Julia worker, which executes `rn = complete(flatten(rn))` then `ODEProblem(rn, [species_sym => v, …], (t0, t1), [param_sym => v, …])` (the Catalyst-16 map-form pipeline; see julia/research/catalyst-ode-probe.md), then projects the resulting `ODEProblem` into the Eigon `OdeProblem` shape. v1 does NOT call `structural_simplify`; species ordering preserved from `network.species_declared`.",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:program:component:implementation": "urn:eigenius:julia:catalyst:proc:compile_to_ode_problem"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:component:bound_trajectory",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:short_name": "bound_trajectory",
+    "urn:eigenius:core:description": "Institution-runtime Component owned by the IntervalArithmetic institution. Implements the leaf-of-evaluation for the DiffEq→IntervalArithmetic comorphism's transformation Lambda. Dispatched into the IntervalArithmetic Julia worker (where `IntervalArithmetic` is in scope so operator overloading dispatches). Evaluates `vector_field_interval_source` over an Interval-typed state along the OdeSolution's saved time grid intersected with the bound domain, takes the union of resulting intervals, and projects into a `ProvesBoundOn(function_source, domain, interval)` claim. v1 is sample-based union, not validated integration — the rigorous-numerics replacement using TaylorModels.jl lands as a separate institution + comorphism.",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:program:component:implementation": "urn:eigenius:julia:intervals:proc:bound_trajectory"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:comorphism:transform_catalyst_to_ode_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
+    "urn:eigenius:core:short_name": "transform_catalyst_to_ode_problem",
+    "urn:eigenius:core:description": "EigenTT term implementing the Catalyst→DiffEq comorphism's typed middle m: CatalystToOdeInput → OdeProblem. Lambda over a CatalystToOdeInput parameter, body Applies the Catalyst institution's `compile_to_ode_problem` Component (institution-runtime leaf) to the bound parameter. Inspectable, type-checkable, reusable across multiple comorphisms (a future ρ_{Catalyst→Optimization} could share this same compile step inside a different transformation Lambda).",
+    "urn:eigenius:program:parameter": "input",
+    "urn:eigenius:program:parameter_type": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+      "urn:eigenius:program:function": "urn:eigenius:julia:catalyst:component:compile_to_ode_problem",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      }
+    }
+  },
+  {
+    "@id": "urn:eigenius:julia:comorphism:transform_diffeq_to_interval_bound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
+    "urn:eigenius:core:short_name": "transform_diffeq_to_interval_bound",
+    "urn:eigenius:core:description": "EigenTT term implementing the DiffEq→IntervalArithmetic comorphism's typed middle m: DiffEqToIntervalBoundInput → ProvesBoundOn. Lambda over a DiffEqToIntervalBoundInput parameter, body Applies the IntervalArithmetic institution's `bound_trajectory` Component to the bound parameter.",
+    "urn:eigenius:program:parameter": "input",
+    "urn:eigenius:program:parameter_type": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+      "urn:eigenius:program:function": "urn:eigenius:julia:intervals:component:bound_trajectory",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      }
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:julia:comorphism:catalyst_to_diffeq",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:core:short_name": "catalyst_to_diffeq",
+    "urn:eigenius:core:description": "Cross-institution Comorphism — Catalyst → DiffEq. The triple (s, m, t) where s = ef_to_ode_input (Catalyst's typed extraction), m = transform_catalyst_to_ode_problem (a EigenTT Lambda — typed term, not an opaque Component), t = if_problem (DiffEq's typed reification). Marked exact: false because mass-action ODE compilation is faithful to the network's *deterministic* limit but the network admits other dynamical interpretations (jumps, SDEs) under the same structure.",
+    "urn:eigenius:institution:export_format": "urn:eigenius:julia:catalyst:ef_to_ode_input",
+    "urn:eigenius:institution:transformation": "urn:eigenius:julia:comorphism:transform_catalyst_to_ode_problem",
+    "urn:eigenius:institution:import_format": "urn:eigenius:julia:diffeq:if_problem",
+    "urn:eigenius:institution:exact": false
+  },
+  {
+    "@id": "urn:eigenius:julia:comorphism:diffeq_to_intervals",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:core:short_name": "diffeq_to_intervals",
+    "urn:eigenius:core:description": "Cross-institution Comorphism — DiffEq → IntervalArithmetic. The triple (s, m, t) where s = ef_to_interval_bound_input (DiffEq's typed extraction), m = transform_diffeq_to_interval_bound (EigenTT Lambda), t = if_proves_bound_on (IntervalArithmetic's typed reification). The bridge Phase 21 needs for *operationally verified* PK predictions. Marked exact: false because the bound depends on the user-supplied interval extension and on tolerance-based saved samples rather than a rigorous validated integrator. The TaylorModels-backed exact variant lands when that institution ships.",
+    "urn:eigenius:institution:export_format": "urn:eigenius:julia:diffeq:ef_to_interval_bound_input",
+    "urn:eigenius:institution:transformation": "urn:eigenius:julia:comorphism:transform_diffeq_to_interval_bound",
+    "urn:eigenius:institution:import_format": "urn:eigenius:julia:intervals:if_proves_bound_on",
+    "urn:eigenius:institution:exact": false
+  }
+]

@@ -1,0 +1,1739 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Bootstrap sequence for kernel initialization.
+//!
+//! Loads the core ontology from `ontologies/core/core-ontology.json`,
+//! creates the root layer, validates it against itself, and returns
+//! a working execution context.
+
+use crate::context::{ExecutionContext, ExecutionMode};
+use crate::layer::{Layer, LayerBuilder};
+use crate::observability::{field, operation};
+use crate::ontology::eigon_json;
+use crate::validation::Validator;
+use std::fmt;
+use std::sync::Arc;
+
+/// Errors during bootstrap.
+#[derive(Debug)]
+pub enum BootstrapError {
+    Parse(eigon_json::ParseError),
+    Layer(crate::layer::LayerError),
+    CoreOntologyInvalid(Vec<crate::validation::ValidationError>),
+    Storage(String),
+    ManifestDrift {
+        stored: String,
+        current: String,
+    },
+    /// D24 §2: non-empty DB without `meta:schema_version`. The DB
+    /// was written by a pre-marker kernel (Phase 14 or earlier);
+    /// the operator must re-seed against a fresh `--db` path.
+    SchemaVersionAbsent,
+    /// D24 §2: stored schema version is higher than this kernel's
+    /// `SCHEMA_VERSION`. Older kernel against a newer DB.
+    SchemaTooNew {
+        stored: u32,
+        kernel: u32,
+    },
+    /// D24 §2: stored schema version is lower than this kernel's
+    /// `SCHEMA_VERSION` and no contiguous migration chain exists in
+    /// the kernel's `MigrationRegistry` to bridge the gap.
+    NoMigrationPath {
+        from: u32,
+        to: u32,
+    },
+    /// D24 §2: a registered migration ran but returned an error. The
+    /// DB is left at its pre-migration version (migrations are
+    /// required to be atomic).
+    MigrationFailed {
+        from: u32,
+        to: u32,
+        message: String,
+    },
+    /// D24 §3.1: the on-disk `meta:schema_version` value couldn't be
+    /// decoded. Indicates corruption rather than version mismatch —
+    /// no migration path applies.
+    SchemaVersionCorrupt(String),
+}
+
+impl fmt::Display for BootstrapError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BootstrapError::Parse(e) => write!(f, "failed to parse core ontology: {e}"),
+            BootstrapError::Layer(e) => write!(f, "failed to build core layer: {e}"),
+            BootstrapError::CoreOntologyInvalid(errors) => {
+                writeln!(
+                    f,
+                    "core ontology validation failed with {} error(s):",
+                    errors.len()
+                )?;
+                for e in errors {
+                    writeln!(f, "  {e}")?;
+                }
+                Ok(())
+            }
+            BootstrapError::Storage(msg) => write!(f, "persistent backend error: {msg}"),
+            BootstrapError::ManifestDrift { stored, current } => writeln!(
+                f,
+                "seed manifest drift — refusing to boot against a DB seeded with different embedded ontologies.\n\
+                 stored:\n{stored}current:\n{current}\n\
+                 Options:\n  1. Use a fresh --db path (reinstalls your capabilities).\n  \
+                 2. Run a migration when `eigenius db migrate` lands (tracked as Phase 14)."
+            ),
+            BootstrapError::SchemaVersionAbsent => write!(
+                f,
+                "schema version marker absent — refusing to boot against a non-empty DB without \
+                 `meta:schema_version`.\n\
+                 The DB was written by a pre-marker kernel (Phase 14 or earlier). Re-seed against \
+                 a fresh `--db` path; pre-marker DBs are not supported.\n\
+                 See docs/design/d24-schema-versioning.md."
+            ),
+            BootstrapError::SchemaTooNew { stored, kernel } => write!(
+                f,
+                "schema version too new — DB stamped at v{stored}, this kernel expects v{kernel}.\n\
+                 Upgrade the kernel binary; older kernels cannot open DBs migrated past their \
+                 expected version (D24 §5: no forward compatibility)."
+            ),
+            BootstrapError::NoMigrationPath { from, to } => write!(
+                f,
+                "no migration path from schema v{from} to v{to}. The kernel's `MigrationRegistry` \
+                 lacks a contiguous chain.\n\
+                 This usually means the kernel was built with `SCHEMA_VERSION={to}` but the \
+                 corresponding `vN_to_vN+1` migrations were not all registered. Report this as a \
+                 kernel bug; see docs/design/d24-schema-versioning.md §6.1."
+            ),
+            BootstrapError::MigrationFailed { from, to, message } => write!(
+                f,
+                "migration v{from} → v{to} failed: {message}\n\
+                 The DB is left at its pre-migration version. Inspect the error above and \
+                 retry; migrations are required to be atomic and idempotent (D24 §3.3)."
+            ),
+            BootstrapError::SchemaVersionCorrupt(detail) => write!(
+                f,
+                "`meta:schema_version` is corrupt: {detail}\n\
+                 The version marker exists but cannot be decoded. This indicates DB corruption, \
+                 not a version mismatch — no migration applies. Restore from backup."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BootstrapError {}
+
+/// Load, build, and validate a layer from embedded JSON.
+fn load_layer(
+    name: &str,
+    json: &str,
+    parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
+) -> Result<Arc<Layer>, BootstrapError> {
+    let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
+    build_layer_from_resources(name, resources, parent, storage)
+}
+
+/// ESL-sourced variant of [`load_layer`]. Compiles the ESL source into
+/// chain resources via `esl::compile`, then runs the same
+/// build-and-validate pipeline. Used by Phase-8 bootstrap to ship
+/// `ontologies/justification/justification.esl` without committing a parallel
+/// `.json` to keep in sync — single source of truth.
+fn load_esl_layer(
+    name: &str,
+    esl_source: &str,
+    parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
+) -> Result<Arc<Layer>, BootstrapError> {
+    // Compile AGAINST the parent layer, so the source resolves constructors declared lower in
+    // the chain (e.g. `closed-class.esl` uses the `lexicon:Cat` ctor `cat_forall` from the
+    // schema). There was a context-free fallback here for a parentless layer; it was
+    // unreachable, because the ontology list below starts with four JSON documents and the
+    // first ESL entry sits at index 4, so an ESL layer always has a parent. A root ESL layer
+    // is now a hard error rather than a silent compile with no chain.
+    let Some(parent_layer) = parent.as_ref() else {
+        return Err(BootstrapError::CoreOntologyInvalid(vec![
+            crate::validation::ValidationError {
+                resource_id: None,
+                property: None,
+                rule: crate::validation::ValidationRule::TypeMismatch,
+                message: format!(
+                    "bootstrap layer `{name}` is ESL with no parent — an ESL ontology must \
+                     compile against a chain"
+                ),
+            },
+        ]));
+    };
+    let compiled = crate::esl::compile(esl_source, parent_layer);
+    let resources = compiled.map_err(|errs| {
+        BootstrapError::CoreOntologyInvalid(
+            errs.into_iter()
+                .map(|e| crate::validation::ValidationError {
+                    resource_id: None,
+                    property: None,
+                    rule: crate::validation::ValidationRule::TypeMismatch,
+                    message: format!("ESL compile error in bootstrap layer `{name}`: {e:?}"),
+                })
+                .collect(),
+        )
+    })?;
+    build_layer_from_resources(name, resources, parent, storage)
+}
+
+fn build_layer_from_resources(
+    name: &str,
+    resources: Vec<crate::ontology::resource::Resource>,
+    parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
+) -> Result<Arc<Layer>, BootstrapError> {
+    let resource_count = resources.len();
+    let mut builder = LayerBuilder::new(name, parent);
+    for resource in resources {
+        builder
+            .add_resource(resource)
+            .map_err(BootstrapError::Layer)?;
+    }
+    let layer = Arc::new(builder.build(storage));
+
+    let validator = Validator::new(Arc::clone(&layer));
+    let errors = validator.validate();
+    if !errors.is_empty() {
+        tracing::warn!(
+            { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+            layer_name = %name,
+            { field::COUNT } = errors.len(),
+            "embedded ontology validation produced errors"
+        );
+        return Err(BootstrapError::CoreOntologyInvalid(errors));
+    }
+
+    tracing::debug!(
+        { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+        layer_name = %name,
+        { field::LAYER_ID } = %layer.id(),
+        { field::COUNT } = resource_count,
+        "bootstrap layer loaded"
+    );
+
+    Ok(layer)
+}
+
+/// Source format of an embedded bootstrap ontology — selects the loader
+/// ([`load_layer`] for Eigon-JSON, [`load_esl_layer`] for ESL compiled against
+/// its parent).
+#[derive(Clone, Copy)]
+enum OntologyFormat {
+    /// Eigon-JSON (`.json` / `.eigon.json`).
+    Json,
+    /// ESL source, compiled against the parent layer.
+    Esl,
+}
+
+/// One layer of the embedded bootstrap chain: its layer name, embedded source
+/// bytes, and source format.
+struct BootstrapOntology {
+    name: &'static str,
+    source: &'static str,
+    format: OntologyFormat,
+}
+
+/// The embedded bootstrap chain, **root-first**: array order *is* the parent
+/// chain (each layer builds on the one before it). This is the single source of
+/// truth for both [`bootstrap_with_storage`] (which builds + validates the chain)
+/// and [`current_manifest`] (which hashes the sources for D13 seed-drift
+/// detection) — so a layer can never be in one and not the other.
+const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
+    // core — the foundational meta-ontology (Class / Property / is_a / the
+    // primitive data types). Root of the chain (`parent = None`).
+    BootstrapOntology {
+        name: "core",
+        source: include_str!("../../../ontologies/core/core-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // D47's chain-mirrored EigenTT type language was a layer of its own here until it was merged
+    // into core. The namespaces stay separate — `core:` and `eigentt:` name different things — but
+    // the LAYERS could not: core's `param_kind`, `type_name` and `ctor_type` carry `eigentt:Term`
+    // values, so `Term`, `expected_type` and `is_a_type` had already been pulled down into core to
+    // resolve the cycle, and a boundary nothing can load one side of is not a boundary. A namespace
+    // is a naming convention, not a layer assertion (N4).
+    BootstrapOntology {
+        name: "program",
+        source: include_str!("../../../ontologies/program/program-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // program:traces — the per-step evaluation record of a `program:` program: LetTrace, MapTrace,
+    // ReduceTrace, CaseTrace, ConstructTrace, ProjectTrace, ComponentTrace, one for nearly every
+    // construct the layer below declares. Was `reflection`, which named why the vocabulary existed
+    // (the kernel describing itself) rather than what is in it, and so accumulated three unrelated
+    // families. NOT `prov:Trace`: these record how a program EVALUATED, those record how a resource
+    // CAME TO EXIST.
+    BootstrapOntology {
+        name: "program-traces",
+        source: include_str!("../../../ontologies/program/program-traces.json"),
+        format: OntologyFormat::Json,
+    },
+    // prov — the provenance axis (Agent / Activity / the four provenance Traces
+    // and the relations between them), mapped onto W3C PROV-O. Above reflection
+    // because `prov:ProgramTrace.trace_tree` points into the kernel's
+    // evaluation-trace family, which is the one link between the two; nothing
+    // left in reflection points back, so the order is forced in one direction
+    // only. Below obo, which carries `prov:was_attributed_to` on its entries.
+    BootstrapOntology {
+        name: "prov",
+        source: include_str!("../../../ontologies/prov/prov.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // obo — shared OBO meta-vocabulary used by the obograph importer (M9.2): the
+    // four synonym Properties + the `inverseOf` RBox axiom imported GO / ChEBI
+    // layers reference. Depends on reflection (entries carry
+    // `is_a: [DeclaredResource]` + `declared_by`).
+    BootstrapOntology {
+        name: "obo",
+        source: include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "institution",
+        source: include_str!("../../../ontologies/institution/institution-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "runtime",
+        source: include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // formulas (Phase 19d.0.d / D32 §4-5) — FormulaTerm (the shared symbol-algebra
+    // term language across the numerical institutions) + the v1 operator catalog.
+    // Above runtime: `Operator.operator_signature` uses `core:inductive` (19d.0.b).
+    BootstrapOntology {
+        name: "formulas",
+        source: include_str!("../../../ontologies/formulas/formulas-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // `lean-expressions` was here — the chain-mirrored Lean expression form (D40's
+    // `LeanName` / `LeanLevel` / `LeanLevelList` / `LeanExpr` inductives) that
+    // `LeanProofTerm.proposition` referred to. D74 §6.3.1 deleted that slot: the Lean goal is
+    // manufactured FROM the claim and compared with `def_eq`, so nothing recovers a proposition
+    // out of Lean any more and the four inductives named nothing.
+    // lean-runtime-classes (Phase 20a.5a / D28 §10.3) — the Lean language
+    // runtime's authoring-side resource classes (LeanProject / LeanPackage /
+    // LeanPackagePin / LeanEnvironment).
+    BootstrapOntology {
+        name: "lean-runtime-classes",
+        source: include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
+        format: OntologyFormat::Json,
+    },
+    // lean-institution (Phase 20a.4 / D28) — the Lean 4 verification institution
+    // and its v1 surface (LeanProofTerm / qc_proof_check QueryClass / ExportFormat).
+    BootstrapOntology {
+        name: "lean-institution",
+        source: include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
+        format: OntologyFormat::Json,
+    },
+    // reasoning (D39 Phase 8) — the Justification Logic institution's chain
+    // artifacts (ChainWitness predicates, justification:Grounds, justification:Conclusion,
+    // the institution + QueryClasses + ExportFormat). ESL source = single source
+    // of truth. Depends on core / eigentt / reflection / institution.
+    BootstrapOntology {
+        name: "justification",
+        source: include_str!("../../../ontologies/justification/justification.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // statistics (D52 Phase 5) — measurement-statistics ontology (claim schema,
+    // SampleSet sum-types, the seven smart-constructor macros, analysis-plan
+    // classes, the §7 stance markers + QueryClasses). Above reasoning so the
+    // notebook sees both (the D52 → D39 composition).
+    // units (D93) — `units:Quantity : Unit -> Set` and the SI vocabulary: 7 base units, the gram,
+    // 22 named derived units, the SI-accepted non-SI units and 24 prefixes, each with its base
+    // dimension and exact factor. It references only `core` (`core:unit`, `core:rational`), but it
+    // is ESL, and the ESL compiler stamps `prov:was_attributed_to` on every declaration — so it
+    // loads after `prov`, which D93's "nothing else constrains it" missed. Before `statistics`,
+    // whose quantities carry units.
+    BootstrapOntology {
+        name: "units",
+        source: include_str!("../../../ontologies/units/units.esl"),
+        format: OntologyFormat::Esl,
+    },
+    BootstrapOntology {
+        name: "statistics",
+        source: include_str!("../../../ontologies/statistics/statistics.esl"),
+        format: OntologyFormat::Esl,
+    },
+    BootstrapOntology {
+        name: "notebook",
+        source: include_str!("../../../ontologies/notebook/notebook-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // ingest (D53) — PinnedExternalFile (content-hash-tracked external data) +
+    // DatasetSchema. Above reflection (parent of PinnedExternalFile).
+    BootstrapOntology {
+        name: "ingest",
+        source: include_str!("../../../ontologies/ingest/ingest-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // reference — bibliographic references + literature-citation warrants
+    // (DOI-identified `Reference`, CiTO-aligned `cites` / `citation_type`).
+    // Depends on core + reflection.
+    BootstrapOntology {
+        name: "reference",
+        source: include_str!("../../../ontologies/reference/reference.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // logic (D63 §8.3 Phase 0) — propositional primitives over `Prop`
+    // (`logic:False`; And/Or arrive with the connectives). Depends only on core.
+    BootstrapOntology {
+        name: "logic",
+        source: include_str!("../../../ontologies/logic/logic.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // lexicon (D62/D63) — the categorial-grammar SCHEMA (`lexicon:Cat`,
+    // LexicalEntry, SemTerm, feature inductives, the `lexicon:form_index`
+    // ValueIndex). Depends on core / eigentt / reflection / logic.
+    BootstrapOntology {
+        name: "lexicon",
+        source: include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // ontology (D63 §8.5 Slice 3c) — Prop-valued structural relations over the
+    // class lattice (`ontology:is_a` / `ontology:subclass_of`) a predicate
+    // nominal produces. Depends on the lexicon schema (`lexicon:Entity`).
+    BootstrapOntology {
+        name: "ontology",
+        source: include_str!("../../../ontologies/ontology/ontology.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // closed-class (D63 §8.3) — the determiner lexicon (every/each/all/a/some/no,
+    // subject + object) over the schema's `cat_forall` + `lexicon:Entity`.
+    // Domain-independent committed chain data; WordNet content composes with it.
+    BootstrapOntology {
+        name: "closed-class",
+        source: include_str!("../../../ontologies/lexicon/closed-class.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // encoding (D62 §6 / D71) — the encoding-pipeline CONTRACT: DiscourseUnit,
+    // ScopedUnit, EncodedClaim + the discourse-kind classes, DecisionPoint,
+    // AnaphorBinding, CutItem, LexicalGap, ReasoningStructure, ProposalDraw.
+    //
+    // BOOTSTRAPPED because the kernel already depends on it: `dcg::parse::resolve`
+    // hardcodes `urn:eigenius:encoding:EncodedClaim` to find a landed claim's kind
+    // class, and the reasoning crate carried the six kind IRIs as consts. Leaving
+    // the vocabulary in a user layer did not remove that dependency, it only made
+    // it undeclared — `FormalizeDocument` degraded quietly on a chain without it.
+    // Same bar `reasoning` / `statistics` / `lean-institution` already clear.
+    //
+    // D62 §11.3 said this from the start; D71 slice 2 argued the other way to keep
+    // vocabulary edits off the reseed path, and was wrong on the merits — the
+    // dependency was already there and unchecked (`2026-08-20`).
+    //
+    // NOT here: `claim-kind-alignment.esl`. It redeclares the kind classes with
+    // `wn:` / `umlscui:` parents that exist only after a lexicon import, so it is
+    // snapshot-coupled curation, layered by scripts/build-alignment-snapshot.sh
+    // alongside the wordnet↔umls merges.
+    BootstrapOntology {
+        name: "encoding",
+        source: include_str!("../../../ontologies/encoding/encoding.esl"),
+        format: OntologyFormat::Esl,
+    },
+];
+
+/// Bootstrap the Eigenius kernel.
+///
+/// Loads + validates the [`BOOTSTRAP_CHAIN`] ontology layers (core → … →
+/// closed-class) and returns an `ExecutionContext` headed at the tip layer.
+///
+/// Phase 14a-iii: an in-memory cache + backend are created here and shared
+/// across all bootstrap layers and the returned `ExecutionContext`. Persistent
+/// backends (`bootstrap_persistent`) replace the in-memory backend with a
+/// `RocksStore` adapter.
+pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
+    bootstrap_with_storage(crate::layer::LayerStorage::in_memory())
+}
+
+/// Bootstrap with caller-provided storage. Used by `bootstrap_persistent`
+/// (RocksDB-backed) and tests that need a particular storage configuration.
+pub fn bootstrap_with_storage(
+    storage: crate::layer::LayerStorage,
+) -> Result<ExecutionContext, BootstrapError> {
+    let mut parent: Option<Arc<Layer>> = None;
+    for spec in BOOTSTRAP_CHAIN {
+        let layer = match spec.format {
+            OntologyFormat::Json => {
+                load_layer(spec.name, spec.source, parent.clone(), storage.clone())?
+            }
+            OntologyFormat::Esl => {
+                load_esl_layer(spec.name, spec.source, parent.clone(), storage.clone())?
+            }
+        };
+        parent = Some(layer);
+    }
+    let head = parent.expect("BOOTSTRAP_CHAIN must be non-empty");
+
+    Ok(ExecutionContext::new(
+        head,
+        "working",
+        ExecutionMode::ReadWrite,
+        storage,
+    ))
+}
+
+/// Bootstrap against a persistent backend (D13 §4).
+///
+/// Two paths:
+///
+/// - **SEED** (empty backend): run the normal in-memory bootstrap,
+///   then commit each of the five embedded ontology layers
+///   (core → program → reflection → institution → runtime → notebook) to the
+///   backend in parent→child order, record the seed manifest, and
+///   create the `main` branch pointing at the notebook layer.
+/// - **RESUME** (backend has a `main` branch): verify the stored seed
+///   manifest matches the current embedded ontologies' SHA-256 hashes;
+///   if it does, rehydrate the layer chain from the backend. If it
+///   doesn't, return a `ManifestDrift` error with actionable detail.
+///
+/// Phase 14g: presence of `branch:main` is the seed-vs-resume
+/// discriminator. The pre-Phase-14 single-`head` pointer is gone;
+/// branches are the only sanctioned head-pointer surface.
+pub fn bootstrap_persistent(
+    backend: Arc<dyn crate::storage::PersistentBackend>,
+) -> Result<ExecutionContext, BootstrapError> {
+    match backend
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
+    {
+        Some(_) => resume_from_backend(backend),
+        None => seed_backend(backend),
+    }
+}
+
+// --- SEED / RESUME helpers ---
+
+const SEED_MANIFEST_KEY: &str = "seed_manifest_v1";
+
+fn now_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Stamp `meta:schema_version` + `meta:last_writer_version` +
+/// `meta:schema_history` (empty Vec) on a freshly-seeded DB. Called
+/// at the end of `seed_backend`. D24 §2.1.
+fn stamp_schema_version_seed(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<(), BootstrapError> {
+    use crate::storage::version::{
+        encode_schema_version, MigrationRecord, LAST_WRITER_VERSION_KEY, SCHEMA_HISTORY_KEY,
+        SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    backend
+        .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(SCHEMA_VERSION))
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_version): {e}")))?;
+
+    backend
+        .put_meta(
+            LAST_WRITER_VERSION_KEY,
+            env!("CARGO_PKG_VERSION").as_bytes(),
+        )
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(last_writer_version): {e}")))?;
+
+    let empty_history: Vec<MigrationRecord> = Vec::new();
+    let mut history_bytes = Vec::new();
+    ciborium::into_writer(&empty_history, &mut history_bytes)
+        .map_err(|e| BootstrapError::Storage(format!("encode schema_history: {e}")))?;
+    backend
+        .put_meta(SCHEMA_HISTORY_KEY, &history_bytes)
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_history): {e}")))?;
+    Ok(())
+}
+
+/// Read + validate `meta:schema_version` against the kernel's compiled
+/// expectation. Returns `Ok(())` when the DB is at the expected
+/// version (no migration needed); `Err` otherwise. Migration handling
+/// (running registered `Migration` impls) is performed by the caller
+/// when the registry is non-empty — Phase 14 ships an empty registry
+/// so any `from < SCHEMA_VERSION` currently surfaces as
+/// `NoMigrationPath`. D24 §2.
+fn check_and_migrate_schema_version(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<(), BootstrapError> {
+    use crate::storage::version::{
+        decode_schema_version, encode_schema_version, MigrationRecord, MigrationRegistry,
+        LAST_WRITER_VERSION_KEY, SCHEMA_HISTORY_KEY, SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    let stored_bytes = backend
+        .get_meta(SCHEMA_VERSION_KEY)
+        .map_err(|e| BootstrapError::Storage(format!("get_meta(schema_version): {e}")))?;
+
+    let stored = match stored_bytes {
+        Some(bytes) => {
+            decode_schema_version(&bytes).map_err(BootstrapError::SchemaVersionCorrupt)?
+        }
+        None => return Err(BootstrapError::SchemaVersionAbsent),
+    };
+
+    if stored == SCHEMA_VERSION {
+        return Ok(());
+    }
+    if stored > SCHEMA_VERSION {
+        return Err(BootstrapError::SchemaTooNew {
+            stored,
+            kernel: SCHEMA_VERSION,
+        });
+    }
+
+    // Stored < SCHEMA_VERSION: run registered migrations stored → SCHEMA_VERSION.
+    let registry = MigrationRegistry::default();
+    if !registry.has_path(stored, SCHEMA_VERSION) {
+        return Err(BootstrapError::NoMigrationPath {
+            from: stored,
+            to: SCHEMA_VERSION,
+        });
+    }
+
+    let mut current = stored;
+    while current < SCHEMA_VERSION {
+        let migration = registry
+            .get(current)
+            .ok_or(BootstrapError::NoMigrationPath {
+                from: current,
+                to: SCHEMA_VERSION,
+            })?;
+        let next = migration.to_version();
+
+        tracing::info!(
+            { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+            from = current,
+            to = next,
+            description = migration.description(),
+            "applying schema migration"
+        );
+
+        migration
+            .apply(backend)
+            .map_err(|e| BootstrapError::MigrationFailed {
+                from: current,
+                to: next,
+                message: e.to_string(),
+            })?;
+
+        // Re-stamp version + last writer + append history. Three
+        // separate meta writes; the version stamp last so a crash mid-
+        // append leaves the DB at the pre-migration version (the
+        // history is append-only and idempotent at re-run).
+        let history_bytes = backend
+            .get_meta(SCHEMA_HISTORY_KEY)
+            .map_err(|e| BootstrapError::Storage(format!("get_meta(schema_history): {e}")))?
+            .unwrap_or_default();
+        let mut history: Vec<MigrationRecord> = if history_bytes.is_empty() {
+            Vec::new()
+        } else {
+            ciborium::from_reader(history_bytes.as_slice())
+                .map_err(|e| BootstrapError::Storage(format!("decode schema_history: {e}")))?
+        };
+        history.push(MigrationRecord {
+            from: current,
+            to: next,
+            applied_at_ms: now_millis(),
+            kernel_version: env!("CARGO_PKG_VERSION").to_string(),
+        });
+        let mut new_history = Vec::new();
+        ciborium::into_writer(&history, &mut new_history)
+            .map_err(|e| BootstrapError::Storage(format!("encode schema_history: {e}")))?;
+        backend
+            .put_meta(SCHEMA_HISTORY_KEY, &new_history)
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_history): {e}")))?;
+
+        backend
+            .put_meta(
+                LAST_WRITER_VERSION_KEY,
+                env!("CARGO_PKG_VERSION").as_bytes(),
+            )
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(last_writer_version): {e}")))?;
+
+        // Version stamp last — see comment above.
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(next))
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_version): {e}")))?;
+
+        current = next;
+    }
+
+    Ok(())
+}
+
+/// The **bootstrap manifest**: newline-separated `<name>:<sha256_hex>` over [`BOOTSTRAP_CHAIN`] in
+/// chain order, hashing each embedded ontology's CONTENT — see [`content_hash`] for what that
+/// means per format and why it is not the raw source bytes.
+///
+/// This is the content-drift signal a persisted store is stamped with, and the value
+/// [`bootstrap_persistent`] compares on resume — a mismatch is `BootstrapError::ManifestDrift` and the
+/// store cannot be opened. Public because it is a fact callers legitimately need: tooling that builds
+/// or records against a store (the reseed script's `PROVENANCE` stamp, an experiment harness checking
+/// its snapshot is current) should be able to read the same value the drift check uses, rather than
+/// discovering drift by failing to open something.
+pub fn current_manifest() -> Vec<u8> {
+    let mut out = String::new();
+    for spec in BOOTSTRAP_CHAIN {
+        out.push_str(&format!(
+            "{}:{}\n",
+            spec.name,
+            hex::encode(content_hash(spec))
+        ));
+    }
+    out.into_bytes()
+}
+
+/// The content hash of one embedded ontology.
+///
+/// **This used to hash `spec.source.as_bytes()`**, and the comment above it claimed raw bytes were
+/// "exactly the content-drift signal we want". Raw bytes are a SUPERSET of content drift: every
+/// real change is caught, and so is every change that is not. Reindenting a JSON array, rewrapping
+/// a comment, adding a trailing newline — each made every persisted store unresumable and forced a
+/// ~40-minute reseed plus the aligned snapshot, the demo artifacts and the parse baselines. Both
+/// false positives on `2026-08-22` were of that kind, one a comment reword and one a
+/// `json.dumps(indent=2)` reflow that produced ~900 diff lines for five semantic changes.
+///
+/// Each format is reduced to a form that discards presentation and keeps meaning:
+///
+/// - **JSON** — parsed to resources and canonicalised (`eigon_json::canonicalize`, the same
+///   byte form admission hashes). Indentation, key order within a resource and inline-vs-
+///   expanded arrays all vanish; resource ORDER is preserved, because core's declaration order is
+///   load-bearing (D47 §211).
+/// - **ESL** — the TOKEN KINDS, in order. The lexer discards comments and whitespace by
+///   construction, so a reworded comment or a reflowed line is invisible; every semantic edit
+///   still moves the stream. `Token::pos` is deliberately excluded — hashing it would reintroduce
+///   line-number sensitivity and defeat the point.
+///
+/// **Neither form needs the layer chain**, which is what makes this affordable on the resume path.
+/// A stronger notion — the compiled resources of an ESL layer — would need the parent built, since
+/// `load_esl_layer` uses `compile_against_layer`, and resume exists precisely to avoid rebuilding.
+///
+/// A source that cannot be read is a broken build, not a drift signal: the bootstrap would fail on
+/// it moments later, so this asserts rather than falling back to raw bytes, which would silently
+/// change the hash basis for that layer alone.
+fn content_hash(spec: &BootstrapOntology) -> [u8; 32] {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    match spec.format {
+        OntologyFormat::Json => {
+            let resources = crate::ontology::eigon_json::parse_document(spec.source)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "embedded ontology `{}` is not valid Eigon-JSON: {e:?}",
+                        spec.name
+                    )
+                });
+            for r in &resources {
+                h.update(crate::ontology::eigon_json::canonicalize(r));
+            }
+        }
+        OntologyFormat::Esl => {
+            let tokens = crate::esl::lexer::tokenize(spec.source)
+                .unwrap_or_else(|e| panic!("embedded ontology `{}` does not lex: {e}", spec.name));
+            for t in &tokens {
+                h.update(format!("{:?}\n", t.kind));
+            }
+        }
+    }
+    h.finalize().into()
+}
+
+fn seed_backend(
+    backend: Arc<dyn crate::storage::PersistentBackend>,
+) -> Result<ExecutionContext, BootstrapError> {
+    // Build the embedded ontologies ON the persistent storage — the same
+    // "a layer is built on the storage it is persisted to" rule every committed
+    // layer follows, so each layer's derived indexes (materialised at persist,
+    // below) land in the backend. Build touches nothing in the DB (resources
+    // persist via `persist_layer`; index population is deferred to persist;
+    // bloom/cache are in-memory), so the ontologies are still fully validated
+    // before anything reaches the DB — preserving the seed safety property.
+    let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+    let ctx = bootstrap_with_storage(storage)?;
+
+    // Walk the chain from the root (core) up and persist each layer.
+    // Layer chain is head → parent → ... → core, so collect bottom-up.
+    let mut chain: Vec<Arc<Layer>> = Vec::new();
+    let mut cursor = Some(Arc::clone(ctx.head()));
+    while let Some(layer) = cursor {
+        let parent = layer.parent().cloned();
+        chain.push(layer);
+        cursor = parent;
+    }
+    chain.reverse(); // root (core) first
+
+    // `persist` writes each layer's resources *and* its derived indexes to the
+    // store the layer is bound to, which is this `backend` — the layers were
+    // built on its `LayerStorage`. Root first so each layer's text/value index
+    // discovery sees its ancestors' already-persisted triple entries.
+    for layer in &chain {
+        layer
+            .persist()
+            .map_err(|e| BootstrapError::Storage(format!("persist {}: {e}", layer.name())))?;
+    }
+
+    // Phase 14g: create the `main` branch pointing at the notebook layer.
+    // This is the only head-pointer surface from Phase 14 onward —
+    // bootstrap_persistent's seed-vs-resume discriminator above keys off
+    // the presence of `branch:main`.
+    let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+    crate::lattice::update_branch(
+        "main",
+        None,
+        ctx.head().id().clone(),
+        crate::lattice::ConflictPolicy::AllowTrivial,
+        storage,
+        backend.as_ref(),
+    )
+    .map_err(|e| BootstrapError::Storage(format!("create main branch: {e}")))?;
+
+    backend
+        .put_meta(SEED_MANIFEST_KEY, &current_manifest())
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(manifest): {e}")))?;
+
+    // D24: stamp schema version + writer + empty history.
+    stamp_schema_version_seed(backend.as_ref())?;
+
+    Ok(ctx)
+}
+
+fn resume_from_backend(
+    backend: Arc<dyn crate::storage::PersistentBackend>,
+) -> Result<ExecutionContext, BootstrapError> {
+    // D24 §2.2: schema version check first. Refuse to boot before
+    // touching the chain on a version mismatch — there's no point
+    // validating ontology fingerprints against a DB whose shape we
+    // can't safely walk. Migrations (when registered) run inside
+    // this call.
+    check_and_migrate_schema_version(backend.as_ref())?;
+
+    // Manifest check before trusting the chain. If drift is detected we
+    // refuse to boot rather than silently upgrading the ontology in
+    // place (D13 §8).
+    let stored = backend
+        .get_meta(SEED_MANIFEST_KEY)
+        .map_err(|e| BootstrapError::Storage(format!("get_meta(manifest): {e}")))?;
+    let current = current_manifest();
+    match stored {
+        Some(bytes) if bytes == current => {}
+        Some(bytes) => {
+            return Err(BootstrapError::ManifestDrift {
+                stored: String::from_utf8_lossy(&bytes).to_string(),
+                current: String::from_utf8_lossy(&current).to_string(),
+            });
+        }
+        None => {
+            // Missing manifest on a non-empty DB: treat as drift rather
+            // than silently trusting. Users with pre-9a DBs will need a
+            // fresh path (v1 policy per D13 §8).
+            return Err(BootstrapError::ManifestDrift {
+                stored: "(missing)".to_string(),
+                current: String::from_utf8_lossy(&current).to_string(),
+            });
+        }
+    }
+
+    // Phase 14g: load chain from `branch:main` head. The discriminator
+    // in `bootstrap_persistent` already verified the branch exists.
+    let main_head = backend
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
+        .ok_or_else(|| {
+            BootstrapError::Storage(
+                "branch:main present in discriminator but absent in resume — concurrent delete?"
+                    .into(),
+            )
+        })?;
+    let info = backend
+        .load_chain_from(&main_head)
+        .map_err(|e| BootstrapError::Storage(format!("load_chain_from: {e}")))?
+        .ok_or_else(|| BootstrapError::Storage("branch:main pointed at unknown layer".into()))?;
+
+    // Storage backed by the live `PersistentBackend`. Cold-cache reads
+    // hit RocksDB on demand; no separate warming step needed.
+    let storage = crate::layer::LayerStorage::with_persistent(backend);
+
+    let head = crate::layer::build_chain(info, storage.clone());
+
+    Ok(ExecutionContext::new(
+        head,
+        "working",
+        ExecutionMode::ReadWrite,
+        storage,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::{content_hash, BootstrapOntology, OntologyFormat};
+
+    fn json_spec(src: &'static str) -> BootstrapOntology {
+        BootstrapOntology {
+            name: "probe",
+            source: src,
+            format: OntologyFormat::Json,
+        }
+    }
+    fn esl_spec(src: &'static str) -> BootstrapOntology {
+        BootstrapOntology {
+            name: "probe",
+            source: src,
+            format: OntologyFormat::Esl,
+        }
+    }
+
+    /// **Reformatting must not force a reseed.**
+    ///
+    /// The manifest hashed raw source bytes, so any byte change made every persisted store
+    /// unresumable and cost a ~40-minute reseed plus the aligned snapshot, the demo artifacts and
+    /// the parse baselines. Both false positives on `2026-08-22` were presentation-only: a comment
+    /// reword, and a `json.dumps(indent=2)` reflow that produced ~900 diff lines for five semantic
+    /// changes.
+    ///
+    /// These four assertions are the property that fix has to have: presentation is invisible,
+    /// meaning is not.
+    #[test]
+    fn the_manifest_hashes_content_not_presentation() {
+        // JSON — inline vs expanded array, different indentation, reordered keys WITHIN a
+        // resource. All presentation; `canonicalize` sorts keys and minifies.
+        let compact = r#"[{"@id":"urn:eigenius:p:A","urn:eigenius:core:is_a":["urn:eigenius:core:Class"],"urn:eigenius:core:short_name":"A"}]"#;
+        let expanded = r#"[
+          {
+            "urn:eigenius:core:short_name": "A",
+            "@id": "urn:eigenius:p:A",
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:Class"
+            ]
+          }
+        ]"#;
+        assert_eq!(
+            content_hash(&json_spec(compact)),
+            content_hash(&json_spec(expanded)),
+            "a JSON reflow is presentation and must not move the manifest"
+        );
+
+        // …but a real edit does.
+        let renamed = r#"[{"@id":"urn:eigenius:p:A","urn:eigenius:core:is_a":["urn:eigenius:core:Class"],"urn:eigenius:core:short_name":"B"}]"#;
+        assert_ne!(
+            content_hash(&json_spec(compact)),
+            content_hash(&json_spec(renamed)),
+            "changing a property value IS content and must move the manifest"
+        );
+
+        // ESL — comments and whitespace are discarded by the lexer.
+        let plain = r#"namespace p = "urn:eigenius:p";
+class p:Dog { description = "a dog"; }"#;
+        let commented = r#"// A reworded comment — the exact shape that forced a reseed on 2026-08-22.
+namespace p = "urn:eigenius:p";
+
+/* block comment */
+class p:Dog {
+    description = "a dog";
+}"#;
+        assert_eq!(
+            content_hash(&esl_spec(plain)),
+            content_hash(&esl_spec(commented)),
+            "comments and layout are presentation and must not move the manifest"
+        );
+
+        let edited = r#"namespace p = "urn:eigenius:p";
+class p:Cat { description = "a dog"; }"#;
+        assert_ne!(
+            content_hash(&esl_spec(plain)),
+            content_hash(&esl_spec(edited)),
+            "renaming a class IS content and must move the manifest"
+        );
+    }
+
+    use super::*;
+    use crate::ontology::iri::Iri;
+
+    #[test]
+    fn bootstrap_succeeds() {
+        let ctx = bootstrap().unwrap();
+        // The chain, root first, must be BOOTSTRAP_CHAIN in declaration order: each layer's parent
+        // is the one declared before it, and core is the root.
+        //
+        // This used to walk `parent()` a fixed number of hops into named locals that nothing
+        // checked — two were already mislabelled (`reasoning` for justification, `reflection` for
+        // program-traces) — so it tested the chain's LENGTH, and adding any layer broke it.
+        let mut names = Vec::new();
+        let mut layer = Some(ctx.head());
+        while let Some(l) = layer {
+            names.push(l.name().to_string());
+            layer = l.parent();
+        }
+        names.reverse();
+        let declared: Vec<&str> = BOOTSTRAP_CHAIN.iter().map(|o| o.name).collect();
+        assert_eq!(names, declared);
+        let mut root = ctx.head();
+        while let Some(p) = root.parent() {
+            root = p;
+        }
+        assert!(root.is_root());
+        assert_eq!(root.name(), "core");
+    }
+
+    #[test]
+    fn can_resolve_core_resources() {
+        let ctx = bootstrap().unwrap();
+        let class_iri = Iri::parse("urn:eigenius:core:Class").unwrap();
+        let resolved = ctx.resolve(&class_iri);
+        assert!(
+            resolved.is_some(),
+            "should resolve Class from core ontology"
+        );
+    }
+
+    #[test]
+    fn can_resolve_logic_and_lexicon() {
+        // The logic (D63 §8.3) + lexicon (D62/D63) layers are bootstrapped: the
+        // propositional bottom and the categorial-grammar schema resolve from a
+        // fresh context.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:logic:False",
+            "urn:eigenius:lexicon:Cat",
+            "urn:eigenius:lexicon:LexicalEntry",
+            "urn:eigenius:lexicon:SemTerm",
+            "urn:eigenius:lexicon:Entity",
+            // closed-class determiners (D63 §8.3) — committed chain data.
+            "urn:eigenius:lexicon:every_subj",
+            "urn:eigenius:lexicon:no_obj",
+            "urn:eigenius:lexicon:forall_sem",
+        ] {
+            assert!(
+                ctx.resolve(&Iri::parse(iri).unwrap()).is_some(),
+                "bootstrap should resolve {iri}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_reference_ontology() {
+        let ctx = bootstrap().unwrap();
+        // The bibliographic class + a CiTO-aligned citation-type individual
+        // both resolve from the seeded reference layer.
+        for iri in [
+            "urn:eigenius:reference:Reference",
+            "urn:eigenius:reference:Citation",
+            "urn:eigenius:reference:CitationType",
+            "urn:eigenius:reference:cites_as_evidence",
+            "urn:eigenius:reference:citation_type",
+        ] {
+            assert!(
+                ctx.resolve(&Iri::parse(iri).unwrap()).is_some(),
+                "should resolve {iri} from the reference ontology"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_eigentt_type_expr() {
+        // D47: the chain-mirrored EigenTT type fragment lives at
+        // urn:eigenius:eigentt:Term and is loaded just above the core
+        // layer.
+        let ctx = bootstrap().unwrap();
+        let iri = Iri::parse("urn:eigenius:eigentt:Term").unwrap();
+        let resolved = ctx
+            .resolve(&iri)
+            .expect("should resolve eigentt:Term from the eigentt-type-fragment layer");
+        let is_a = resolved.is_a();
+        let inductive_type_iri = Iri::parse("urn:eigenius:core:InductiveType").unwrap();
+        assert!(
+            is_a.iter().any(|i| i == &inductive_type_iri),
+            "eigentt:Term should be an InductiveType; is_a = {is_a:?}"
+        );
+    }
+
+    #[test]
+    fn can_resolve_all_core_classes() {
+        let ctx = bootstrap().unwrap();
+        for class_name in [
+            "Class",
+            "Property",
+            "DataType",
+            "Format",
+            "Encoding",
+            "ConditionalRequirement",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class_name}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve core class {class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_core_properties() {
+        let ctx = bootstrap().unwrap();
+        for prop in [
+            "is_a",
+            "description",
+            "short_name",
+            "data_type",
+            "requires",
+            "recommends",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prop}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve core property {prop}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_data_types() {
+        let ctx = bootstrap().unwrap();
+        for dt in [
+            "string",
+            "integer",
+            "float",
+            "boolean",
+            "resource",
+            "resource_array",
+            "value_array",
+            "json",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{dt}")).unwrap();
+            assert!(ctx.resolve(&iri).is_some(), "should resolve data type {dt}");
+        }
+    }
+
+    #[test]
+    fn can_resolve_formats() {
+        let ctx = bootstrap().unwrap();
+        for fmt in ["date", "datetime", "time", "iri", "uuid", "regex"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:formats:{fmt}")).unwrap();
+            assert!(ctx.resolve(&iri).is_some(), "should resolve format {fmt}");
+        }
+    }
+
+    /// D43 §3.1 — `core:TextIndex` and `core:VectorIndex` Class
+    /// declarations resolve from the core ontology. M1 deliverable.
+    #[test]
+    fn can_resolve_d43_index_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in ["TextIndex", "VectorIndex"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index class {class}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — enum Classes that narrow `vec_distance` /
+    /// `vec_strategy` / `vec_embedding_policy` resolve from the core
+    /// ontology, plus each of their declared Resource instances.
+    #[test]
+    fn can_resolve_d43_enum_classes_and_instances() {
+        let ctx = bootstrap().unwrap();
+        for class in ["DistanceMetric", "VectorStrategy", "EmbeddingPolicy"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum class {class}"
+            );
+        }
+
+        for (prefix, instance) in [
+            ("distances", "cosine"),
+            ("distances", "l2"),
+            ("distances", "dot"),
+            ("strategies", "flat"),
+            ("strategies", "hnsw"),
+            ("strategies", "auto"),
+            ("embedding_policies", "eager_on_load"),
+            ("embedding_policies", "lazy_on_query"),
+            ("embedding_policies", "manual"),
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prefix}:{instance}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum instance {prefix}:{instance}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — Properties carried by TextIndex / VectorIndex
+    /// Resources resolve from the core ontology.
+    #[test]
+    fn can_resolve_d43_index_properties() {
+        let ctx = bootstrap().unwrap();
+        for prop in [
+            "target_property",
+            "text_analyzer",
+            "vec_model",
+            "vec_dim",
+            "vec_distance",
+            "vec_strategy",
+            "vec_hnsw_m",
+            "vec_hnsw_ef_construction",
+            "vec_embedding_policy",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prop}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index property {prop}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_program_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in [
+            "Program",
+            "Let",
+            "Apply",
+            "Var",
+            "Lambda",
+            "Case",
+            "Branch",
+            "Pair",
+            "Construct",
+            "Project",
+            "Map",
+            "Reduce",
+            "Literal",
+            "Component",
+            "CapabilityLevel",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:program:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve program class {class}"
+            );
+        }
+    }
+
+    /// Every `program:Component` the bootstrap declares is implemented somewhere.
+    ///
+    /// Replaces a hand-maintained list of names to resolve, which could only ever confirm that a
+    /// declaration exists — the property that was already true of `components:Combine`, `Extract`
+    /// and `Transform`, declared `implementation: "builtin"` and `deterministic: true` while
+    /// being implemented nowhere. Three of the four components declaring determinism were
+    /// phantoms, and an unregistered IRI evaluated to a stuck neutral that committed with a
+    /// `ProgramTrace` over a step that never ran. Deleting the three declarations
+    /// fixes the instances; checking the declarations against the implementations is what stops
+    /// a fourth.
+    ///
+    /// The two implementation sites are [`ComponentRegistry::default`] (in-process) and
+    /// `server::lifecycle::REMOTE_COMPONENTS` (dispatched to the orchestrator).
+    #[test]
+    fn every_declared_component_is_implemented() {
+        let component_class = Iri::parse("urn:eigenius:program:Component").unwrap();
+
+        let registry = crate::program::component::ComponentRegistry::default();
+        let implemented: std::collections::BTreeSet<String> = registry
+            .list()
+            .into_iter()
+            .chain(
+                crate::server::lifecycle::REMOTE_COMPONENTS
+                    .iter()
+                    .map(|s| (*s).to_string()),
+            )
+            .collect();
+
+        let program_json = include_str!("../../../ontologies/program/program-ontology.json");
+        let declared: Vec<String> = eigon_json::parse_document(program_json)
+            .expect("the program ontology parses")
+            .into_iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &component_class))
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
+
+        assert!(
+            !declared.is_empty(),
+            "the bootstrap declares no `program:Component` at all, so this test checks nothing"
+        );
+
+        let phantom: Vec<&String> = declared
+            .iter()
+            .filter(|iri| !implemented.contains(*iri))
+            .collect();
+        assert!(
+            phantom.is_empty(),
+            "these components are declared and implemented nowhere — a program applying one \
+             fails `ComponentDispatchFailed` at run time rather than at commit: {phantom:?}"
+        );
+    }
+
+    #[test]
+    fn can_resolve_program_trace_classes() {
+        let ctx = bootstrap().unwrap();
+        // Only the EVALUATION family is left here. The provenance traces
+        // (ProgramTrace / DeclarationTrace / ObservationTrace / VerificationTrace)
+        // moved to `prov`, which is what `prov_layer_smoke.rs` covers; the two
+        // families had shared the word `Trace` and nothing else.
+        for class in [
+            "Trace",
+            "ComponentTrace",
+            "PureTrace",
+            "LetTrace",
+            "MapTrace",
+            "CaseTrace",
+            "ConstructTrace",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:program:traces:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve program:traces class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_epistemic_grade_vocabulary_is_gone() {
+        // The four `epistemic:*` individuals were the stored grade, and a stored
+        // grade conflates the two axes: how a resource came to exist is
+        // provenance and applies to everything, while what evidence exists for
+        // its proposition is warrant and applies only to resources carrying one.
+        // Warrant is now computed from a justification term and stored nowhere,
+        // so a resource that resolved one of these was asserting a grade nothing
+        // checked.
+        let ctx = bootstrap().unwrap();
+        for status in ["declared", "observed", "derived", "verified"] {
+            let iri = Iri::parse(&format!("urn:eigenius:reflection:epistemic:{status}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_none(),
+                "epistemic status `{status}` must not resolve — the grade vocabulary is deleted"
+            );
+        }
+        for class in [
+            "urn:eigenius:reflection:EpistemicStatus",
+            "urn:eigenius:reflection:DeclaredResource",
+            "urn:eigenius:reflection:ObservedResource",
+            "urn:eigenius:reflection:DerivedResource",
+            "urn:eigenius:reflection:VerifiedResource",
+        ] {
+            let iri = Iri::parse(class).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_none(),
+                "grade class `{class}` must not resolve"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_institution_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in [
+            "Institution",
+            "ExportFormat",
+            "ImportFormat",
+            "QueryClass",
+            "Comorphism",
+            "Verdict",
+            "RuntimeKind",
+            "DispatchRole",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:institution:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve institution class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_dispatch_roles() {
+        let ctx = bootstrap().unwrap();
+        for role in ["on_demand", "auto_on_load", "decidable"] {
+            let iri =
+                Iri::parse(&format!("urn:eigenius:institution:dispatch_roles:{role}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve dispatch role {role}"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_resolves_the_justification_layer_artifacts() {
+        // The indexed inductive (justification:Grounds) and the
+        // two resource classes, plus the three witness predicates the certificate ctors
+        // reference — those now resolve from CORE, which is the point of the P7 move: the
+        // kernel constructs their inhabitants, so they cannot be owned by a layer above it.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:witness:IsDeclaredAs",
+            "urn:eigenius:witness:IsObservedAs",
+            "urn:eigenius:witness:IsVerifiedAs",
+            "urn:eigenius:justification:Grounds",
+            "urn:eigenius:justification:Conclusion",
+            "urn:eigenius:justification:Declaration",
+        ] {
+            let parsed = Iri::parse(iri).unwrap();
+            assert!(
+                ctx.resolve(&parsed).is_some(),
+                "bootstrap should resolve justification-layer artifact `{iri}`"
+            );
+        }
+    }
+
+    /// `core:implicit_args` survives the whole round trip: ESL clause, chain property, decoded
+    /// `InductiveCtorDecl::implicit`.
+    ///
+    /// Positions, not just presence. The list is authored as names precisely so a name and the
+    /// telescope cannot drift apart, and this is where the translation lands.
+    #[test]
+    fn the_certificates_implicit_binders_reach_the_kernel_declaration() {
+        let ctx = bootstrap().unwrap();
+        let iri = Iri::parse("urn:eigenius:justification:Grounds").unwrap();
+        let resource = ctx
+            .resolve(&iri)
+            .expect("justification:Grounds is chain-resident");
+        let decl = match crate::program::ground::resolve_inductive_type(&iri, &resource, ctx.head())
+            .expect("justification:Grounds resolves as an inductive")
+        {
+            crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected an inductive type former, got {other:?}"),
+        };
+        let flags = |name: &str| {
+            decl.ctors
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("no constructor `{name}`"))
+                .implicit
+                .clone()
+        };
+        // `app : forall (A : Prop, B : Prop) => Cert(A -> B) -> Cert(A) -> Cert(B)`
+        assert_eq!(flags("app"), vec![true, true, false, false]);
+        // `sum_l : forall (P : Prop) => Cert(P) -> Cert(P) -> Cert(P)`
+        assert_eq!(flags("sum_l"), vec![true, false, false]);
+        assert_eq!(flags("sum_r"), vec![true, false, false]);
+        // The grounding constructors write everything: the `iri` IS the author's citation, and
+        // eliding it would mean never naming what a claim rests on.
+        for ground in ["declared", "observed", "verified"] {
+            assert!(
+                flags(ground).is_empty(),
+                "`{ground}` declares nothing implicit"
+            );
+        }
+        // `instantiate` hides `T` and `P`, writing only the instance and the premise.
+        //
+        // This asserted the opposite — that nothing was implicit, because `?P x` against the
+        // expected index is not a pattern and cannot be solved. That reasoning was about the
+        // wrong equation. `P` is determined from the PREMISE, where `?P y` is a meta applied to
+        // one distinct bound variable — the Miller pattern, with a unique solution — and `T`
+        // falls out of the same unification's domain. What is genuinely unsolvable is the
+        // expected-index equation, which is why `x` stays explicit.
+        assert_eq!(flags("instantiate"), vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn nothing_the_reasoning_institution_declared_still_resolves() {
+        // P7 deleted the Reasoning institution, its ExportFormat, all four QueryClasses, and
+        // the five input/output classes that existed only to shape those queries.
+        // ValidateJustification was absorbed into commit by P2, EntailmentQuery's question is
+        // a witness-index lookup, ConsistencyCheck returned Undecidable for every non-empty
+        // input, and ProjectJustification's algebra moved to `kernel/src/justification/` at
+        // P6.0. With no handler left the institution hosted nothing.
+        //
+        // `urn:eigenius:reasoning` names nothing at all now. The `justification:` entries
+        // below are the request and report shapes whose only route was a deleted QueryClass —
+        // they are listed here rather than left declared, because a shape with no writer is
+        // the reserved-IRI pattern this project rejects.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:reasoning:reasoning_institution",
+            "urn:eigenius:reasoning:ef_justification",
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+            "urn:eigenius:reasoning:qc_project_justification",
+            "urn:eigenius:justification:EntailmentRequest",
+            "urn:eigenius:justification:ConsistencyRequest",
+            // The projection request/report pair went with the QueryClass that routed
+            // between them. The ALGEBRA is live in `kernel/src/justification/`; what is
+            // gone is a chain-resident shape nothing ever wrote.
+            "urn:eigenius:justification:ProjectionRequest",
+            "urn:eigenius:justification:Projection",
+            "urn:eigenius:justification:subject_sentence",
+            "urn:eigenius:justification:counterfactual_iri",
+            "urn:eigenius:justification:support_count",
+            "urn:eigenius:justification:fully_verified",
+            "urn:eigenius:justification:declared_grounds",
+            "urn:eigenius:justification:observed_grounds",
+            "urn:eigenius:justification:verified_grounds",
+            "urn:eigenius:justification:survives_without",
+        ] {
+            let parsed = Iri::parse(iri).unwrap();
+            assert!(
+                ctx.resolve(&parsed).is_none(),
+                "`{iri}` was retired at P7 and must not resolve"
+            );
+        }
+    }
+
+    // --- D24 schema-version tests ---
+
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::version::{
+        decode_schema_version, encode_schema_version, MigrationRecord, LAST_WRITER_VERSION_KEY,
+        SCHEMA_HISTORY_KEY, SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    #[test]
+    fn seed_stamps_schema_version() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ctx = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        let stored = backend
+            .get_meta(SCHEMA_VERSION_KEY)
+            .unwrap()
+            .expect("schema_version stamped on seed");
+        assert_eq!(decode_schema_version(&stored).unwrap(), SCHEMA_VERSION);
+
+        let writer = backend
+            .get_meta(LAST_WRITER_VERSION_KEY)
+            .unwrap()
+            .expect("last_writer_version stamped on seed");
+        assert_eq!(
+            std::str::from_utf8(&writer).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+
+        let history_bytes = backend
+            .get_meta(SCHEMA_HISTORY_KEY)
+            .unwrap()
+            .expect("schema_history stamped on seed");
+        let history: Vec<MigrationRecord> =
+            ciborium::from_reader(history_bytes.as_slice()).unwrap();
+        assert!(history.is_empty(), "fresh seed has no migration history");
+    }
+
+    #[test]
+    fn resume_succeeds_when_version_matches() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+
+        // Seed.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+        // Resume — same backend, same version.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+    }
+
+    #[test]
+    fn resume_refuses_when_version_absent_on_non_empty_db() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+
+        // Seed, then strip the schema_version key to simulate a
+        // pre-marker DB.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+        backend.delete_meta(SCHEMA_VERSION_KEY).unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        assert!(
+            matches!(err, BootstrapError::SchemaVersionAbsent),
+            "expected SchemaVersionAbsent, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn resume_refuses_when_version_too_new() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Stamp a version higher than the kernel expects.
+        backend
+            .put_meta(
+                SCHEMA_VERSION_KEY,
+                &encode_schema_version(SCHEMA_VERSION + 5),
+            )
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        match err {
+            BootstrapError::SchemaTooNew { stored, kernel } => {
+                assert_eq!(stored, SCHEMA_VERSION + 5);
+                assert_eq!(kernel, SCHEMA_VERSION);
+            }
+            other => panic!("expected SchemaTooNew, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_refuses_when_no_migration_path() {
+        // Phase 14 ships SCHEMA_VERSION = 1 and an empty registry, so
+        // any stored < SCHEMA_VERSION (impossible until v2 lands) would
+        // have no path. Simulate by stamping v0 even though that's not
+        // a real version — the boot check decodes 0 as a u32 and looks
+        // for a 0→1 migration, finds none, refuses.
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Force stored back to 0 to simulate a pre-v1 DB that
+        // somehow got stamped (real pre-v1 DBs would hit
+        // SchemaVersionAbsent above).
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(0))
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        match err {
+            BootstrapError::NoMigrationPath { from, to } => {
+                assert_eq!(from, 0);
+                assert_eq!(to, SCHEMA_VERSION);
+            }
+            other => panic!("expected NoMigrationPath, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_refuses_when_version_corrupt() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Stamp a 3-byte (wrong-length) value.
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &[0x00, 0x00, 0x01])
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        assert!(
+            matches!(err, BootstrapError::SchemaVersionCorrupt(_)),
+            "expected SchemaVersionCorrupt, got {err:?}"
+        );
+    }
+
+    /// Confirm that a kernel-emitted Verdict resource (the shape
+    /// AutoOnLoad fires-and-emits at every StatisticalAnalysisPlan /
+    /// justification:Conclusion commit per D14 §5.6) validates cleanly. The
+    /// resource carries `core:ctor_name` to record which Verdict ctor
+    /// (Holds / Fails / Undecidable) the institution returned — same
+    /// property declared on InductiveCtor for declared-ctor names.
+    /// The property's `domain` must include `Verdict` so the
+    /// retroactive-validate pass (which walks the merged chain view
+    /// looking for property carriers) doesn't trip on the AutoOnLoad-
+    /// emitted Verdict the second time the same notebook cell runs.
+    #[test]
+    fn kernel_emitted_verdict_validates_cleanly() {
+        use crate::ontology::resource::Value;
+        use crate::ontology::well_known as wk;
+        use crate::validation::Validator;
+        use std::sync::Arc;
+
+        let ctx = bootstrap().unwrap();
+        let mut builder =
+            crate::layer::LayerBuilder::new("test-verdict", Some(Arc::clone(ctx.head())));
+        let mut r = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:verdict:test:abc").unwrap(),
+        );
+        r.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
+        );
+        r.set(
+            Iri::parse(wk::CTOR_NAME).unwrap(),
+            Value::String("Holds".to_string()),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:institution:verdict_subject").unwrap(),
+            Value::String("urn:eigenius:test:subject".to_string()),
+        );
+        builder.add_resource(r).unwrap();
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let domain_violations: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == crate::validation::ValidationRule::DomainViolation)
+            .collect();
+        assert!(
+            domain_violations.is_empty(),
+            "Verdict resource must not trigger DomainViolation on `core:ctor_name` — the \
+             AutoOnLoad-emitted Verdict reaches every commit's retroactive-validate pass; \
+             got: {domain_violations:#?}"
+        );
+    }
+
+    /// D52 Phase 5 — confirm the statistics-layer macros (smart
+    /// constructors like `stats:SingleSampleEstimate`) are reachable
+    /// from notebook-cell ESL via `esl::compile_full`. This is the
+    /// load-bearing path for the [stats-and-reasoning notebook]
+    /// (../../../notebooks/examples/stats-and-reasoning.json): the
+    /// server-side `parse_resources` calls `compile_full` with the
+    /// branch's head layer, which seeds the compiler's macro table
+    /// from `collect_macros_from_layer` walking parent layers. If
+    /// statistics.esl's macros didn't land in the bootstrap, or if
+    /// the server's compile path bypassed the layer, this would
+    /// reject with `macro X is not declared in this file`.
+    #[test]
+    fn notebook_can_invoke_statistics_macros_via_compile_full() {
+        use std::sync::Arc;
+        let ctx = bootstrap().unwrap();
+        let head = ctx.head();
+        let index = Arc::new(crate::institution::registry::InstitutionIndex::default());
+
+        let sample_set_cell = r#"
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace prov       = "urn:eigenius:prov";
+namespace stats      = "urn:eigenius:measurements";
+namespace screen     = "urn:eigenius:demo:screen";
+
+resource screen:act_kinase_glo_plate_2026_03_11 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-11";
+    core:short_name = "act_kinase_glo_plate_2026_03_11";
+}
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_11;
+    prov:observed_at = "2026-03-11T10:18:42Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],
+        BiologicalReplication(),
+    );
+}
+"#;
+
+        let resources =
+            crate::esl::compile_full(sample_set_cell, index, head).unwrap_or_else(|errs| {
+                panic!(
+                    "stats:SingleSampleEstimate macro should resolve from the bootstrapped \
+                     statistics layer via compile_full; got: {errs:?}"
+                )
+            });
+        assert!(
+            !resources.is_empty(),
+            "should compile to at least one resource"
+        );
+    }
+}

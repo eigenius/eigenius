@@ -1,0 +1,131 @@
+// C-0011 — "two limbs, and they fail differently", as types rather than as a field.
+//
+// D100 rung 2. The claim, `kind: marked`:
+//
+//     «Ile380Thr is very likely tolerated, and — more decisive than that — the risk it carries is
+//      bounded rather than open-ended.»
+//
+// Its certificate rejects it, and says why:
+//
+//     reading: Two limbs, and they fail differently. 'Bounded rather than open-ended' rests on
+//              hemizygosity (C-0013 certified) and loss-of-function mechanism (certified), and it
+//              HOLDS. 'Very likely tolerated' rests on …
+//     premise_failure: C-0100 (rejected: gnomAD cannot establish health), C-0024 (blocked on 'ever')
+//     verdict: rejected
+//
+// `premise_failure` is a FIELD the procedure added because, in the collaborator's words, "there is
+// no verdict for 'the inference is sound but a premise failed'. I hit that twice and had to route
+// around it." This file asks whether Eigenius can state it instead of recording it.
+//
+// It can, and the shape is forced by the grounding vocabulary rather than chosen. `Grounds` has
+// seven constructors and NO CONJUNCTION INTRODUCTION — `declared`, `observed`, `verified`, `app`,
+// `sum_l`, `sum_r`, `instantiate`. So `Grounds(A ∧ B)` cannot be assembled from `Grounds(A)` and
+// `Grounds(B)`; the conjunction must be DECLARED as a bridge and eliminated with `app`, exactly as
+// justification.esl says of implication: "there is no deduction theorem, so a bridge between
+// vocabularies cannot be derived; it must be Declared."
+//
+// With that bridge in hand, the failure is the missing ARGUMENT, not a missing verdict:
+//
+//     app( app(bridge, groundsA), groundsB )   needs a term of `Grounds(B)`
+//
+// and the rejected premise means no such term exists. The inference is sound — the bridge is
+// declared and grounded — and the claim is unprovable anyway. That is the distinction the
+// collaborator had no verdict for.
+
+namespace core          = "urn:eigenius:core";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace logic         = "urn:eigenius:logic";
+namespace variant       = "urn:eigenius:variant";
+namespace xiap          = "urn:eigenius:uab:xiap";
+
+// The edited allele the report is about — the bystander substitution, not C-0020's subject.
+resource xiap:p_Ile380Thr : variant:ProteinAllele {
+    variant:reference = "HGNC:592:p";
+    variant:start     = 380;
+    variant:end       = 380;
+    variant:ref_state = "Ile";
+    variant:alt       = "Thr";
+    variant:hgvs      = "p.Ile380Thr";
+    core:description  = "The bystander edit an adenine base editor installs alongside the intended correction. The report's question is whether it is an acceptable risk.";
+}
+
+// ── The two limbs ─────────────────────────────────────────────────────────────────────────────
+
+// «the risk a carries is bounded rather than open-ended» — limb A, which the certificate says HOLDS.
+axiom xiap:RiskBounded : variant:ProteinAllele -> Prop
+
+// «a is very likely tolerated» — limb B, whose premises C-0100 and C-0024 failed.
+axiom xiap:LikelyTolerated : variant:ProteinAllele -> Prop
+
+// ── Limb A's ground: declared, standing in for the certified premise chain ────────────────────
+
+resource xiap:warrant_bounded : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_bounded";
+    core:description       = "Hemizygosity (C-0013, certified) and a loss-of-function mechanism (C-0016, C-0205, C-0207, certified). Stands in for the certified premise chain, which this experiment does not re-derive; what rung 2 is about is what happens at the conjunction, not how each limb was established.";
+}
+
+resource xiap:bounded_holds : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_bounded;
+    prov:rationale          = "Limb A on certified premises. The certificate's own reading: 'it holds'.";
+
+    eigentt:proposition = type_expr( xiap:RiskBounded(xiap:p_Ile380Thr) );
+}
+
+resource xiap:bounded_holds_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:bounded_holds;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_bounded;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// Limb B is deliberately ungrounded. C-0100 was rejected — "gnomAD cannot establish health" — and
+// C-0024 blocked on «ever». No declaration, no trace, and therefore no witness for the kernel to
+// synthesize: `Grounds(LikelyTolerated(p_Ile380Thr))` has no inhabitant.
+
+// ── The conjunction bridge, declared because it cannot be derived ─────────────────────────────
+
+resource xiap:warrant_conjunction : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_conjunction";
+    core:description       = "Conjunction introduction for these two propositions. Declared rather than derived because justification:Grounds has no conjunction constructor: a claim that asserts two things at once needs its combination grounded like any other bridge.";
+}
+
+resource xiap:both_limbs_rule : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_conjunction;
+    prov:rationale          = "The claim asserts both limbs. Grounding the conjunction needs this rule because Grounds offers no conjunction introduction — the same reason justification.esl gives for implication: there is no deduction theorem.";
+
+    eigentt:proposition = type_expr(
+        xiap:RiskBounded(xiap:p_Ile380Thr) ->
+            xiap:LikelyTolerated(xiap:p_Ile380Thr) ->
+                logic:And( xiap:RiskBounded(xiap:p_Ile380Thr),
+                           xiap:LikelyTolerated(xiap:p_Ile380Thr) )
+    );
+}
+
+resource xiap:both_limbs_rule_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:both_limbs_rule;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_conjunction;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// ── Limb A alone commits ──────────────────────────────────────────────────────────────────────
+
+resource xiap:concl_bounded : justification:Conclusion {
+    core:description = "RiskBounded(p.Ile380Thr) — limb A on its own. Commits: its declaration is witnessed, so the ground is there.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:uab:xiap:bounded_holds",
+                   xiap:RiskBounded(xiap:p_Ile380Thr),
+                   ()
+               )),
+               type_expr(justification:Grounds( xiap:RiskBounded(xiap:p_Ile380Thr) )) );
+}

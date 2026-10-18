@@ -1,0 +1,65 @@
+---
+// Blog index. Standalone posts are reverse-chronological; a series is
+// grouped and ordered by part ascending, so Part I reads first.
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import PostCard from "../../components/PostCard.astro";
+import { getIndexEntries } from "../../lib/posts";
+
+const entries = await getIndexEntries();
+---
+
+<BaseLayout
+  title="Blog — Eigenius"
+  description="Notes and articles on typed knowledge graphs, warranted reasoning, and building auditable AI research agents."
+  current="blog"
+>
+  <section class="section">
+    <div class="section-inner">
+      <span class="section-eyebrow">Blog</span>
+      <h1 class="section-title">Notes and articles</h1>
+      <p class="section-prose">
+        Writing on typed knowledge graphs, the four-warrant taxonomy, and
+        what it takes to make an AI research agent show its work.
+      </p>
+
+      {
+        entries.length === 0 ? (
+          <p class="section-prose post-empty">No posts yet.</p>
+        ) : (
+          <div class="post-entries">
+            {entries.map((entry) =>
+              entry.kind === "series" ? (
+                <section class="post-series">
+                  <header class="post-series-header">
+                    <span class="post-series-label">Series</span>
+                    <h2 class="post-series-name">{entry.name}</h2>
+                    <p class="post-series-count">
+                      {entry.posts.length} parts · read in order
+                    </p>
+                  </header>
+                  <ol class="post-list post-list-series">
+                    {entry.posts.map((post) => (
+                      <li class="post-item">
+                        <PostCard post={post} />
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : (
+                <ul class="post-list">
+                  <li class="post-item">
+                    <PostCard post={entry.post} />
+                  </li>
+                </ul>
+              ),
+            )}
+          </div>
+        )
+      }
+
+      <p class="section-footnote">
+        Posts are also available as an <a href="/rss.xml">RSS feed</a>.
+      </p>
+    </div>
+  </section>
+</BaseLayout>

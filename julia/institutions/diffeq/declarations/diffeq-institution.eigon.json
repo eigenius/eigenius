@@ -1,0 +1,59 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:diffeq",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "DiffEq",
+    "urn:eigenius:core:description": "Ordinary-differential-equation institution backed by `OrdinaryDiffEq.jl`. v1 scope: validates `OdeSolution` claims by re-integrating the referenced `OdeProblem` with the claimed algorithm + tolerances and confirming the final state matches within tolerance. Future scope (D27 §4.5): `ReproducibleIntegration` claims with trajectory hashing for bit-reproducibility audits, OnDemand `qc_diffeq_solve` exposing on-the-fly integration to FIBER queries, sensitivity analysis, the `Catalyst → DiffEq` comorphism for time-course simulation of reaction networks (the natural pairing for the kinase mechanism the Catalyst tutorial introduces).",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:diffeq",
+    "urn:eigenius:institution:institution_name": "DiffEq",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:diffeq:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:signatures:validate_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_solution",
+    "urn:eigenius:core:description": "Julia entry point that takes an `OdeSolution` mirror struct and returns a `Verdict`. The handler rebuilds the `OdeProblem` from `solution.problem` (parses the RHS source, packs ICs/parameters/tspan), looks up the algorithm in the per-name registry, calls `solve(prob, alg; abstol, reltol)`, checks `successful_retcode(sol)`, and per-component-compares `sol.u[end]` against the claim's `final_state`. Holds on a successful re-integration that matches; Fails on a mismatch or solver-internal failure when success was claimed; Undecidable on indeterminate solver states (`MaxIters`, `ConvergenceFailure`, etc., per D27's verified-API ReturnCode enum).",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_solution",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:diffeq:OdeSolution"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:query_classes:solution_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "solution_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `OdeSolution` resource. Re-integrates the referenced problem and produces the canonical D14 Verdict tri-state. A `Fails` verdict rejects the gated commit per D31 §6.3 — the chain only persists OdeSolution claims whose final state the institution can independently reproduce.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:diffeq:OdeSolution",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:diffeq:signatures:validate_solution",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:diffeq"
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:signatures:reify_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "reify_problem",
+    "urn:eigenius:core:description": "Julia entry point for the target-side reify of the `Catalyst → DiffEq` Comorphism (D14 §9.3 step 4). The comorphism's typed middle is the identity Lambda on `OdeProblem` (D32 §6.2 generalised) — Catalyst produces a chain-typed `OdeProblem` with FormulaTerm RHS via `compile_to_ode`, and DiffEq speaks the same shape, so the reify is identity at the boundary. The Julia handler returns its `OdeProblem` argument unchanged; the function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism reify calls through the substrate uniformly with `query` and `extract_typed`, rather than special-casing `no-op` procedures kernel-side.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "reify_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:diffeq:OdeProblem"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:diffeq:OdeProblem"
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:formats:if_diffeq_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_diffeq_problem",
+    "urn:eigenius:core:description": "Typed inbound constructor for `OdeProblem`: reifies a FormulaTerm-typed OdeProblem payload as itself (identity reify — both source and target speak the same shape). Target side of the `Catalyst → DiffEq` comorphism: any institution producing FormulaTerm-typed OdeProblems imports through this format. Anchored on the `reify_problem` Julia handler — the kernel's `ExternalInstitution::reify` dispatches through the substrate the same way `query` does (D14 §9.3 step 4).",
+    "urn:eigenius:institution:to_class": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:diffeq:signatures:reify_problem"
+  }
+]

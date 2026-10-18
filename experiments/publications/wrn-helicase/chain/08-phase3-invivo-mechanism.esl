@@ -1,0 +1,646 @@
+// WRN Helicase paper — Phase-3 in-vivo validation + mechanism chain.
+//
+// Stacks on the Phase-2 chain (… → wrn-phase1 → wrn-phase2 → wrn-phase3).
+// Encodes C-VIVO and C-MECH.
+//
+// As in Phase 2, the wet-lab statistics are the authors' own (xenograft
+// growth via lme4 likelihood-ratio test; DSB/IF foci; GSEA) and are NOT in
+// any public slice we hold, so the readouts are LINKED-EXTERNAL
+// bench:ToolArtifacts. The one Phase-3 sub-claim that IS recomputable from
+// the pinned slice — p53 status modulates WRN dependence (Wilcoxon, 23 vs
+// 13, P=0.02) — is kernel-recomputed in the statistics layer
+// (wrn-phase1-recompute-conclusions.esl :: concl_p53_modulates).
+//
+// The encodable contribution here is again the Declared reasoning:
+//   - C-VIVO: the C911 seed-control logic — shWRN1 impairs KM12 xenograft
+//     growth while the seed-matched control shWRN1-C911 (nt 9-11 complemented
+//     to preserve the off-target seed) is inert ⇒ the in-vivo effect is
+//     on-target, not shRNA seed off-target.
+//   - C-MECH: the DSB → DDR(p53)/apoptosis/arrest mechanism, and the
+//     explicitly tested-and-REJECTED telomere-defect hypothesis (FISH:
+//     diffuse chromosomal DSBs, no telomeric fusions / signal loss).
+//
+// Validated by crates/eigenius-reasoning/tests/wrn_phase3.rs.
+
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
+namespace justification = "urn:eigenius:justification";
+namespace stats         = "urn:eigenius:measurements";
+namespace prov       = "urn:eigenius:prov";
+namespace wrnact     = "urn:eigenius:pub:wrn:activity";
+
+// ════════════════════════════════════════════════════════════════════
+// C-VIVO — in vivo + patient-derived validation
+// ════════════════════════════════════════════════════════════════════
+
+// Kernel-recomputed (D56): the KM12 dox-inducible shWRN1 xenograft growth
+// warrant is no longer a linked-external bench:ToolArtifact. It is
+// materialized by running the authors' lme4 random-slope mixed-model LRT
+// (in_vivo_KM12_analysis.R) as a RuntimeScript through the R language
+// runtime (D55), wrapping the real lme4 at a pinned image. The pieces:
+//   - programs/invivo/xenograft-input.json  — the Fig 2d tumor-volume table (73 obs)
+//   - programs/invivo/xenograft-lme4-program.json — applies the RunRuntimeScript
+//     component to that table; the R script fits the lme4 LRT and emits the
+//     DerivedResource `wrn:vivo_lme4:result` carrying
+//     `canonical_proposition = onco:InVivoDependence("WRN","MSI")` (set when
+//     the Day:Dox interaction is significant; observed p ≈ 0.048).
+// `eigenius run` commits that output under a ProgramTrace, which mints the
+// `IsDerivedAs(vivo_lme4:result, InVivoDependence(WRN,MSI))` witness the
+// concl_vivo certificate below discharges (the recomputed warrant must be
+// materialized before this chain layer is loaded — D54 lemma-citation order).
+//
+// Minimal class for the program's typed input (the xenograft table).
+class wrn:XenograftTable {
+    description = "The KM12 shWRN1 xenograft tumor-volume table (Fig 2d) consumed by the lme4 in-vivo-dependence RuntimeScript program (D56). Columns: vivo_volume, vivo_day, vivo_mouse, vivo_dox. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe.";
+}
+
+// Linked-external: the C911 seed-matched control is inert in vivo.
+resource wrn:vivo_seed_control : bench:ToolArtifact {
+    prov:was_attributed_to = wrn:authors;
+    bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
+    bench:produced_from   = ["wrn-paper:Fig-2d"];
+    bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:fig_2d_seed_control;
+    eigentt:proposition = type_expr(
+        onco:SeedControlInert("WRN", "xenograft_growth")
+    );
+}
+resource wrn:vivo_seed_control_trace : prov:DeclarationTrace {
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:vivo_seed_control;
+    prov:was_generated_by    = wrnact:fig_2d_seed_control;
+    prov:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// Declared: the seed-control inference. An shRNA's off-target activity is
+// driven by its 'seed'; a seed-matched but on-target-disrupted control
+// (C911) that is inert isolates the on-target effect.
+resource wrn:seed_control_rule : justification:Declaration {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_c911_seed_control_logic;
+    prov:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence, and a C911 seed-preserving control isolates on-target from seed off-target effects (Buehler 2012 [16], a litclaim premise): shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. Given that control's validity, if the seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
+    eigentt:proposition = type_expr(
+        litclaim:C911ControlIsValid("shRNA")
+        ->
+        onco:SeedControlInert("WRN", "xenograft_growth")
+        ->
+        onco:OnTarget("WRN", "xenograft_growth")
+    );
+}
+resource wrn:seed_control_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:seed_control_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_c911_seed_control_logic;
+    prov:timestamp   = "2026-06-13T03:30:00Z";
+}
+
+resource wrn:concl_vivo : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table")))),
+               type_expr(justification:Grounds(
+                   onco:InVivoDependence("WRN", "MSI") )) );
+}
+
+resource wrn:concl_vivo_ontarget : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            RULE = "urn:eigenius:pub:wrn:seed_control_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_c911_design",
+            ART  = "urn:eigenius:pub:wrn:vivo_seed_control",
+            C911 = litclaim:C911ControlIsValid("shRNA"),
+            SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
+            OT   = onco:OnTarget("WRN", "xenograft_growth"),
+            RULE_P = C911 -> SC -> OT,
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, C911))
+        in
+        app(cert1, declared(ART, SC))),
+               type_expr(alias
+            RULE = "urn:eigenius:pub:wrn:seed_control_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_c911_design",
+            ART  = "urn:eigenius:pub:wrn:vivo_seed_control",
+            C911 = litclaim:C911ControlIsValid("shRNA"),
+            SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
+            OT   = onco:OnTarget("WRN", "xenograft_growth"),
+            RULE_P = C911 -> SC -> OT,
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, C911))
+        in
+        justification:Grounds(
+                   onco:OnTarget("WRN", "xenograft_growth") )) );
+}
+
+// Reproduced-external (C-MECH p53 arm): WRN loss activates the p53 DDR. The
+// wrapped-R `emmeans` warrant (programs/mechanism/if-ed5-lsmeans-program.json) over the
+// per-cell p-p53(S15)/p21 IF (ED Fig 5b/d/f, 175,974 cells; MSI + TP53-proficient
+// stratum) emits the MEASURED fact `wrn:if_ed5:result` →
+// `onco:RaisesP53DamageMarkers("WRN","MSI")` (set when BOTH p-p53 and p21 rise
+// significantly: logFC +0.155 / +0.310; the p53-null MSI line KM12 fails to
+// induce p21 — finding F7). The ACTIVATION interpretation is then a logical step
+// over the literature: phospho-p53(S15) marks p53 activation (Loughery 2014 [16
+// → wrn:lit:lit_ps15_readout]). The p53_activation_rule composes that premise
+// with the measured fact; concl_p53_activation discharges it (the if_ed5 witness
+// is minted by the R run; lit_ps15_readout by its DeclarationTrace).
+resource wrn:p53_activation_rule : justification:Declaration {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_activation_readout;
+    prov:rationale   = "Phospho-p53(Ser15) is an ATR/ATM DNA-damage-response target that marks p53 activation (Loughery 2014, the lit_ps15_readout premise). Given that, if WRN depletion raises p-p53(S15) (and the p53 target p21) in MSI cells, WRN depletion activates the p53 response in MSI.";
+    eigentt:proposition = type_expr(
+        litclaim:pS15MarksP53Activation("p53")
+        ->
+        onco:RaisesP53DamageMarkers("WRN", "MSI")
+        ->
+        onco:ActivatesP53Response("WRN", "MSI")
+    );
+}
+resource wrn:p53_activation_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:p53_activation_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_activation_readout;
+    prov:timestamp   = "2026-06-17T00:00:00Z";
+}
+
+resource wrn:concl_p53_activation : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            RULE = "urn:eigenius:pub:wrn:p53_activation_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_ps15_readout",
+            RES  = "urn:eigenius:pub:wrn:if_ed5:result",
+            PS15 = litclaim:pS15MarksP53Activation("p53"),
+            RM   = onco:RaisesP53DamageMarkers("WRN", "MSI"),
+            AP   = onco:ActivatesP53Response("WRN", "MSI"),
+            RULE_P = PS15 -> RM -> AP,
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, PS15))
+        in
+        app(cert1, app(declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"))))),
+               type_expr(alias
+            RULE = "urn:eigenius:pub:wrn:p53_activation_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_ps15_readout",
+            RES  = "urn:eigenius:pub:wrn:if_ed5:result",
+            PS15 = litclaim:pS15MarksP53Activation("p53"),
+            RM   = onco:RaisesP53DamageMarkers("WRN", "MSI"),
+            AP   = onco:ActivatesP53Response("WRN", "MSI"),
+            RULE_P = PS15 -> RM -> AP,
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, PS15))
+        in
+        justification:Grounds(
+                   onco:ActivatesP53Response("WRN", "MSI") )) );
+}
+
+// Reproduced-external (specificity / rejected-alternative): WRN's MSI-selective
+// dependence is intrinsic to MSI, NOT a confound of paralogue co-loss. Like
+// concl_vivo, the witness exists only after the R program runs — the authors'
+// 1.6 GB DepMap omics bundle (D53 PinnedExternalFile, read via readRDS — the
+// large multi-schema container path) is dispatched through a D56 wrapped-R
+// warrant (programs/specificity/paralog-ed9a-program.json) that fits
+// lm(avg_WRN_dep ~ MSI + gene_loss) per RECQ paralogue and emits
+// `wrn:paralog_ctrl:result` with `NotExplainedByParalogLoss("WRN","MSI")` —
+// set when the MSI coefficient stays significant + same-signed controlling for
+// every paralogue's loss (baseline β = −0.667 p = 4.4e-60; controlled β stays
+// ≈ −0.67..−0.70, worst p ≈ 1e-58). ED Fig 9a.
+resource wrn:concl_paralog : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")))),
+               type_expr(justification:Grounds(
+                   onco:NotExplainedByParalogLoss("WRN", "MSI") )) );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MECH — mechanism: WRN loss ⇒ MSI-selective DSBs ⇒ DDR-driven lethality
+// ════════════════════════════════════════════════════════════════════
+
+// DSB induction in MSI, MSI-selective — now mostly RECOMPUTED. The lesion markers
+// γH2AX (intensity ED 6c → concl_dsb_gh2ax; foci ED 6a/6d → concl_dsb_gh2ax_foci)
+// and 53BP1 (foci ED 6f/6h → concl_dsb_foci), and the DDR-signaling pATM(S1981)
+// (ED 7b/7d → concl_ddr_signaling), are all reproduced-external. This ToolArtifact
+// now carries only the genuinely non-recomputable remnant as linked corroboration:
+// the Chk2(T68) western blot (ED 7e — band levels, no per-cell numeric data) and
+// the shRNA in-vitro/in-vivo γH2AX confirmation (Fig 2e / ED 7e, CRISPR-artifact
+// control). No source-data sheet exists for either.
+resource wrn:mech_dsb : bench:ToolArtifact {
+    prov:was_attributed_to = wrn:authors;
+    bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
+    bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
+    bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:dsb_marker_if;
+    eigentt:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+}
+resource wrn:mech_dsb_trace : prov:DeclarationTrace {
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:mech_dsb;
+    prov:was_generated_by    = wrnact:dsb_marker_if;
+    prov:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// Declared: the DSB-driven-lethality mechanism. DSBs activate the DNA-damage
+// response (ATM/ATR → p53; G2/M & E2F down, apoptosis up by GSEA; annexin V
+// death; p53-S15 & p21 IF) and are directly toxic — independent of p53 status
+// (explaining why p53-impaired MSI cells are also sensitive).
+resource wrn:mech_rule : justification:Declaration {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_dsb_ddr_mechanism;
+    prov:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The DSB lesion is now reproduced-external in both markers (γH2AX intensity + foci via concl_dsb_gh2ax/concl_dsb_gh2ax_foci; 53BP1 foci via concl_dsb_foci), and the upstream DDR signaling that bridges DSBs to p53 is reproduced via pATM(S1981) (concl_ddr_signaling, onco:ActivatesDSBResponse) — so the lethality claim rests on recomputed DSB + DDR-signaling readouts PLUS the two kernel-recomputed DDR endpoints; only the Chk2(T68) western remains linked.";
+    eigentt:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+        ->
+        onco:CausesCellCycleArrest("WRN", "MSI")
+        ->
+        onco:CausesApoptosis("WRN", "MSI")
+        ->
+        onco:DSBDrivenLethality("WRN", "MSI")
+    );
+}
+resource wrn:mech_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:mech_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_dsb_ddr_mechanism;
+    prov:timestamp   = "2026-06-13T03:30:00Z";
+}
+
+resource wrn:concl_dsb : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared("urn:eigenius:pub:wrn:mech_dsb",
+               onco:CausesDSBs("WRN", "MSI"))),
+               type_expr(justification:Grounds(
+                   onco:CausesDSBs("WRN", "MSI") )) );
+}
+
+// Reproduced-external corroboration of concl_dsb: the 53BP1 DSB-foci arm of the
+// marker panel, recomputed live. Like concl_vivo / concl_p53_activation, the
+// witness only exists after the R program runs — the per-cell Apple-53BP1-trunc
+// foci counts (ED Fig 6f/6h, 39,249 cells across MSS SW620/ES2 + MSI KM12/OVK18,
+// pinned as a D53 file-backed SampleSet) are dispatched through a D56 wrapped-R
+// warrant (programs/mechanism/foci-ed6-program.json) that fits foci ~ cell_line +
+// condition*MSI and emits `wrn:foci_dsb:result` with
+// `canonical_proposition = onco:CausesDSBs("WRN","MSI")` — set when the
+// condition×MSI interaction is positive and significant (the MSI-SELECTIVE extra
+// DSB induction: WRN-KO ~2.08× foci in MSI vs ~1.04× in MSS, interaction
+// +1.82 foci, p ≈ 2.6e-142). The other markers are now ALSO reproduced (γH2AX
+// intensity + foci → concl_dsb_gh2ax / concl_dsb_gh2ax_foci; pATM(S1981) foci →
+// concl_ddr_signaling); only the Chk2(T68) western (ED 7e, no numeric data)
+// remains linked in mech_dsb. This reproduces the 53BP1 leg from per-cell data.
+resource wrn:concl_dsb_foci : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83")))),
+               type_expr(justification:Grounds(
+                   onco:CausesDSBs("WRN", "MSI") )) );
+}
+
+// Reproduced-external: the γH2AX DSB-lesion arm, now recomputed live in BOTH the
+// authors' quantifications. γH2AX is the canonical DSB marker (named before 53BP1
+// in the text). (1) INTENSITY (ED Fig 6c, ES2 MSS + OVK18 MSI, 32,882 cells) via a
+// D56 wrapped-R emmeans interaction (programs/mechanism/gh2ax-intensity-program.json)
+// — reproduces the paper's published statistic exactly (mean log10 fold-change
+// 0.055 ES2 / 0.144 OVK18; MSI-vs-MSS contrast P < 2e-16). (2) FOCI (ED Fig 6a/6d,
+// colon + ovarian, 94,791 cells) via a wrapped-R interaction lm
+// (programs/mechanism/gh2ax-foci-program.json), with saturated pan-nuclear cells
+// counted at a ceiling (the MSI-enriched high-damage cells; interaction +7.3,
+// foci ×3.4 MSI vs ×1.0 MSS). Two independent recomputed γH2AX legs of CausesDSBs.
+resource wrn:concl_dsb_gh2ax : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")))),
+               type_expr(justification:Grounds(
+                   onco:CausesDSBs("WRN", "MSI") )) );
+}
+resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c")))),
+               type_expr(justification:Grounds(
+                   onco:CausesDSBs("WRN", "MSI") )) );
+}
+
+// Reproduced-external: the DDR-SIGNALING arm — phospho-ATM(S1981) foci (ED Fig
+// 7b/7d, colon SW620/KM12/SW48 + ovarian ES2/OVK18, 191,241 cells) via a D56
+// wrapped-R interaction lm (programs/mechanism/patm-foci-program.json; foci ×1.74
+// MSI vs ×1.11 MSS, interaction p≈0). ATM autophosphorylation reports activation
+// of the apical DSB-response kinase — the signaling step the paper uses to bridge
+// DSBs → p53 / anti-proliferative signaling (the upstream evidence concl_p53_
+// activation rests on). Commits the new onco:ActivatesDSBResponse, previously
+// absent from the chain. (Chk2(T68), ED 7e, is a western blot with no per-cell
+// numeric data and stays linked in mech_dsb.)
+resource wrn:concl_ddr_signaling : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de") -> onco:ActivatesDSBResponse("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de")))),
+               type_expr(justification:Grounds(
+                   onco:ActivatesDSBResponse("WRN", "MSI") )) );
+}
+
+// Modus ponens over the 3-antecedent mech_rule. The first leg (DSBs) is
+// discharged by `Declared(wrn:mech_dsb)`, the linked-external DSB-marker
+// ToolArtifact. The two downstream legs (cell-cycle arrest, apoptosis) carry
+// INLINED COPIES of the phase-1 recompute proofs — the `c_cellcycle_re_0_*` and
+// `c_apoptosis_re_1_*` alias blocks below, each an `App(Declared(plan),
+// Observed(sampleset))` per cell line (ED Fig 4b/4c nested ANOVAs).
+//
+// They are copies rather than citations because the inductive-value encoding has
+// no subtree reference: a `Value` can hold `ResourceRef(Iri)` for a resource, but
+// an inductive value is `Json` — inline only. D54's lemma citation was
+// `Verified(iri)` standing in for a reference it could not express, which is
+// exactly the laundering P3 closed. `support()` returns a `BTreeSet<Leaf>`, so
+// the inlined tree and a referencing DAG yield the same support set; the cost is
+// duplication, not a different answer. P6 adds the reference node and dedupes.
+resource wrn:concl_mech : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_cellcycle_re_0_cs_0 = app(declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
+            c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_cellcycle_re_0_cs_1 = app(declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
+            c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_cellcycle_re_0_cs_2 = app(declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
+            c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_cellcycle_re_0_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_cellcycle_re_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_cellcycle_re_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_cellcycle_re_0_RULE_P = c_cellcycle_re_0_K -> c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA,
+            c_cellcycle_re_0_cert1 = app(declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
+            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
+            c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_apoptosis_re_1_cs_0 = app(declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
+            c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_apoptosis_re_1_cs_1 = app(declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
+            c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_apoptosis_re_1_cs_2 = app(declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
+            c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_apoptosis_re_1_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_apoptosis_re_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_apoptosis_re_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_apoptosis_re_1_RULE_P = c_apoptosis_re_1_K -> c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA,
+            c_apoptosis_re_1_cert1 = app(declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
+            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
+            c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_cellcycle_re_2_cs_0 = app(declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
+            c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_cellcycle_re_2_cs_1 = app(declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
+            c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_cellcycle_re_2_cs_2 = app(declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
+            c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_cellcycle_re_2_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_cellcycle_re_2_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_cellcycle_re_2_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_cellcycle_re_2_RULE_P = c_cellcycle_re_2_K -> c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA,
+            c_cellcycle_re_2_cert1 = app(declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
+            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
+            c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_apoptosis_re_3_cs_0 = app(declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
+            c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_apoptosis_re_3_cs_1 = app(declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
+            c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_apoptosis_re_3_cs_2 = app(declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
+            c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_apoptosis_re_3_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_apoptosis_re_3_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_apoptosis_re_3_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_apoptosis_re_3_RULE_P = c_apoptosis_re_3_K -> c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA,
+            c_apoptosis_re_3_cert1 = app(declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
+            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
+            RULE = "urn:eigenius:pub:wrn:mech_rule",
+            ART  = "urn:eigenius:pub:wrn:mech_dsb",
+            CC   = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+            AP   = "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
+            DSB  = onco:CausesDSBs("WRN", "MSI"),
+            CA   = onco:CausesCellCycleArrest("WRN", "MSI"),
+            AA   = onco:CausesApoptosis("WRN", "MSI"),
+            DL   = onco:DSBDrivenLethality("WRN", "MSI"),
+            RULE_P = DSB -> CA -> AA -> DL,
+            cert1 = app(declared(RULE, RULE_P), declared(ART, DSB)),
+            cert2 = app(cert1, app(c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
+        in
+        app(cert2, app(c_apoptosis_re_1_cert2, c_apoptosis_re_1_cs_2))),
+               type_expr(alias
+            c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_cellcycle_re_0_cs_0 = app(declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
+            c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_cellcycle_re_0_cs_1 = app(declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
+            c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_cellcycle_re_0_cs_2 = app(declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
+            c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_cellcycle_re_0_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_cellcycle_re_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_cellcycle_re_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_cellcycle_re_0_RULE_P = c_cellcycle_re_0_K -> c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA,
+            c_cellcycle_re_0_cert1 = app(declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
+            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
+            c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_apoptosis_re_1_cs_0 = app(declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
+            c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_apoptosis_re_1_cs_1 = app(declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
+            c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_apoptosis_re_1_cs_2 = app(declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
+            c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_apoptosis_re_1_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_apoptosis_re_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_apoptosis_re_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_apoptosis_re_1_RULE_P = c_apoptosis_re_1_K -> c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA,
+            c_apoptosis_re_1_cert1 = app(declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
+            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
+            c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_cellcycle_re_2_cs_0 = app(declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
+            c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_cellcycle_re_2_cs_1 = app(declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
+            c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_cellcycle_re_2_cs_2 = app(declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
+            c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_cellcycle_re_2_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_cellcycle_re_2_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_cellcycle_re_2_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_cellcycle_re_2_RULE_P = c_cellcycle_re_2_K -> c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA,
+            c_cellcycle_re_2_cert1 = app(declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
+            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
+            c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_apoptosis_re_3_cs_0 = app(declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
+            c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_apoptosis_re_3_cs_1 = app(declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
+            c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_apoptosis_re_3_cs_2 = app(declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
+            c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_apoptosis_re_3_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_apoptosis_re_3_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_apoptosis_re_3_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_apoptosis_re_3_RULE_P = c_apoptosis_re_3_K -> c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA,
+            c_apoptosis_re_3_cert1 = app(declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
+            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
+            RULE = "urn:eigenius:pub:wrn:mech_rule",
+            ART  = "urn:eigenius:pub:wrn:mech_dsb",
+            CC   = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+            AP   = "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
+            DSB  = onco:CausesDSBs("WRN", "MSI"),
+            CA   = onco:CausesCellCycleArrest("WRN", "MSI"),
+            AA   = onco:CausesApoptosis("WRN", "MSI"),
+            DL   = onco:DSBDrivenLethality("WRN", "MSI"),
+            RULE_P = DSB -> CA -> AA -> DL,
+            cert1 = app(declared(RULE, RULE_P), declared(ART, DSB)),
+            cert2 = app(cert1, app(c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
+        in
+        justification:Grounds(
+                   onco:DSBDrivenLethality("WRN", "MSI") )) );
+}
+
+// ── Telomere-defect hypothesis: tested and REJECTED ──────────────────
+// Linked-external: telomere-FISH of metaphase spreads (2 MSI, 2 MSS) 96 h
+// after shWRN1 induction directly showed diffuse chromosomal DSBs WITHOUT
+// telomeric end-to-end fusions or signal loss — ruling out a telomere defect
+// as the basis of the synthetic lethality.
+resource wrn:fish_readout : bench:ToolArtifact {
+    prov:was_attributed_to = wrn:authors;
+    bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
+    bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
+    bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:ed_fig_8a;
+    eigentt:proposition = type_expr(
+        onco:NotViaTelomereDefect("WRN", "MSI")
+    );
+}
+resource wrn:fish_readout_trace : prov:DeclarationTrace {
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:fish_readout;
+    prov:was_generated_by    = wrnact:ed_fig_8a;
+    prov:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:concl_not_telomere : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared("urn:eigenius:pub:wrn:fish_readout",
+               onco:NotViaTelomereDefect("WRN", "MSI"))),
+               type_expr(justification:Grounds(
+                   onco:NotViaTelomereDefect("WRN", "MSI") )) );
+}
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource wrn:warrant_c911_seed_control_logic : prov:Source {
+    prov:was_attributed_to = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:c911-seed-control-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_c911_seed_control_logic";
+}
+
+resource wrn:warrant_dsb_ddr_mechanism : prov:Source {
+    prov:was_attributed_to = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:dsb-ddr-mechanism`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_dsb_ddr_mechanism";
+}
+
+resource wrn:warrant_p53_activation_readout : prov:Source {
+    prov:was_attributed_to = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:p53-activation-readout`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_p53_activation_readout";
+}
+

@@ -1,0 +1,35 @@
+[package]
+name = "eigenius-r"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Production R / Bioconductor language runtime for the Eigenius substrate (D55). Implements LanguageRuntime over the substrate's ServiceSpawner abstraction, so the same dispatch path runs the R worker as a host subprocess (LocalServiceSpawner, dev) or inside a digest-pinned R image (DockerServiceSpawner, prod). Pairs with eigenius-r-worker (the cdylib) and eigenius-r-runtime (the mirror generator)."
+keywords = ["eigenius", "r", "bioconductor", "language-runtime"]
+categories = ["science"]
+
+[dependencies]
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+eigenius-kernel = { path = "../../kernel" }
+# Encodes the script source / decodes input resources for the wire — the
+# substrate's own CBOR codec, consistent across both sides.
+ciborium = "0.2"
+serde_bytes = "0.11"
+# Hashes the renv.lock into the image manifest hash (the cross-check anchor),
+# using the same `sha256:{:x}` idiom as eigenius-julia/eigenius-lean-runtime.
+sha2 = "0.10"
+
+[dev-dependencies]
+# The P2 end-to-end test drives a real R worker through LocalServiceSpawner;
+# depending on eigenius-r-worker makes cargo build its cdylib first (the
+# worker the spawned `Rscript` dyn.loads) and lets the test locate it.
+eigenius-r-worker = { path = "../eigenius-r-worker" }
+tempfile = "3"
+# Asserts the canonical_proposition term shape the R worker emits
+# (marshalling_round_trip) — same D47 JSON the reasoning institution reads.
+serde_json.workspace = true
+# The P3.2 build→Docker-dispatch e2e needs `DockerServiceSpawner` (the
+# `docker-spawner` feature). Enabling it only here keeps the production
+# crate generic over `ServiceSpawner` with no Docker/bollard dependency;
+# Cargo unifies the feature for test builds.
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }

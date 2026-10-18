@@ -1,0 +1,229 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// A precision-medicine case (D99 §6–§8), shaped after GA4GH Phenopackets v2: the individuals a
+// case is about, the alleles they carry and in which state, how those alleles were classified,
+// the treatments tried, and the family's questions and the analyst's recommendations.
+//
+// Every registry value is a `justification:Declaration` by the registry (D99 §5); this layer
+// supplies what those declarations are ABOUT. It asserts nothing itself.
+//
+// Chain-loaded, above `variant` (D99 §9). Named `clinical`, not `case`, which is an ESL keyword.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace variant       = "urn:eigenius:variant";
+namespace clinical      = "urn:eigenius:clinical";
+
+// ── Cases and individuals ─────────────────────────────────────────────────────────────────
+
+class clinical:Case : lexicon:Entity {
+    description = "One case of a precision-medicine registry: who it is about, and its record. The record's identity is its IRI, minted from the registry's own record id; `clinical:case_id` is a property, because the registry repeats case IDs (two duplicates in ~690 rows, D99 §7).";
+    requires clinical:case_id, clinical:subject;
+}
+
+property clinical:case_id : core:string {
+    description = "The registry's case identifier as written (`PMI-YY-NN`). Not unique in the source, so not the identity.";
+    domain clinical:Case;
+}
+
+property clinical:subject : core:resource_array {
+    description = "The individuals the case is about — usually one; the registry's `Males` / `Females` / `Family` values are several (D99 §7).";
+    class_types clinical:Individual;
+    domain clinical:Case;
+}
+
+class clinical:Individual : lexicon:Entity {
+    description = "A person a case is about. Phenopackets Individual: an imprecise date of birth, and sex recorded per person.";
+    recommends clinical:birth_year, clinical:sex;
+}
+
+property clinical:birth_year : core:integer {
+    description = "Year of birth — the registry records no month or day. Age is computed from it for a stated date, never stored (D99 §7).";
+    domain clinical:Individual;
+}
+
+class clinical:Sex {
+    description = "A sex value for an individual. Closed: male and female, the registry's two per-person values; `N/A` writes nothing.";
+}
+
+resource clinical:male : clinical:Sex {
+    core:description = "Male.";
+    core:short_name = "male";
+}
+
+resource clinical:female : clinical:Sex {
+    core:description = "Female.";
+    core:short_name = "female";
+}
+
+property clinical:sex : core:resource {
+    description = "An individual's sex as the registry records it.";
+    class_types clinical:Sex;
+    allows_only clinical:male, clinical:female;
+    domain clinical:Individual;
+}
+
+// ── Genotype: which alleles an individual carries, and how (D99 §6a) ─────────────────────
+
+class clinical:AllelicState {
+    description = "How many copies of an allele an individual carries. Closed, the three allelic states of the registry's Zygosity field; its other two values are a relation between alleles (`Compound Heterozygous` → `clinical:InTrans`) and a tissue distribution (`Mosaic`). Aligned to GENO once GENO is loaded.";
+}
+
+resource clinical:heterozygous : clinical:AllelicState {
+    core:description = "One copy, the other allele differing.";
+    core:short_name = "heterozygous";
+}
+
+resource clinical:homozygous : clinical:AllelicState {
+    core:description = "Both copies.";
+    core:short_name = "homozygous";
+}
+
+resource clinical:hemizygous : clinical:AllelicState {
+    core:description = "The only copy — an X-linked allele in a male.";
+    core:short_name = "hemizygous";
+}
+
+data clinical:Carries : clinical:Individual -> variant:NucleotideAllele -> clinical:AllelicState -> Prop {
+    description = "The individual carries the allele in the state. Takes a NUCLEOTIDE allele: a person carries sequence (D99 §2). A row known only at protein resolution is an existential over the nucleotide alleles that translate to its protein change.";
+}
+
+data clinical:InTrans : variant:NucleotideAllele -> variant:NucleotideAllele -> Prop {
+    description = "The two alleles are on different copies — what the registry's `Compound Heterozygous` says, beside `heterozygous` for each.";
+}
+
+data clinical:Mosaic : clinical:Individual -> variant:NucleotideAllele -> Prop {
+    description = "The allele is present in some of the individual's cells only.";
+}
+
+data clinical:DeNovo : clinical:Individual -> variant:NucleotideAllele -> Prop {
+    description = "The allele arose in the individual, absent from both parents. Written only for the registry's `Confirmed de novo = true`: `false` does not distinguish inherited from untested (D99 §7).";
+}
+
+class clinical:Parent {
+    description = "Which parent an allele came from. Closed.";
+}
+
+resource clinical:maternal : clinical:Parent {
+    core:description = "From the mother.";
+    core:short_name = "maternal";
+}
+
+resource clinical:paternal : clinical:Parent {
+    core:description = "From the father.";
+    core:short_name = "paternal";
+}
+
+data clinical:InheritedFrom : clinical:Individual -> variant:NucleotideAllele -> clinical:Parent -> Prop {
+    description = "The individual inherited the allele from that parent.";
+}
+
+// ── Classification (D99 §6b) ──────────────────────────────────────────────────────────────
+
+class clinical:AcmgTier {
+    description = "An ACMG/AMP pathogenicity tier. Closed, the five tiers. ACMG classifies a variant FOR A CONDITION; the registry records the tier without the condition, so no pathogenicity proposition is formed from it.";
+}
+
+resource clinical:benign : clinical:AcmgTier {
+    core:description = "Benign.";
+    core:short_name = "benign";
+}
+
+resource clinical:likely_benign : clinical:AcmgTier {
+    core:description = "Likely benign.";
+    core:short_name = "likely_benign";
+}
+
+resource clinical:vus : clinical:AcmgTier {
+    core:description = "Variant of uncertain significance.";
+    core:short_name = "vus";
+}
+
+resource clinical:likely_pathogenic : clinical:AcmgTier {
+    core:description = "Likely pathogenic.";
+    core:short_name = "likely_pathogenic";
+}
+
+resource clinical:pathogenic : clinical:AcmgTier {
+    core:description = "Pathogenic.";
+    core:short_name = "pathogenic";
+}
+
+data clinical:ClassifiedAs : variant:Allele -> clinical:AcmgTier -> Prop {
+    description = "The allele was classified in the tier — declared by the reporting lab where a record names it, by the registry otherwise.";
+}
+
+// ── Treatment (D99 §8d) ───────────────────────────────────────────────────────────────────
+
+class clinical:Trial : lexicon:Entity {
+    description = "One course of a treatment in one individual — Phenopackets MedicalAction with a Treatment. Its outcome is a proposition about it, declared by whoever recorded it.";
+    requires clinical:treated, clinical:agent;
+    recommends core:description;
+}
+
+property clinical:treated : core:resource {
+    description = "The individual the trial treated.";
+    class_types clinical:Individual;
+    domain clinical:Trial;
+}
+
+property clinical:agent : core:resource {
+    description = "The drug or therapeutic agent. Not class-constrained: agents come from whichever vocabulary names them.";
+    domain clinical:Trial;
+}
+
+data clinical:NoMeasurableReduction : clinical:Trial -> Prop {
+    description = "The trial produced no measurable reduction in the outcome measure. `Measurable` is the recorder's threshold: declared by the clinician without volumes, observed with them (D99 §8d).";
+}
+
+// ── Questions and recommendations (D99 §8a, §8c) ─────────────────────────────────────────
+
+class clinical:Question : lexicon:Entity {
+    description = "A question someone asked about the case — the family's goal is three of them. A question has answers, not a truth value, so it takes no grounds; what answers it does.";
+    requires clinical:asked_by;
+    recommends clinical:whether, clinical:answered_by, core:description;
+}
+
+property clinical:asked_by : core:resource {
+    description = "Who asked: the family member, not the registry that transcribed the question.";
+    class_types prov:Agent;
+    domain clinical:Question;
+}
+
+property clinical:whether : core:inductive {
+    description = "A polar question's content: the proposition whose truth is asked.";
+    class_types eigentt:Term;
+    expected_type Prop;
+    domain clinical:Question;
+}
+
+property clinical:answered_by : core:resource {
+    description = "What answers the question — a conclusion or a declaration.";
+    domain clinical:Question;
+}
+
+class clinical:Recommendation : lexicon:Entity {
+    description = "A directive about the case (`do not re-trial at a higher dose`). It carries no grounds of its own: it names the conclusion it rests on, and the conclusion carries the grounds.";
+    requires prov:was_attributed_to, clinical:rests_on;
+    recommends core:description;
+}
+
+property clinical:rests_on : core:resource_array {
+    description = "The conclusions or declarations a recommendation rests on.";
+    domain clinical:Recommendation;
+}

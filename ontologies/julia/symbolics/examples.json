@@ -1,0 +1,47 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:hill_function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "hill_function",
+    "urn:eigenius:core:description": "The kinase-activity-remaining function with Hill coefficient n=1: `h(c) = ic50 / (ic50 + c)`. Free variables `c` (compound concentration) and `ic50` (the IC50 parameter). Foundation for the kinase-grounded Symbolics demos: substitution to specialise on a measured IC50, differentiation to get the slope at a concentration, equation-form to relate to the inhibition curve.",
+    "urn:eigenius:julia:symbolics:expression_source": "ic50 / (ic50 + c)",
+    "urn:eigenius:julia:symbolics:variables": ["c", "ic50"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:hill_at_eig0042_cdk2",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "hill_at_eig0042_cdk2",
+    "urn:eigenius:core:description": "The Hill function specialised at IC50 = 42 nM (EIG_0042 vs CDK2 from R0001). Free variable: `c` only.",
+    "urn:eigenius:julia:symbolics:expression_source": "42.0 / (42.0 + c)",
+    "urn:eigenius:julia:symbolics:variables": ["c"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:hill_eig0042_substitution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:symbolics:Substitutes"],
+    "urn:eigenius:core:short_name": "hill_eig0042_substitution",
+    "urn:eigenius:core:description": "Substituting `ic50 := 42.0` in the Hill function yields the EIG_0042-CDK2-specific form. AutoOnLoad re-runs `Symbolics.substitute` and confirms.",
+    "urn:eigenius:julia:symbolics:expr": "urn:eigenius:demo:assay:hill_function",
+    "urn:eigenius:julia:symbolics:substitution_var": "ic50",
+    "urn:eigenius:julia:symbolics:substitution_value_source": "42.0",
+    "urn:eigenius:julia:symbolics:result": "urn:eigenius:demo:assay:hill_at_eig0042_cdk2"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:hill_derivative_dc",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "hill_derivative_dc",
+    "urn:eigenius:core:description": "The derivative `dh/dc` of the Hill function: `-ic50 / (ic50 + c)^2`. Used downstream by IntervalArithmetic to bound the slope of the inhibition curve on a concentration domain (the natural Phase-19f handoff once 19d/19f Comorphisms are wired).",
+    "urn:eigenius:julia:symbolics:expression_source": "-ic50 / (ic50 + c)^2",
+    "urn:eigenius:julia:symbolics:variables": ["c", "ic50"]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:hill_differentiates_dc",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:symbolics:Differentiates"],
+    "urn:eigenius:core:short_name": "hill_differentiates_dc",
+    "urn:eigenius:core:description": "Claims that the derivative of the Hill function with respect to `c` is `-ic50 / (ic50 + c)^2`. AutoOnLoad re-runs `Symbolics.derivative` + `simplify` and compares. Holds modulo simplification.",
+    "urn:eigenius:julia:symbolics:expr": "urn:eigenius:demo:assay:hill_function",
+    "urn:eigenius:julia:symbolics:differentiation_var": "c",
+    "urn:eigenius:julia:symbolics:result": "urn:eigenius:demo:assay:hill_derivative_dc"
+  }
+]

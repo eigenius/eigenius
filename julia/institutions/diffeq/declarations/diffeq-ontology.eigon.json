@@ -1,0 +1,162 @@
+[
+  {
+    "@id": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OdeProblem",
+    "urn:eigenius:core:description": "A first-order ODE initial-value problem `du/dt = f(u, p, t), u(t_start) = u_0` lifted onto the chain. Carries the RHS as a list of `formulas:FormulaTerm`-typed components — the Nth `RhsComponent` is the FormulaTerm for `du[N]/dt` — plus initial conditions, time span, parameter values, and the named species/parameter ordering the FormulaTerms reference. The institution rebuilds an `OrdinaryDiffEq.ODEProblem` at dispatch time by walking each FormulaTerm under a numerical interpreter driven by the `(u, p, t)` env. Not a claim — no AutoOnLoad gate fires on commit; only `OdeSolution` claims about a problem trigger validation. See D27 §4.5.1 + D32 §6.2 for the FormulaTerm-everywhere comorphism story this lift unlocks.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:diffeq:state_names",
+      "urn:eigenius:diffeq:parameter_names",
+      "urn:eigenius:diffeq:rhs",
+      "urn:eigenius:diffeq:initial_conditions",
+      "urn:eigenius:diffeq:parameters",
+      "urn:eigenius:diffeq:time_span_start",
+      "urn:eigenius:diffeq:time_span_end"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:state_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "state_names",
+    "urn:eigenius:core:description": "State-variable names in canonical positional order. The Nth name is the variable referenced by `Var(name)` ctors in `rhs[N]` and corresponds to `initial_conditions[N]`. Length determines the ODE's state dimension; mismatched `initial_conditions` length is reported as `Fails` at the OdeSolution gate.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:parameter_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameter_names",
+    "urn:eigenius:core:description": "Parameter names in canonical positional order. The Nth name is the variable referenced by `Var(name)` ctors in any `rhs[*]` component and corresponds to `parameters[N]`. Length must match `parameters`. The reserved name `t` (for time) is implicit — it can be referenced from any FormulaTerm via `Var(\"t\")` without appearing in this list.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:rhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "rhs",
+    "urn:eigenius:core:description": "Ordered list of `RhsComponent` wrappers, one per state variable. The Nth element is the FormulaTerm for `du[N]/dt`. Length must equal `length(state_names)`; the chain validator's `class_types` check confirms each element is a `RhsComponent`, and the RhsComponent's inductive-value rule confirms its `term` is a well-formed FormulaTerm against `formulas:FormulaTerm`'s ctor schema.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:diffeq:RhsComponent"],
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:initial_conditions",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "initial_conditions",
+    "urn:eigenius:core:description": "Initial state vector `u_0`, indexed positionally with `state_names`. Length must equal `length(state_names)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:parameters",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameters",
+    "urn:eigenius:core:description": "Parameter vector `p`, indexed positionally with `parameter_names`. Length must equal `length(parameter_names)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:time_span_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "time_span_start",
+    "urn:eigenius:core:description": "Initial time `t_start`. Typically `0.0`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:time_span_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "time_span_end",
+    "urn:eigenius:core:description": "Final time `t_end`. The integrator advances from `time_span_start` to `time_span_end`. Two scalar properties rather than a `(t_start, t_end)` tuple class because the chain doesn't have a Tuple primitive and a one-shot pair class would be obscure naming for a property used in exactly one place.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeProblem"]
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:RhsComponent",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "RhsComponent",
+    "urn:eigenius:core:description": "Wrapper class carrying one `formulas:FormulaTerm` RHS expression. An `OdeProblem`'s `rhs` is a positionally-ordered list of these wrappers — the Nth wraps the FormulaTerm for `du[N]/dt`. A wrapper class (rather than a direct `List<FormulaTerm>` property) because the chain doesn't have a parametric `core:List<T>` surface committed yet (D32 §3.4 sketches it as future work). The wrapper is shape-only — its `term` field is the actual content; future evolutions might add per-component metadata (a documentation string, a derivation provenance ref) without changing the FormulaTerm payload.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:diffeq:term"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "term",
+    "urn:eigenius:core:description": "The FormulaTerm expression for one component of the ODE RHS. Free variables are the state names from the enclosing `OdeProblem.state_names`, the parameter names from `parameter_names`, and the special name `t` for time. Operators are the chain-committed catalog at `urn:eigenius:formulas:ops:*` (`add`, `sub`, `mul`, `div`, `pow`, `neg`, `exp`, `log`, `sin`, `cos`, `tan`, `sqrt`, `abs`). Multi-arg operators are curried via left-spined `App`s — same discipline as everywhere else FormulaTerm appears (D32 §4.1).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:RhsComponent"]
+  },
+
+  {
+    "@id": "urn:eigenius:diffeq:OdeSolution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OdeSolution",
+    "urn:eigenius:core:description": "A claim that the institution can integrate the referenced `OdeProblem` with the named algorithm + tolerances and arrive at the claimed `final_state`. AutoOnLoad fires `validate_solution`, which rebuilds the `ODEProblem` (compiling each FormulaTerm RHS component into a numerical closure), calls `solve` with the same `(algorithm, abstol, reltol)`, checks `successful_retcode`, and per-component-compares the integrator's final state against the claim within tolerance. `Holds` on a successful re-integration that matches; `Fails` on a mismatch or solver failure when `success` is claimed; `Undecidable` on solver-internal indeterminate states (`MaxIters`, `ConvergenceFailure`, etc., per D27's verified-API ReturnCode enum).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:diffeq:problem",
+      "urn:eigenius:diffeq:algorithm",
+      "urn:eigenius:diffeq:abstol",
+      "urn:eigenius:diffeq:reltol",
+      "urn:eigenius:diffeq:final_state"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "problem",
+    "urn:eigenius:core:description": "The OdeProblem the solution is claimed against. The validator dereferences this resource to read the FormulaTerm RHS, ICs, parameters, and time span before re-solving.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:diffeq:OdeProblem"],
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:algorithm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "algorithm",
+    "urn:eigenius:core:description": "Name of the OrdinaryDiffEq integrator. v1 supports the algorithms in `_ALG_REGISTRY` in the handler: `Tsit5` (5th-order Runge-Kutta, default for non-stiff), `Vern9` (9th-order RK, high accuracy), `Rosenbrock23` / `Rodas5` / `Rodas5P` (stiff), `QNDF` / `FBDF` (very stiff). Adding an algorithm requires a registry entry on the handler side; the validator doesn't restrict the string at commit (an unsupported algorithm shows up as a `Fails` at dispatch).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:abstol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "abstol",
+    "urn:eigenius:core:description": "Absolute integration tolerance. Forwarded to `solve(prob, alg; abstol=...)`. Defaults in OrdinaryDiffEq are 1e-6 absolute / 1e-3 relative; tightening one or both is what makes `ReproducibleIntegration` claims meaningful (future v2 surface).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0.0,
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:reltol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "reltol",
+    "urn:eigenius:core:description": "Relative integration tolerance. Forwarded to `solve(prob, alg; reltol=...)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0.0,
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:diffeq:final_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "final_state",
+    "urn:eigenius:core:description": "Claimed state vector at `problem.time_span_end`. The AutoOnLoad gate compares each component to the institution's re-integrated trajectory's final state via a per-component tolerance check `|claim_i - actual_i| ≤ max(abstol, reltol * |actual_i|)`. Tolerance is per-component, matching the integrator's own per-component error control. Length must equal `length(problem.state_names)`; mismatch is reported as `Fails`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:diffeq:OdeSolution"]
+  }
+]

@@ -1,0 +1,21 @@
+[package]
+name = "eigenius-pmi-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Convert PMI Case Registry records (UAB experiment 02) into an ESL layer over the variant and clinical vocabularies — no parser (D99 step 4)."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+eigenius-kernel = { path = "../../kernel" }
+# `snapshot::open_head_and_backend`, for the DB-backed SYN-26-002 test.
+eigenius-encoding = { path = "../eigenius-encoding" }
+
+[[bin]]
+name = "pmi-registry-convert"
+path = "src/bin/pmi_registry_convert.rs"

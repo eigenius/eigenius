@@ -1,0 +1,536 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! `compile(print(t))` is α-equal to `t`, over every D47 term in the committed demo artifacts.
+//!
+//! The comparator is [`alpha_canonicalize_proposition`] — the SAME normalisation the witness
+//! index hashes to decide whether a chain-resident witness discharges a proposition. So a term that
+//! passes here does not merely "look similar": it is the identical witness as far as the commit
+//! gate is concerned.
+//!
+//! The corpus is the parser's own output (`claims-*.json`, produced by the DCG over English prose)
+//! plus the hand-authored rule and certificate terms. Those exercise the forms that motivated the
+//! surface work — `Sig` under `Fst` from every definite description, curried `App` spines,
+//! `CtorApp` justification spines, and the synthesised `UnitVal` certificate slot.
+
+use std::collections::BTreeMap;
+
+use eigenius_kernel::esl;
+use eigenius_kernel::esl::print::{is_d47_term, print_type_expr, print_value_term, Namespaces};
+use eigenius_kernel::layer::Layer;
+use serde_json::Value;
+
+/// The demo's committed chain artifacts, relative to the kernel crate root (cargo's CWD for an
+/// integration test). These are ESL — the demo loads them directly — so the test compiles each
+/// one and round-trips the terms the compiler produced. That checks the committed source, not a
+/// separate JSON copy of it.
+const CORPUS: &[&str] = &[
+    "../demo/prose-to-formulas-v2/claims-intact.esl",
+    "../demo/prose-to-formulas-v2/claims-edited.esl",
+    "../demo/prose-to-formulas-v2/inference.esl",
+    // D66 replaced the generated shape rules and per-sentence bridges with transparent
+    // definitions, so `rules.esl` and `bridges.esl` no longer exist. The definitions and the
+    // quantified literature rule take their place in this corpus.
+    "../demo/prose-to-formulas-v2/onco-typed.esl",
+    "../demo/prose-to-formulas-v2/literature-rules.esl",
+    // Repointed from `demo/prose-to-formulas/` to v2 on 2026-08-17: v1 was retired and its files
+    // deleted (a sense-erased skeleton pin cannot break a sense-only tie, so it was
+    // inventory-dependent — see that demo's README).
+    //
+    // COVERAGE NOTE — one artifact had no v2 counterpart and is GONE: `rule-general.esl`, whose term
+    // nested THREE quantifiers over mixed domains (`forall v0:Set. forall v1:Set. forall
+    // v2:lexicon:Entity. …`). What remains is shallower: `literature-rules.esl` has a single
+    // `forall (m : Set)` and `inference.esl` two. So quantified terms are still round-tripped, but
+    // DEEP nesting is not. If the printer/parser regresses on nested binders this corpus will no
+    // longer catch it — worth a purpose-built fixture rather than relying on a demo artifact.
+    //
+    // D99 §10 — the identity type and the proof-level forms (`eigentt:Eq`, `refl`, `J`, `apart`,
+    // `field`), including `apart` applied to its proof and three-binder `J` motives.
+    "tests/fixtures/disequality_by_field.esl",
+];
+
+/// A D47 node: an object carrying `ctor` + `args`.
+/// Is this property value a TERM?
+///
+/// A term is a resource whose `is_a` names an `eigentt:Term` constructor class (D85 §6.1). It
+/// used to be "a JSON object with `ctor` and `args`" — the tagged shape, which no longer
+/// reaches a property.
+fn is_term(v: &eigenius_kernel::ontology::resource::Value) -> bool {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => r
+            .is_a()
+            .first()
+            .is_some_and(|c| c.as_str().starts_with("urn:eigenius:eigentt:Term-")),
+        _ => false,
+    }
+}
+
+/// Every term-valued property in a document, keyed `<resource-id> :: <property>`.
+fn terms_in(
+    resources: &[eigenius_kernel::ontology::resource::Resource],
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    for r in resources {
+        let id = r
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_else(|| "<anon>".to_string());
+        for (k, v) in r.properties() {
+            if is_term(v) {
+                out.insert(format!("{id} :: {k}"), tagged_of(v));
+            }
+        }
+    }
+    out
+}
+
+/// Print `term`, compile the result, and return the term the compiler produced.
+///
+/// The probe is a RESOURCE PROPERTY, not an `axiom` — that is where these terms actually live, and
+/// it is the only context in which a bare inductive constructor (`app(...)`, `declared(...)`)
+/// resolves. An axiom statement is a *type*; a certificate is a *term*, so it would not be
+/// well-typed there regardless.
+fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Value, String> {
+    let mut ns = Namespaces::new();
+    // A `type_expr(...)` wrapper is what makes the slot a D47 TYPE; the value dialect goes in
+    // bare. Printing one as the other would compile to a different encoding entirely.
+    let body = if is_d47_term(term) {
+        format!(
+            "type_expr(\n{}\n    )",
+            print_type_expr(term, &mut ns).map_err(|e| format!("print: {e}"))?
+        )
+    } else {
+        print_value_term(term, &mut ns, prop_ns).map_err(|e| format!("print: {e}"))?
+    };
+    let src = format!(
+        "{}namespace rt = \"urn:eigenius:roundtrip\";\n\nresource rt:probe : rt:Probe {{\n    \
+         rt:term = {body};\n}}\n",
+        ns.preamble()
+    );
+    // Against a layer, not bare: constructor short names resolve through the chain's ctor table
+    // (`collect_ctors_from_layer`), which is where `justification:Grounds`'s ctors live. This is
+    // also how decompiled ESL is meant to be reloaded.
+    let resources = esl::compile(&src, layer).map_err(|errs| {
+        let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+        format!("recompile: {}\n--- source ---\n{src}", msgs.join("; "))
+    })?;
+    let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
+        .expect("well-formed IRI");
+    for r in &resources {
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
+        }
+    }
+    Err(format!(
+        "no rt:term in recompiled output\n--- source ---\n{src}"
+    ))
+}
+
+/// The constructor view of a compiled value, for assertions written as `j["ctor"]`.
+///
+/// A term is a resource whose `is_a` names its constructor's class (D85 §6.1); this reads it
+/// back positionally so these assertions stay about the TERM rather than about property names.
+fn tagged_of(v: &eigenius_kernel::ontology::resource::Value) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value;
+    match v {
+        Value::Embedded(r) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, bootstrap_chain())
+                .expect("a compiled term is a well-formed value resource")
+        }
+        other => panic!("expected a term value, got {other:?}"),
+    }
+}
+
+/// The bootstrap chain, built once — a value resource names classes the chain declares.
+fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
+/// α-canonicalise a term in the tagged PROJECTION these round trips compare.
+///
+/// The kernel canonicalises VALUES — `witness::alpha_canonicalize_proposition`, the one the
+/// witness key hashes through. This file compares projections, because printing and
+/// recompiling is what it exercises, so the same renaming is spelled once here rather than
+/// kept as a second canonicaliser in the kernel.
+fn alpha_canon_tagged(v: &serde_json::Value) -> serde_json::Value {
+    fn go(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
+        let Some(obj) = v.as_object() else {
+            return v.clone();
+        };
+        let (Some(ctor), Some(args)) = (
+            obj.get("ctor").and_then(serde_json::Value::as_str),
+            obj.get("args").and_then(serde_json::Value::as_array),
+        ) else {
+            return v.clone();
+        };
+        match (ctor, args.len()) {
+            ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
+                let binder = args[0].as_str().unwrap_or("").to_string();
+                let dom = go(&args[1], env);
+                let canonical = if binder.is_empty() {
+                    String::new()
+                } else {
+                    format!("_b{}", env.len())
+                };
+                env.push((binder, canonical.clone()));
+                let body = go(&args[2], env);
+                env.pop();
+                serde_json::json!({"ctor": ctor, "args": [canonical, dom, body]})
+            }
+            ("Var", 1) => {
+                let name = args[0].as_str().unwrap_or("");
+                let resolved = env
+                    .iter()
+                    .rev()
+                    .find(|(orig, _)| orig == name && !orig.is_empty())
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_else(|| name.to_string());
+                serde_json::json!({"ctor": "Var", "args": [resolved]})
+            }
+            _ => serde_json::json!({
+                "ctor": ctor,
+                "args": args.iter().map(|a| go(a, env)).collect::<Vec<_>>(),
+            }),
+        }
+    }
+    go(v, &mut Vec::new())
+}
+
+#[test]
+fn every_demo_term_round_trips_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let mut checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
+    for path in CORPUS {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            panic!("corpus file missing: {path} (run from the kernel crate root)");
+        };
+        let resources =
+            esl::compile(&text, layer).unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
+        for (label, term) in terms_in(&resources) {
+            checked += 1;
+            // The inductive a property's values inhabit is declared in the same ontology as the
+            // property, so the property IRI minus its local name is the ctor namespace.
+            let prop_ns = label
+                .rsplit_once(" :: ")
+                .and_then(|(_, p)| p.rsplit_once(':'))
+                .map(|(ns, _)| ns.to_string())
+                .unwrap_or_default();
+            match print_then_compile(&term, &prop_ns, layer) {
+                Err(e) => failures.push(format!("{path}\n  {label}\n  {e}")),
+                Ok(back) => {
+                    let a = alpha_canon_tagged(&term);
+                    let b = alpha_canon_tagged(&back);
+                    if a != b {
+                        failures.push(format!(
+                            "{path}\n  {label}\n  NOT alpha-equal after round trip\n  \
+                             original: {a}\n  reparsed: {b}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(checked > 0, "corpus produced no terms — the fixtures moved");
+    assert!(
+        failures.is_empty(),
+        "{}/{} terms failed to round-trip:\n\n{}",
+        failures.len(),
+        checked,
+        failures.join("\n\n")
+    );
+    eprintln!("round-tripped {checked} D47 terms from the demo corpus");
+}
+
+/// A boolean literal survives ESL source → D47 term → printed ESL → D47 term.
+///
+/// The `LitBool` ctor was added to `eigentt:Term` for `program:Literal` booleans; without the
+/// matching `true` / `false` surface in `parse_type_expr` the printer would emit source that does
+/// not reparse, which is exactly what `print_then_compile` catches.
+#[test]
+fn boolean_literal_round_trips_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+
+    for (literal, json) in [("true", true), ("false", false)] {
+        let src = format!(
+            "namespace rt = \"urn:eigenius:roundtrip\";\n\n\
+             resource rt:probe : rt:Probe {{\n    rt:term = type_expr({literal});\n}}\n"
+        );
+        let resources = esl::compile(&src, layer)
+            .unwrap_or_else(|e| panic!("{literal} does not compile: {e:?}"));
+        let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
+            .expect("well-formed IRI");
+        let term = resources
+            .iter()
+            .find_map(|r| r.get(&iri).map(tagged_of))
+            .expect("rt:term is a D47 term");
+
+        assert_eq!(
+            term,
+            serde_json::json!({"ctor": "LitBool", "args": [json]}),
+            "`{literal}` in a type position must encode as the LitBool ctor"
+        );
+        assert!(is_d47_term(&term), "LitBool must classify as a D47 ctor");
+        assert_eq!(
+            print_type_expr(&term, &mut Namespaces::new()).expect("prints"),
+            literal
+        );
+
+        let back = print_then_compile(&term, "rt", layer).expect("reparses");
+        assert_eq!(
+            alpha_canon_tagged(&term),
+            alpha_canon_tagged(&back),
+            "`{literal}` changed across the round trip"
+        );
+    }
+}
+
+/// The printer must REFUSE a term it has no surface for rather than emit something lossy — a
+/// decompiler that drops a subterm yields source compiling to a different chain object.
+#[test]
+fn refuses_a_ctor_with_no_esl_surface() {
+    let pair = serde_json::json!({"ctor": "Pair", "args": [
+        {"ctor": "UnitVal", "args": []},
+        {"ctor": "UnitVal", "args": []},
+    ]});
+    let err = print_type_expr(&pair, &mut Namespaces::new()).expect_err("Pair has no surface");
+    assert!(err.message.contains("no ESL surface"), "{err}");
+}
+
+/// Binder names the DCG generates (`G#0`) are not legal identifiers; renaming them must not
+/// capture a free occurrence that happens to carry the replacement name.
+#[test]
+fn renamed_binders_do_not_capture() {
+    // exists G#0 : Set => x0(G#0)   — `x0` is free, and is the printer's first choice of name.
+    let term = serde_json::json!({"ctor": "Sig", "args": [
+        "G#0",
+        {"ctor": "Sort", "args": [level_tree(1)]},
+        {"ctor": "App", "args": [{"ctor": "Var", "args": ["x0"]}, {"ctor": "Var", "args": ["G#0"]}]},
+    ]});
+    let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
+    assert!(
+        !printed.starts_with("exists x0 "),
+        "renamed the binder onto a free name already in the term: {printed}"
+    );
+}
+
+/// `Layout::Pretty` may only change whitespace. Every corpus term is printed both ways, and both
+/// renderings must compile to the same term — otherwise the readable form on disk would commit
+/// something other than what the flat form does.
+#[test]
+fn pretty_layout_changes_only_whitespace() {
+    use eigenius_kernel::esl::print::{print_type_expr_with, Layout};
+
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let mut checked = 0usize;
+    let mut broke_a_line = 0usize;
+
+    for path in CORPUS {
+        let text = std::fs::read_to_string(path).expect("corpus file");
+        let resources = esl::compile(&text, layer).expect("corpus compiles");
+        for (label, term) in terms_in(&resources) {
+            if !is_d47_term(&term) {
+                continue;
+            }
+            let flat = print_type_expr(&term, &mut Namespaces::new()).expect("flat");
+            let mut pns = Namespaces::new();
+            let pretty = print_type_expr_with(&term, &mut pns, Layout::Pretty, 0).expect("pretty");
+            if pretty.contains('\n') {
+                broke_a_line += 1;
+            }
+            // Whitespace-insensitive equality is not enough — a break could land inside a token.
+            // Compile both and compare the terms.
+            let a = print_then_compile(&term, "", layer).expect("flat recompiles");
+            let b = wrap_and_compile(&pretty, &pns, layer)
+                .unwrap_or_else(|e| panic!("{label}: pretty form does not compile: {e}"));
+            assert_eq!(
+                alpha_canon_tagged(&a),
+                alpha_canon_tagged(&b),
+                "{label}: pretty and flat compile to different terms"
+            );
+            checked += 1;
+            assert_ne!(flat, "", "{label}: empty rendering");
+        }
+    }
+    assert!(checked > 0, "no D47 terms in the corpus");
+    assert!(
+        broke_a_line > 0,
+        "no term was long enough to break — the pretty path went untested"
+    );
+    eprintln!("{checked} terms print identically flat and pretty ({broke_a_line} broke a line)");
+}
+
+/// `Type n` is the only undelimited multi-token form the printer emits, so it is the only one a
+/// surrounding construct could split. Every position that could do so is checked here, at levels
+/// on both sides of the `Prop` / `Set` / `Type n` spelling boundary.
+///
+/// **Regression.** The printer emitted `Type(1)`, which the parser rejects outright (`expected
+/// non-negative integer level after `Type`, found LParen`) — so no term carrying a universe above
+/// `Set` could be decompiled into source that reparses. `Prop` (`Sort 0`) and `Set` (`Sort 1`) are
+/// spelled as single tokens and were unaffected, which is exactly why a corpus that only uses
+/// `Succ^n(Zero)` as the encoder emits it.
+fn level_tree(n: u64) -> serde_json::Value {
+    let mut v = serde_json::json!({"ctor": "Zero", "args": []});
+    for _ in 0..n {
+        v = serde_json::json!({"ctor": "Succ", "args": [v]});
+    }
+    v
+}
+
+/// those two did not catch it.
+#[test]
+fn sorts_round_trip_in_every_position() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let mut checked = 0usize;
+
+    // 0 → `Prop`, 1 → `Set`, 2 and up → `Type n`. Both spellings, so the test would still hold if
+    // the boundary moved.
+    for level in [0u64, 1, 2, 7] {
+        // `Sort`'s argument is an `eigentt:Level` tree — `Set` is `Succ(Zero)`,
+        // not `1`. Built here the way the encoder builds it, so the comparison below is against
+        // the encoding a fresh compile produces. There is no numeral form to test: retyping the
+        // ctor moved the manifest, and the reseed that forced re-encodes every term from source.
+        let s = serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]});
+        let cases = [
+            ("bare", s.clone()),
+            (
+                "arrow domain",
+                serde_json::json!({"ctor": "Pi", "args": ["", s.clone(), s.clone()]}),
+            ),
+            (
+                "App argument",
+                serde_json::json!({"ctor": "App", "args": [
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]},
+                    s.clone(),
+                ]}),
+            ),
+            (
+                "binder domain",
+                serde_json::json!({"ctor": "Sig", "args": [
+                    "x", s.clone(), {"ctor": "Var", "args": ["x"]},
+                ]}),
+            ),
+            (
+                "under a projection",
+                serde_json::json!({"ctor": "Fst", "args": [
+                    {"ctor": "Sig", "args": ["x", s.clone(), {"ctor": "Var", "args": ["x"]}]},
+                ]}),
+            ),
+        ];
+        for (position, term) in cases {
+            let label = format!("Sort {level} in {position}");
+            let mut ns = Namespaces::new();
+            let printed = print_type_expr(&term, &mut ns).expect("prints");
+            let back = wrap_and_compile(&printed, &ns, layer)
+                .unwrap_or_else(|e| panic!("{label}: printed `{printed}` does not compile: {e}"));
+            assert_eq!(
+                alpha_canon_tagged(&term),
+                alpha_canon_tagged(&back),
+                "{label}: printed `{printed}`, which compiles to a different term"
+            );
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} sort placements round-trip");
+}
+
+/// Compile an already-printed type-expression body in a resource-property slot.
+fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value, String> {
+    // The preamble comes from the same `Namespaces` the body was printed with — the printer
+    // records exactly the aliases it emitted, so there is nothing to keep in sync by hand.
+    let src = format!(
+        "{}namespace rt = \"urn:eigenius:roundtrip\";\n\nresource rt:probe : rt:Probe {{\n    \
+         rt:term = type_expr(\n{body}\n    );\n}}\n",
+        ns.preamble()
+    );
+    let resources = esl::compile(&src, layer).map_err(|errs| {
+        let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+        format!("{}\n--- source ---\n{src}", msgs.join("; "))
+    })?;
+    let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
+        .expect("well-formed IRI");
+    for r in &resources {
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
+        }
+    }
+    Err("no rt:term".into())
+}
+
+/// **Polymorphic levels round-trip through ESL** (N3 §3 as revised).
+///
+/// This test asserted the OPPOSITE until the surface syntax landed: that the printer refuses a
+/// polymorphic level, recorded as a documented limitation. It was evidence the design was
+/// incomplete — without syntax nothing can author a `Level::Param`, so `uparams` would have had
+/// nothing to generalise and universe polymorphism would have been unreachable from the language.
+///
+/// The forms are Lean 4's: `Sort u`, `Sort (max u v)`, `Sort (imax u v)`, `Sort (u + 1)`.
+#[test]
+fn polymorphic_levels_round_trip_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let param = |n: &str| serde_json::json!({"ctor": "Param", "args": [n]});
+    let cases = [
+        ("Sort u", param("u")),
+        (
+            "Sort (max u v)",
+            serde_json::json!({"ctor": "Max", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (imax u v)",
+            serde_json::json!({"ctor": "IMax", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (u + 2)",
+            serde_json::json!({"ctor": "Succ", "args": [
+                {"ctor": "Succ", "args": [param("u")]}
+            ]}),
+        ),
+    ];
+    for (expected_source, level) in cases {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level]});
+        let mut ns = Namespaces::new();
+        let printed = print_type_expr(&term, &mut ns).expect("a polymorphic level prints");
+        assert_eq!(printed, expected_source, "surface spelling");
+        let back = wrap_and_compile(&printed, &ns, layer)
+            .unwrap_or_else(|e| panic!("`{printed}` must recompile: {e}"));
+        assert_eq!(back, term, "`{printed}` must round-trip to the same level");
+    }
+}
+
+/// The abbreviations stay abbreviations: a numeral level prints as `Prop` / `Set` / `Type k`,
+/// never as the general `Sort n` form, so the 942 monomorphic uses in the tree print as written.
+#[test]
+fn numeral_levels_still_print_as_the_abbreviations() {
+    for (n, expected) in [(0u64, "Prop"), (1, "Set"), (2, "Type 1"), (4, "Type 3")] {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level_tree(n)]});
+        let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
+        assert_eq!(printed, expected);
+    }
+}

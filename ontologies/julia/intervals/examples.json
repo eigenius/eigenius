@@ -1,0 +1,44 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:R0001:ic50_bounded",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:BoundedBy"],
+    "urn:eigenius:core:short_name": "R0001_ic50_bounded",
+    "urn:eigenius:core:description": "EIG_0042 vs CDK2 (Kinase-Glo): IC50 = 42 nM bounded by the result's reported 95% CI [38, 47] nM. Demonstrates the v1 sanity-bound use of BoundedBy — the institution validates `inf <= value <= sup` on commit and admits the resource if so. Decidable role lets a downstream program use Exp::NativeDecide(BoundedBy(ic50_value, [lo, hi]), _) to reduce to Refl when the bound holds.",
+    "urn:eigenius:julia:intervals:value": 42.0,
+    "urn:eigenius:julia:intervals:interval": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:Interval"],
+      "urn:eigenius:julia:intervals:inf": 38.0,
+      "urn:eigenius:julia:intervals:sup": 47.0
+    }
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:R0001:selectivity_cdk2_over_cdk4",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:BoundedBy"],
+    "urn:eigenius:core:short_name": "R0001_R0002_selectivity",
+    "urn:eigenius:core:description": "Selectivity index of EIG_0042 (IC50_CDK4 / IC50_CDK2). Point estimate 380/42 ~= 9.05; interval-propagated bound [320/47, 450/38] = [6.81, 11.84] obtained by IntervalArithmetic.jl on the per-target CI bounds. AutoOnLoad validates `inf <= value <= sup`.",
+    "urn:eigenius:julia:intervals:value": 9.047619047619047,
+    "urn:eigenius:julia:intervals:interval": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:Interval"],
+      "urn:eigenius:julia:intervals:inf": 6.808510638297872,
+      "urn:eigenius:julia:intervals:sup": 11.842105263157894
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:R0001:hill_inhibition_bound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:ProvesBoundOn"],
+    "urn:eigenius:core:short_name": "R0001_hill_bound",
+    "urn:eigenius:core:description": "For the kinase-activity-remaining function h(c) = K/(K+c) parameterised at K = IC50 = 42 nM (EIG_0042 vs CDK2), bound the function on the assay's compound-concentration range c in [0, 1000] nM. h is monotonically decreasing, so h([0, 1000]) = [h(1000), h(0)] = [42/1042, 1] = [0.04031, 1.0]. The institution's interval extension reproduces this on commit.",
+    "urn:eigenius:julia:intervals:function_source": "c -> 42.0 / (42.0 + c)",
+    "urn:eigenius:julia:intervals:domain": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:Interval"],
+      "urn:eigenius:julia:intervals:inf": 0.0,
+      "urn:eigenius:julia:intervals:sup": 1000.0
+    },
+    "urn:eigenius:julia:intervals:interval": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:julia:intervals:Interval"],
+      "urn:eigenius:julia:intervals:inf": 0.04030710172744722,
+      "urn:eigenius:julia:intervals:sup": 1.0
+    }
+  }
+]

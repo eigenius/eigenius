@@ -1,0 +1,25 @@
+[
+  {
+    "@id": "urn:eigenius:comorphisms:symbolics_to_jump:m_id_optimisation_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
+    "urn:eigenius:core:short_name": "m_id_optimisation_problem",
+    "urn:eigenius:core:description": "Identity EigenTT term on `jump:OptimisationProblem`. Body is a `program:Var` referencing the bound parameter, so this Lambda has type `OptimisationProblem → OptimisationProblem`. Realises the typed middle `m` of the Symbolics → JuMP Comorphism (D32 §6 generalised): the source-side ExportFormat (`ef_symb_to_jump_input`) already produces a fully-formed OptimisationProblem via `frame_as_optimisation_problem`, so the cross-institution boundary needs no payload translation — the framing on the Symbolics side is what carries the JuMP-side context (variables, bounds, sense, constraints) into the typed shape. Same pattern as `catalyst_to_diffeq:m_id_ode_problem`.",
+    "urn:eigenius:program:parameter": "p",
+    "urn:eigenius:program:parameter_type": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+      "urn:eigenius:program:name": "p"
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:comorphisms:symbolics_to_jump",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:core:short_name": "symbolics_to_jump",
+    "urn:eigenius:core:description": "Cross-institution Comorphism — Symbolics → JuMP. The triple (s, m, t) where s = `ef_symb_to_jump_input` (Symbolics-side framing of a `SymbolicsToJuMPInput` to a chain-typed `OptimisationProblem` via `frame_as_optimisation_problem` — identity on the wrapped FormulaTerm), m = `m_id_optimisation_problem` (the identity Lambda on OptimisationProblem), t = `if_jump_optimisation_problem` (JuMP-side reify of the OptimisationProblem payload). The chain-side formalisation of D27 §4.2's natural pairing: a user authors an objective via Symbolics (perhaps as the result of `qc_symb_simplify`), frames it with the optimisation context (variables / bounds / sense / constraints), and pipes the typed result into a JuMP-HiGHS solve. Marked `exact: false` because the framing imposes structure (variables, sense, constraints) not present in the source SymbolicExpression — the typed FormulaTerm content is bit-for-bit preserved, but the comorphism as a whole picks one of many valid framings.",
+    "urn:eigenius:institution:export_format": "urn:eigenius:symbolics:formats:ef_symb_to_jump_input",
+    "urn:eigenius:institution:transformation": "urn:eigenius:comorphisms:symbolics_to_jump:m_id_optimisation_problem",
+    "urn:eigenius:institution:import_format": "urn:eigenius:jump_highs:formats:if_jump_optimisation_problem",
+    "urn:eigenius:institution:exact": false
+  }
+]

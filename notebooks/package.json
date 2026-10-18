@@ -1,0 +1,50 @@
+{
+  "name": "@eigenius/notebooks",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lang-markdown": "^6.3.0",
+    "@codemirror/language": "^6.10.3",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.34.1",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-web": "^2.1.1",
+    "@dagrejs/dagre": "^3.0.0",
+    "@eigenius/client": "file:../clients/eigenius-ts",
+    "@fluentui/react-charts": "^9.3.18",
+    "@fluentui/react-components": "^9.55.0",
+    "@fluentui/react-icons": "^2.0.325",
+    "@fluentui/react-nav": "^9.3.24",
+    "@types/d3-hierarchy": "^3.1.7",
+    "@uiw/react-codemirror": "^4.23.5",
+    "@xyflow/react": "^12.10.2",
+    "cbor-x": "^1.6.4",
+    "d3-hierarchy": "^3.1.2",
+    "katex": "^0.16.45",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
+  }
+}

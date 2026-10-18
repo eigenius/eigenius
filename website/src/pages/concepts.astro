@@ -1,0 +1,203 @@
+---
+// Concepts landing — hand-authored polished page that introduces
+// the framework's vocabulary and routes readers into the deeper
+// concept pages (which still render through Starlight).
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import WarrantMap from "../components/WarrantMap.astro";
+import AudienceCard from "../components/AudienceCard.astro";
+import YouTubeEmbed from "../components/YouTubeEmbed.astro";
+
+const description =
+  "The structural ideas behind Eigenius. The four-warrant taxonomy, domain bridges, institutions, and the feedback loop that makes AI reasoning agents auditable — written for readers who want to understand the framework without committing to learning the platform.";
+---
+
+<BaseLayout title="Concepts — Eigenius" description={description} current="concepts">
+    <!-- ───────── Hero ───────── -->
+    <section class="concepts-hero">
+      <div class="concepts-hero-inner">
+        <span class="hero-eyebrow">Concepts · the framework's vocabulary</span>
+        <h1 class="concepts-headline">
+          The structural ideas<br />behind Eigenius.
+        </h1>
+        <p class="concepts-pitch">
+          This section is for readers who want to understand the
+          framework without committing to learning the platform.
+          What a typed knowledge graph is, why four warrant
+          categories instead of one accountability surface, and
+          what changes when scientific reasoning becomes
+          machine-checkable. If you want to <em>try</em> the
+          platform, head to <a href="/start/">Get started</a> or
+          <a href="/docs/">Docs</a> instead.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Why AI reasoning needs this ───────── -->
+    <section class="section section-tinted">
+      <div class="section-inner">
+        <span class="section-eyebrow">The feedback loop</span>
+        <h2 class="section-title">
+          Why are coding agents great<br />
+          and reasoning agents not?
+        </h2>
+        <p class="section-prose">
+          AI coding agents are unreasonably good because a compiler,
+          a type-checker, and a test suite give them a feedback loop
+          they cannot fake. AI reasoning agents, by contrast, produce
+          prose that nobody mechanically checks &mdash; so brilliance
+          and hallucination look identical at the surface. The video
+          below frames the move: build a feedback loop for AI thought
+          out of typed chain commits the kernel can verify.
+        </p>
+        <div class="watch-single">
+          <YouTubeEmbed
+            videoId="_yGO5p1YUjs"
+            title="Eigenius — The Feedback Loop for AI Thought"
+            description="Why AI coding agents are incredibly effective while AI reasoning agents remain dangerously unreliable, and how a typed-knowledge-graph kernel closes the gap by being the compiler-for-AI-thought the reasoning side has been missing."
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Four warrants ───────── -->
+    <section class="section">
+      <div class="section-inner">
+        <span class="section-eyebrow">The four warrants</span>
+        <h2 class="section-title">
+          Every claim &mdash; human or AI &mdash;<br />
+          lands in one of four categories.
+        </h2>
+        <p class="section-prose">
+          Three warrant kinds are mechanical &mdash; an instrument
+          run, a deterministic computation, or a formal proof &mdash;
+          and can be independently re-executed by anyone with read
+          access. The fourth carries an authoritative warrant: a
+          named declarer is on record, and the citation chain is
+          examinable. The distinction is what an AI agent must
+          declare when it commits a claim, and what stops a
+          hallucination from masquerading as a mechanical derivation.
+        </p>
+        <WarrantMap />
+        <p class="section-footnote">
+          The four categories are <em>peers</em>, not a hierarchy.
+          The chain doesn't prevent an AI from declaring something
+          false &mdash; but it does prevent it from passing a
+          declaration off as a mechanical warrant.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Read on ───────── -->
+    <section class="section section-tinted">
+      <div class="section-inner">
+        <span class="section-eyebrow">Read on</span>
+        <h2 class="section-title">
+          Three deeper concepts.
+        </h2>
+        <div class="audience-grid">
+          <AudienceCard
+            audience="Domain bridges"
+            tagline="The declarative first move in crossing between domains."
+            bullets={[
+              "Formulate the entities and propositions of a domain",
+              "State implications that link them to a neighbouring vocabulary",
+              "Citable, refutable, chain-resident — translation as data",
+            ]}
+            href="/concepts/domain-bridges/"
+            linkLabel="Read about domain bridges →"
+          />
+          <AudienceCard
+            audience="Institutions"
+            tagline="How runtimes cooperate without sharing a language."
+            bullets={[
+              "Goguen–Burstall institutions as the platform's modularity surface",
+              "Comorphisms: typed translations between runtime boundaries",
+              "How institutions lift domain bridges into live computation",
+            ]}
+            href="/concepts/institutions/"
+            linkLabel="Read about institutions →"
+          />
+          <AudienceCard
+            audience="Justification logic"
+            tagline="The modal calculus behind the warrant taxonomy."
+            bullets={[
+              "Artemov's justification logic, chain-instantiated",
+              "JustifiedBy as a typed inductive over evidence",
+              "For the academically curious — coming soon",
+            ]}
+            href="/concepts/justification-logic/"
+            linkLabel="Read the placeholder →"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── See it in practice ───────── -->
+    <section class="section">
+      <div class="section-inner">
+        <span class="section-eyebrow">See it in practice</span>
+        <h2 class="section-title">
+          From idea to a worked example.
+        </h2>
+        <p class="section-prose">
+          When you're ready to see all of this end-to-end in a real
+          workflow, the <a href="/examples/drug-screening/">
+          drug-screening example</a> walks the chain from raw IC₅₀
+          plate readings to the final designation. Five chain
+          commits, three warrant kinds, one domain bridge, one
+          reasoning certificate &mdash; everything type-checked at
+          commit time.
+        </p>
+        <p class="hero-actions">
+          <a class="cta cta-primary" href="/examples/drug-screening/">
+            Read the worked example
+          </a>
+          <a class="cta cta-secondary" href="/start/">
+            Or get started locally
+          </a>
+        </p>
+      </div>
+    </section>
+</BaseLayout>
+
+<style>
+  /* Page-unique styles. Shared chrome lives in custom.css and the
+     TopNav / SiteFooter components. */
+
+  .concepts-hero {
+    padding: 3rem 1.5rem 3.5rem 1.5rem;
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .concepts-hero-inner {
+    max-width: 44rem;
+  }
+
+  .concepts-headline {
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 0.5rem 0 1rem 0;
+  }
+
+  .concepts-pitch {
+    font-size: clamp(1rem, 1.4vw, 1.15rem);
+    color: var(--sl-color-gray-3);
+    line-height: 1.55;
+    max-width: 56ch;
+  }
+
+  .concepts-pitch a {
+    color: var(--sl-color-text-accent);
+  }
+
+  /* The video card sits centered under the section title with the
+     same max-width treatment used on the landing-page Watch section. */
+  .watch-single {
+    max-width: 48rem;
+    margin: 1.4rem auto 0 auto;
+  }
+</style>

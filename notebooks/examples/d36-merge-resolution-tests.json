@@ -1,0 +1,187 @@
+{
+  "format_version": 1,
+  "meta": {
+    "title": "D36 Merge Resolution — Manual Test Scenarios",
+    "description": "Manual walk-through of the Phase 15 / D36 merge-resolution UX. Run the fixture cell once on `main`, tag the resulting layer as `d36-base`, then for each scenario create two fresh branches off that tag (one per side), run the corresponding ESL cell on each, and drive the resolution flow per the markdown instructions. Must-pass set before closing Phase 15: 1, 5, 8, 9, 10.",
+    "created": "2026-05-17T00:00:00Z",
+    "modified": "2026-05-17T00:00:00Z",
+    "eigenius_version": "0.1.0"
+  },
+  "cells": [
+    {
+      "id": "d36a0000-0000-4000-8000-000000000001",
+      "type": "markdown",
+      "source": "# D36 Merge Resolution — Manual Test Scenarios\n\nWalk-through of the Phase 15 / D36 merge-resolution UX. Each scenario produces a *witnessed-merge conflict* by running two ESL cells against two divergent branches forked from a shared starting layer, then steps you through the resolution flow.\n\n## Setup\n\n1. Run **the fixture cell below** (Cell 2) on `main`. It commits the shared ontology (Profile, profile_for, weight, Mammal, Reptile) that all later scenarios extend.\n2. On the resulting commit, click **History → Inspect resources…** (or use the History detail panel's **Create tag…**) to **tag it `d36-base`**. The tag pins the layer (also protects it from GC) and gives subsequent scenarios a stable starting point.\n3. For each scenario:\n   - Open **Branches → New branch**. Pick **Tag → d36-base**, name the branch `sN-a` (where N is the scenario number), tick *Switch to this branch after creating*, click Create.\n   - Run the **branch-A ESL cell** for that scenario on the new branch.\n   - Switch back to `main`, open **New branch** again, pick **Tag → d36-base**, name it `sN-b`, switch to it.\n   - Run the **branch-B ESL cell**.\n   - Open the **Merge** rail. Source = `sN-b`, Target = `sN-a`. Click **Refresh preview** → expect *Predicted: conflict*. Click **Merge** → click **Resolve conflicts**.\n   - Follow the scenario-specific resolution steps in its markdown cell.\n\n## Must-pass set\n\nBefore closing Phase 15, these five must succeed end-to-end: **1** (Rename happy path) · **5** (Restructure — heaviest editor) · **8** (cell-error auto-clear) · **9** (BRANCH_CAS_RACE recovery) · **10** (localStorage persistence).\n\n## Coverage summary\n\n| # | D36 surface |\n|---|---|\n| 1 | StrategyPicker + RenameEditor + cascade ack + success card |\n| 2 | QuotientEditor → KeepOne + winner radio |\n| 3 | QuotientEditor → KeepNeither + ancestor-fallback semantics |\n| 4 | KeepBoth greyed-out rationale (§15.5) |\n| 5 | RestructureEditor + new-parent definition |\n| 6 | Happy-path Witness via D37 — `merge_comorphism` ESL → commit-time validators (Rule 18 + Rule 19) → WitnessEditor Combobox → successful merge |\n| 7 | MALFORMED_RESOLUTION + Try-again loop |\n| 8 | Cell auto-clear on success (§15.3) |\n| 9 | BRANCH_CAS_RACE recovery + race-diff banner (§11) |\n| 10 | localStorage persistence + cancel cleanup (§10) |\n| 11 | Empty-cascade short-circuit (§7.1) |\n| 12 | Fold-after-20 section UI |\n| 13 | In-app help link |\n| 14 | Telemetry events |"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000002",
+      "type": "esl",
+      "source": "// Fixture — shared ontology every scenario extends. Run this on\n// `main`, then tag the resulting layer as `d36-base`.\n//\n// `Patient` is a placeholder in the base so subsequent scenarios can\n// reference it (in particular, the witness in Scenario 6's setup\n// commits a `merge_comorphism for project:Patient` which needs\n// Patient to already exist in the chain). Branches s1-a/b, s6-a/b,\n// etc. re-declare Patient with different descriptions to create the\n// IriCollision conflict the scenarios drive resolution on.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\n// --- Shared classes & properties --------------------------------\n\nclass project:Profile {\n    description = \"Patient profile, references Patient by IRI.\";\n    requires project:profile_for;\n}\n\nproperty project:profile_for : core:resource {\n    description = \"Reference to a Patient resource.\";\n}\n\nproperty project:weight : core:float {\n    description = \"Patient weight in kilograms.\";\n}\n\nclass project:Patient {\n    description = \"Placeholder Patient class — scenario branches re-declare with different descriptions to drive IriCollision.\";\n}\n\n// --- Animals (used in the SubclassConflict scenario, #5) --------\n\nclass project:Mammal { description = \"Warm-blooded vertebrate.\"; }\nclass project:Reptile { description = \"Cold-blooded vertebrate.\"; }\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000003",
+      "type": "markdown",
+      "source": "## Scenario 1 — IriCollision resolved by Rename\n\n**Tests.** StrategyPicker · `RenameEditor` · cascade ack · success card.\n\n**Setup.** Create branches `s1-a` and `s1-b`, both off the `d36-base` tag. Run the branch-A cell on `s1-a`, the branch-B cell on `s1-b`.\n\n**Resolution.**\n1. Merge rail → source `s1-b`, target `s1-a` → **Refresh preview** → expect *Predicted: conflict* listing `urn:project:Patient`.\n2. Click **Merge** → result block shows *Conflict — target unchanged* with **Resolve conflicts** button. Click it.\n3. Picker mounts with one conflict card (kind: `IriCollision`).\n4. Pick **Rename**. Side = B. New IRI = `urn:project:billing:Patient`. Preview button enables.\n5. Click **Preview cascade**. The cascade may be empty (no Profile instance was committed) — that's fine; if any items appear, tick them.\n6. Click **Commit merge**. Expect the success card: *Merge committed*.\n7. Switch to `s1-a` in the Branches panel — confirm the tip advanced to the merge layer."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000004",
+      "type": "esl",
+      "source": "// Scenario 1 — branch A (run on `s1-a`).\n// Patient as a medical-records class that requires the inherited\n// `weight` property.\n\nnamespace project = \"urn:project\";\n\nclass project:Patient {\n    description = \"Medical-records Patient.\";\n    requires project:weight;\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000005",
+      "type": "esl",
+      "source": "// Scenario 1 — branch B (run on `s1-b`).\n// Patient with a different (billing-system) description — same IRI,\n// different body, structurally an IriCollision.\n\nnamespace project = \"urn:project\";\n\nclass project:Patient {\n    description = \"Billing-system Patient.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000006",
+      "type": "markdown",
+      "source": "## Scenario 2 — PropertyDataType resolved by KeepOne\n\n**Tests.** `QuotientEditor` keep-one path · winner radio.\n\n**Setup.** Create branches `s2-a` and `s2-b`, both off `d36-base`. Run the branch-A cell on `s2-a`, the branch-B cell on `s2-b`.\n\n**Resolution.**\n1. Merge rail → source `s2-b`, target `s2-a` → **Refresh preview** → expect *Predicted: conflict* listing `urn:project:weight`.\n2. Click **Merge** → **Resolve conflicts**. One conflict card; kind = `PropertyDataType`.\n3. Pick **Keep one**. Winner = A.\n4. Preview cascade → ack any items that appear → Commit. Expect success."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000007",
+      "type": "esl",
+      "source": "// Scenario 2 — branch A (run on `s2-a`).\n// Redeclare `weight` as `core:float` (matches the fixture; the new\n// layer's contribution still triggers the divergence with B).\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:float {\n    description = \"Weight in kg, fractional precision.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000008",
+      "type": "esl",
+      "source": "// Scenario 2 — branch B (run on `s2-b`).\n// Redeclare `weight` as `core:integer` — the data_type disagreement\n// produces a `PropertyDataType` conflict on the merge.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:integer {\n    description = \"Weight in grams as an integer.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000009",
+      "type": "markdown",
+      "source": "## Scenario 3 — PropertyDataType resolved by KeepNeither\n\n**Tests.** `QuotientEditor` keep-neither path · ancestor-fallback / tombstone semantics.\n\n**Setup.** Create branches `s3-a` and `s3-b`, both off `d36-base`. Run the branch-A and branch-B cells (same shape as Scenario 2).\n\n**Resolution.**\n1. Drive to the picker. One conflict card.\n2. Pick **Keep neither**.\n3. Preview → ack → Commit. Expect success.\n4. **Verify ancestor fallback.** On the merged branch, run an EigenQL cell that resolves `project:weight`. Expect the ancestor's `core:float` definition from `d36-base` to be the visible body (because the ancestor had a body for this IRI; the tombstone path only fires when the ancestor was empty)."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000a",
+      "type": "esl",
+      "source": "// Scenario 3 — branch A (run on `s3-a`). Same shape as Scenario 2.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:float {\n    description = \"Weight in kg, fractional precision.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000b",
+      "type": "esl",
+      "source": "// Scenario 3 — branch B (run on `s3-b`). Same shape as Scenario 2.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:integer {\n    description = \"Weight in grams as an integer.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000c",
+      "type": "markdown",
+      "source": "## Scenario 4 — KeepBoth greyed-out rationale (D36 §15.5)\n\n**Tests.** Applicability-greyed UI · inline rationale copy.\n\n**Setup.** Create branches `s4-a` and `s4-b`, both off `d36-base`. Run the branch-A and branch-B cells (same shape as Scenario 2).\n\n**Steps.**\n1. Open the resolution flow.\n2. Locate the **Keep both** radio in the strategy list.\n3. Expect: radio **disabled** with the generic inline caption *\"Not applicable to this conflict kind.\"* — D36 §15.5's kind-specific verbiage (e.g. \"data_type is single-valued…\") was deferred and is not in v1; the longer story is one click away via the **Strategy reference** help link.\n4. Do not commit — close with **Cancel**."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000d",
+      "type": "esl",
+      "source": "// Scenario 4 — branch A (run on `s4-a`). Same shape as Scenario 2.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:float {\n    description = \"Weight in kg, fractional precision.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000e",
+      "type": "esl",
+      "source": "// Scenario 4 — branch B (run on `s4-b`). Same shape as Scenario 2.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nproperty project:weight : core:integer {\n    description = \"Weight in grams as an integer.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000000f",
+      "type": "markdown",
+      "source": "## Scenario 5 — SubclassConflict resolved by Restructure\n\n**Tests.** `RestructureEditor` · new-parent definition · multi-select (heaviest editor).\n\n**Setup.** Create branches `s5-a` and `s5-b`, both off `d36-base`. The fixture already committed `Mammal` and `Reptile` for you. Run the branch-A and branch-B cells on their respective branches.\n\n**Resolution.**\n1. Drive to the picker. One conflict card; kind = `SubclassConflict`.\n2. Pick **Restructure**.\n3. Affected class = `urn:project:Dog`. New parent IRI = `urn:project:Animal`. Toggle **Introduce new parent class** = on.\n4. Sub-form: short_name = `Animal`, description = `Common parent for Mammal and Reptile.`.\n5. Classes-under-new multi-select: tick `urn:project:Mammal` and `urn:project:Reptile`.\n6. Toggle **Re-parent affected class under new parent** = off (Dog inherits through the new lineage; the test exercises the toggle being available, not its semantics).\n7. Preview → ack → Commit. Expect success."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000010",
+      "type": "esl",
+      "source": "// Scenario 5 — branch A (run on `s5-a`).\n// Dog inherits from Mammal.\n\nnamespace project = \"urn:project\";\n\nclass project:Dog : project:Mammal {\n    description = \"Domestic dog (mammal lineage).\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000011",
+      "type": "esl",
+      "source": "// Scenario 5 — branch B (run on `s5-b`).\n// Dog inherits from Reptile — for testing only; the conflict drives\n// the Restructure resolution that introduces a shared parent.\n\nnamespace project = \"urn:project\";\n\nclass project:Dog : project:Reptile {\n    description = \"Dog (reptile lineage — for testing only).\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000012",
+      "type": "markdown",
+      "source": "## Scenario 6 — Witness, happy path (D37)\n\n**Tests.** D37 PRs 2+3 end-to-end: `merge_comorphism` ESL declaration → commit-time validator (Rule 18 + Rule 19) → `WitnessEditor` Combobox of applicable witnesses → resolver's apply-time class check → successful merge layer.\n\n**Kernel status.** D37 PR 1 wired apply-time class enforcement (`resolve_merge_comorphism` early-rejects on `merge_target_class` mismatch). PR 2 added the ESL surface (`merge_comorphism`, `lambda`, `pi`, `for`) plus commit-time validators for `MergeComorphism` shape (Rule 18) and standalone Lambda well-typedness (Rule 19, NbE-backed). PR 3 turned the `WitnessEditor` into an EigenQL-driven Combobox of applicable comorphisms.\n\n**Witness vs. other strategies.** Witness operates at the **instance** level — `merge_comorphism for A` means \"applies when both sides of an IriCollision are instances of class A.\" The conflict's `is_a[0]` (the class the instances belong to) is what the WitnessEditor's Combobox query filters on. **Class-level redeclarations** like Scenario 1 (both branches re-defining `class project:Patient`) have `is_a[0] = urn:eigenius:core:Class`, so a witness `for project:Patient` won't surface — Rename / Restructure fit those shapes. This scenario uses an instance-level conflict so the witness picker resolves.\n\n**Setup.**\n\n1. Create branches `s6-a` and `s6-b`, both off `d36-base`. The fixture already commits `class project:Patient` + `property project:weight`.\n2. Run the **branch-A cell** on `s6-a` — commits `resource project:patient_42 : project:Patient { weight = 75.0 }`.\n3. Switch back to `main`, create `s6-b` off `d36-base`, switch to it. Run the **branch-B cell** — commits the same IRI with `weight = 80.0`.\n4. Switch back to `s6-a` (the branch the merge will target). Run the **witness cell** below. Validator (Rule 19) resolves `project:Patient` through `s6-a`'s chain (the fixture's Patient class), commits the synthesised Lambda + `MergeComorphism` cleanly. The witness lives on `s6-a` and is reachable through that branch at merge time (`resolve_merge_comorphism` searches both branch tips' contributions, not just the ancestor).\n\n**Resolution.**\n\n1. Open the Merge rail. Source = `s6-b`, target = `s6-a`. Drive to the picker. One conflict card; kind = `IriCollision` on `urn:project:patient_42`.\n2. Pick **Witness**. The `WitnessEditor` auto-extracts the conflict's class from `branchABodyJson` (`urn:project:Patient`) and queries the chain for `MergeComorphism` resources with `merge_target_class = urn:project:Patient`.\n   - **Expected**: `patient_take_b` appears as a single option in the Combobox.\n3. Select `patient_take_b`. The Combobox commits its IRI as the `WitnessStrategy`'s `comorphismIri`.\n4. Click **Preview cascade**. The cascade may be empty.\n5. Click **Commit merge**. Expect: success card *\"Merge committed\"*. The merged `urn:project:patient_42` is **branch B's body** (weight = 80.0) because the witness's `Var \"b\"` returns the second argument unchanged.\n6. Switch to `s6-a` in the Branches panel — confirm the tip advanced to the merge layer. Verify the merged instance by running an EigenQL `MATCH project:Patient(?p) { project:weight = ?w } RETURN ?w` query — should return 80.0.\n\n**Negative path (free-form fallback).** For conflict shapes where the WitnessEditor falls back to the free-form input (e.g., class-level conflicts as in Scenario 1, or paste an unresolved IRI), the apply-time resolver still surfaces `MergeComorphismNotFound` → `MALFORMED_RESOLUTION`. The Try-again button drops back to picking — the D36 error UX is preserved."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001f",
+      "type": "esl",
+      "source": "// Scenario 6 — commit the take-B witness on the shared base.\n//\n// This is D37 §9.1 — the simplest witness: return Branch B's body\n// unchanged. The compiler lowers this into:\n//\n// 1. A synthesised standalone Lambda at\n//    `urn:eigenius:auto:lambda:<sha256>` carrying:\n//      - 3 nested Lambda binders for (a, b, opt)\n//      - `parameter_type` slots: Patient, Patient, Option<Patient>\n//      - `program:type` = `pi a : Patient, b : Patient,\n//                          opt : Option<Patient> => Patient`\n//      - Body: Var \"b\" (returns the second parameter)\n// 2. A MergeComorphism at `urn:project:patient_take_b`:\n//      - `merge_target_class` = `urn:project:Patient`\n//      - `merge_transformation` = <synthesised-lambda-IRI>\n//\n// Commit-time validators run on both and surface clean.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nmerge_comorphism project:patient_take_b for project:Patient {\n    (a, b, opt) => b\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000013",
+      "type": "esl",
+      "source": "// Scenario 6 — branch A (run on `s6-a`).\n//\n// Instance-level conflict: commit a Patient instance with one\n// weight. Branch B will commit the same IRI with a different\n// weight. The conflict's `is_a[0]` is `urn:project:Patient` (the\n// Patient class the instance belongs to), which is what the\n// WitnessEditor's Combobox query filters on.\n//\n// This differs from Scenario 1's class-level redeclaration shape\n// (where both branches re-declare `class project:Patient`); Witness\n// is the natural strategy for instance-level merges, while Rename\n// fits class-level conflicts.\n\nnamespace project = \"urn:project\";\n\nresource project:patient_42 : project:Patient {\n    project:weight = 75.0;\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000014",
+      "type": "esl",
+      "source": "// Scenario 6 — branch B (run on `s6-b`).\n//\n// Same IRI as branch A's instance, different weight. The merge\n// classifier surfaces this as an IriCollision on\n// `urn:project:patient_42` whose `is_a[0]` is `urn:project:Patient`\n// — Witness picker queries against that class.\n\nnamespace project = \"urn:project\";\n\nresource project:patient_42 : project:Patient {\n    project:weight = 80.0;\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000015",
+      "type": "markdown",
+      "source": "## Scenario 7 — Malformed Rename (collision)\n\n**Tests.** `MALFORMED_RESOLUTION` error path · error MessageBar rendering.\n\n**Setup.** Create branches `s7-a` and `s7-b`, both off `d36-base`. Run the branch-A and branch-B cells (same shape as Scenario 1).\n\n**Resolution.**\n1. Drive to the picker.\n2. Pick **Rename**. Side = B. New IRI = `urn:project:Profile` — an IRI **already taken** by the fixture's `Profile` class.\n3. Preview cascade → expect `MALFORMED_RESOLUTION` from the kernel with a message pointing at the colliding IRI.\n4. Confirm **Try again** drops to `picking`; fix the new IRI to `urn:project:billing:Patient` and proceed."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000016",
+      "type": "esl",
+      "source": "// Scenario 7 — branch A (run on `s7-a`). Same shape as Scenario 1.\n\nnamespace project = \"urn:project\";\n\nclass project:Patient {\n    description = \"Medical-records Patient.\";\n    requires project:weight;\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000017",
+      "type": "esl",
+      "source": "// Scenario 7 — branch B (run on `s7-b`). Same shape as Scenario 1.\n\nnamespace project = \"urn:project\";\n\nclass project:Patient {\n    description = \"Billing-system Patient.\";\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000018",
+      "type": "markdown",
+      "source": "## Scenario 8 — Cell auto-clear on successful resolution\n\n**Tests.** D36 §15.3 — cell-badge auto-dismissal · cellId thread-through.\n\nThis scenario uses the **cell-race path** (two browser tabs) rather than an explicit branch merge, so no per-scenario ESL cells are needed — re-use Scenario 1's ESL.\n\n**Steps.**\n1. Open the notebook in two browser tabs (T1, T2), both pointed at `main`.\n2. T1: run an ESL cell with the Scenario 1 *branch-A* source. Note `main` advances.\n3. **Don't reload T2.** In T2, paste the Scenario 1 *branch-B* ESL into a new cell and run it.\n4. T2's cell should commit but hit `NEEDS_WITNESSED_MERGE` — the cell badge shows `Needs witnessed merge` with a **Resolve in Merge rail** button.\n5. Click the button. Drive a Rename to a successful commit (as in Scenario 1).\n6. After the success card appears, look at the cell that triggered the resolution — its badge should now show a normal merged status (no error indicator). Internally the cell's commit meta was rewritten from `NEEDS_WITNESSED_MERGE` to `TRIVIAL_MERGE`."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000019",
+      "type": "markdown",
+      "source": "## Scenario 9 — Race recovery (BRANCH_CAS_RACE)\n\n**Tests.** §11 error-recovery path · race-diff banner · keyed-by-conflict-id preservation of picks.\n\nUses the cell-race path; no per-scenario ESL cells needed.\n\n**Steps.**\n1. Tab 1: drive the Scenario 1 setup until you have an open resolution session in the `acknowledging` state (cascade previewed, boxes not yet ticked).\n2. Tab 2 (same notebook, same branch as the resolution target): run an ESL cell that **introduces a new conflicting IRI** distinct from `project:Patient`. E.g., add a `class project:Visit { ... }` that also exists with a different body on the resolution's candidate head. Commit succeeds in tab 2, advancing the branch.\n3. Tab 1: click **Commit merge**. Kernel returns `BRANCH_CAS_RACE`.\n4. Expect the flow to drop back to `picking` with the **race-diff banner** showing `New conflicts: project:Visit` (or `+1 new conflict, …`). Your prior Rename pick for `project:Patient` should be **preserved**.\n5. Pick a strategy for the new conflict and continue. Confirm commit succeeds the second time."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001a",
+      "type": "markdown",
+      "source": "## Scenario 10 — Cancel + localStorage persistence\n\n**Tests.** Reload-recovery (D36 §10) · cancel cleans up storage.\n\nUses any conflict setup (Scenario 1 is easiest).\n\n**Steps.**\n1. Drive to the picker, fill in a Rename pick, but **don't preview**.\n2. Reload the page (F5).\n3. The notebook should re-mount the resolution flow at the same `picking` state, with the Rename pick intact. (The Branches panel may need a moment to repopulate.)\n4. Click **Cancel**. The Merge rail returns to its default view.\n5. In devtools → Application → Local Storage → `http://localhost:8080`, confirm the `eigenius.mergeResolution.v1` key has been deleted."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001b",
+      "type": "markdown",
+      "source": "## Scenario 11 — Empty cascade short-circuit (D36 §7.1)\n\n**Tests.** Cascade-preview shortcut when there are no consequences.\n\nUses any conflict setup. Because the fixture only commits a `Profile` *class* (not a Profile *instance* referencing `Patient`), Scenarios 1-2 already trigger an empty cascade.\n\n**Resolution.**\n1. Drive the explicit-merge path from Scenario 2's setup. One conflict card.\n2. Pick **Keep one**, winner = A.\n3. Click **Preview cascade**. Because there are no downstream references, the kernel returns an empty cascade.\n4. Expect the flow to skip the acknowledging state and short-circuit to `committing` (or surface the *\"Resolutions are self-contained — no downstream consequences.\"* empty banner with Commit immediately available — verify which one happens; both are valid per §7.1)."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001c",
+      "type": "markdown",
+      "source": "## Scenario 12 — Fold-after-20 in the cascade preview\n\n**Tests.** Section fold UI for large cascades.\n\nHard to manufacture organically. Skip in routine testing; instead, in devtools, set a breakpoint in `CascadePreviewPane.tsx`'s `Section` and temporarily lower `SECTION_FOLD_THRESHOLD` to 2 while you have a 3+ item cascade open. Confirm:\n\n- Only the first 2 items render initially.\n- A **Show all N** button appears.\n- Clicking it expands; the inverse **Show first 2** appears.\n\nRevert the threshold change before continuing other scenarios."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001d",
+      "type": "markdown",
+      "source": "## Scenario 13 — Help link\n\n**Tests.** §15 in-app docs affordance.\n\n**Steps.** Open any picker (e.g. from Scenario 1's setup), click **Strategy reference** in the picker header. Expect a new tab to open at `https://eigenius.io/`."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-00000000001e",
+      "type": "markdown",
+      "source": "## Scenario 14 — Telemetry events\n\n**Tests.** §15 telemetry sink.\n\n**Steps.**\n1. Open browser devtools console.\n2. Drive any successful Scenario 1 run end-to-end.\n3. Expect to see, in order:\n   - `[merge-resolution] open { state: \"loading\", branch, candidateHeadShort }`\n   - `[merge-resolution] preview { state: \"previewing\", conflictCount }`\n   - `[merge-resolution] commit-success { state: \"done\", mergeLayerShort }`\n4. Drive a Cancel from `picking`. Expect `[merge-resolution] cancel`.\n5. Drive an error path (Scenario 7). Expect `[merge-resolution] error { errorKind, rpc }`."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000020",
+      "type": "markdown",
+      "source": "## Scenario 15 — Provenance records in the Layer Inspector (D38 §3)\n\n**Tests.** D38 PR 1 end-to-end: `MergeResolutionRecord` resources are committed alongside the resolved bodies in every merge layer and surface in the History panel's Layer Inspector.\n\n**Setup.** Any successful merge run leaves a record per resolved conflict on the merge layer. Easiest path: re-run **Scenario 1** (IRI-collision rename) end-to-end and capture the resulting merge-layer id.\n\n**Steps.**\n1. Drive Scenario 1 to a successful merge. Note the merge-layer id from the `done` card.\n2. Open the History panel. Locate the merge layer in the timeline — its name is `merge:<head_a>+<head_b>`.\n3. Expand the Layer Inspector for that layer. Among the layer's contributions you should see a resource at IRI `urn:eigenius:auto:merge-record:<sha256>`.\n4. Inspect that resource. Expect:\n   - `is_a` includes `urn:eigenius:core:MergeResolutionRecord`.\n   - `merge_record_strategy = \"Rename\"`.\n   - `merge_record_conflict_id` matches the conflict id the classifier emitted (e.g. `iri_collision:urn:project:Patient`).\n   - `merge_record_rename_side`, `merge_record_rename_from_iri`, `merge_record_rename_to_iri` populated with the picker's choices.\n   - `merge_record_branch_a_source_layer` / `_branch_b_source_layer` present (cycle-shaped conflicts wouldn't carry these — Scenario 1's IriCollision does).\n5. Optional EigenQL query — the records are chain-resident and queryable. Run in an EigenQL cell:\n\n   ```eigenql\n   USING \"urn:eigenius:core:MergeResolutionRecord\"\n\n   MATCH MergeResolutionRecord(?r) {\n       \"urn:eigenius:core:merge_record_conflict_id\": ?conflict,\n       \"urn:eigenius:core:merge_record_strategy\":    ?strategy\n   }\n   RETURN [] { record: ?r, conflict: ?conflict, strategy: ?strategy }\n   ORDER BY ?conflict\n   ```\n\n   Expect one row per resolved conflict across the chain's merge history.\n\n**Per-strategy variants.** Re-run with Scenario 2 (KeepOne), Scenario 3 (KeepNeither), Scenario 5 (Restructure), Scenario 6 (Witness) to verify each strategy's optional slots:\n- KeepOne: `merge_record_quotient_kind = \"KeepOne\"` + `merge_record_quotient_winner`.\n- KeepNeither: `merge_record_quotient_kind = \"KeepNeither\"` (no winner).\n- Restructure: `merge_record_restructure_new_parent` + `merge_record_restructure_affected_class`.\n- Witness: `merge_record_witness` (comorphism IRI) + `merge_record_witness_source_layer` (the original committing layer's id).\n\n**Idempotency check.** Re-running the same resolution against the same span (re-drive from the picker, pick the same strategy + parameters) must produce a merge layer with the same id. The record's `@id` is content-hashed (`urn:eigenius:auto:merge-record:<sha256>`), so identical resolutions deduplicate naturally."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000021",
+      "type": "markdown",
+      "source": "## Scenario 16 — Witness on a sibling branch (D38 §4)\n\n**Tests.** D38 PR 2 end-to-end: `WitnessEditor`'s \"Search additional branches\" disclosure surfaces witnesses on branches outside the merge span; the kernel's fourth-tier walk applies them; the off-span witness gets copied into the merge layer (D38 §3.2 step-4 off-span path) so the merge layer stays self-contained.\n\n**Setup.**\n\n1. Re-run Scenario 6's setup through **step 3** (so both `s6-a` and `s6-b` exist with `patient_42` and a weight conflict), but **skip the witness cell on `s6-a`** — for this scenario we want the witness to live elsewhere.\n2. From `main`, create a new branch `witness-library` off `d36-base`. Switch to it and run the **witness-library cell** below (same content as Scenario 6's witness cell, but committed on the sibling branch instead of `s6-a`).\n3. Switch back to `s6-a` (the merge target).\n\n**Resolution.**\n\n1. Open the Merge rail. Source = `s6-b`, target = `s6-a`. Drive to the picker. One conflict on `urn:project:patient_42`, kind = `IriCollision`.\n2. Pick **Witness**. The Combobox is empty — `patient_take_b` lives on `witness-library`, not on `s6-a`'s chain.\n3. Click **▸ Search additional branches** (below the Combobox). Type `witness-library` and press Enter (or click Add).\n4. The Combobox re-queries. Expect: `patient_take_b` now appears as the single option.\n5. Select it. Click **Preview cascade** (empty cascade expected). Click **Commit merge**.\n6. Expect the merge to succeed and `urn:project:patient_42` to resolve to weight 80.0 on `s6-a` (branch B's body, per the `λa.λb.λopt.b` witness).\n\n**Off-span copy verification.**\n\n1. Note the merge-layer id from the `done` card. Open the History panel's Layer Inspector for that layer.\n2. Among the layer's contributions you should see both:\n   - The `MergeComorphism` resource at `urn:project:patient_take_b` — copied from `witness-library` into the merge layer per D38 §3.2's off-span guard.\n   - The synthesised transformation `Lambda` at `urn:eigenius:auto:lambda:<sha256>` — same.\n3. Inspect the `MergeResolutionRecord` for the conflict. `merge_record_witness_source_layer` should be the `witness-library` tip's layer id (the *original* committing layer, preserved after the copy).\n4. **GC stability sanity check.** Delete the `witness-library` branch ref (`eigenius db branch delete witness-library` or via the Branches panel). Re-open the merge layer's Layer Inspector — the `MergeComorphism` and Lambda are still resolvable through the merge layer. The off-span copy made the merge layer self-contained.\n\n**In-span no-copy sanity check (contrast).** Re-run Scenario 6 verbatim (witness on `s6-a`, the merge target — *in* the span). After the merge commits, open the merge layer's Layer Inspector and confirm the witness IRI is **not** in the layer's own contributions — the merge layer reaches it through its parent chain instead. D38 §3.2's guard skips the duplication for in-span witnesses.\n\n**Stale-branch tolerance.** With the picker open and the scope set to a name that doesn't exist (e.g. `bogus-branch`), the query silently skips it — the Combobox still surfaces whatever's reachable from the default scope + any valid extras. No hard error, no resolution-time failure."
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000022",
+      "type": "esl",
+      "source": "// Scenario 16 — commit the take-B witness on the sibling\n// `witness-library` branch (NOT on `s6-a`).\n//\n// Same content as Scenario 6's witness cell. The difference is\n// *where* it lives: on a separate branch off `d36-base` rather than\n// on the merge target. This makes the witness off-span from any\n// later s6-b → s6-a merge, so the resolver's fourth-tier walk\n// (D38 §4) is required to surface it and the §3.2 off-span guard\n// copies it into the merge layer.\n//\n// Pre-requisite: create branch `witness-library` off `d36-base` and\n// switch to it before running this cell.\n\nnamespace core    = \"urn:eigenius:core\";\nnamespace project = \"urn:project\";\n\nmerge_comorphism project:patient_take_b for project:Patient {\n    (a, b, opt) => b\n}\n"
+    },
+    {
+      "id": "d36a0000-0000-4000-8000-000000000023",
+      "type": "markdown",
+      "source": "## Post-run cleanup\n\nThe scenarios produce a small but non-trivial chain. To reset, blow away the local DB or `docker compose down -v && docker compose up -d` against the orchestrator stack."
+    }
+  ]
+}

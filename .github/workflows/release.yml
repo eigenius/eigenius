@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: eigeniusacr.azurecr.io  # Update with actual ACR name
+  KERNEL_IMAGE: eigenius-kernel
+  ORCHESTRATION_IMAGE: eigenius-orchestration
+
+jobs:
+  build-and-push:
+    name: Build and push container images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # For Azure OIDC authentication
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests (release mode)
+        run: cargo test --workspace --release
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name eigeniusacr
+
+      - name: Build and push kernel image
+        run: |
+          docker build -f deploy/Dockerfile.kernel -t ${{ env.REGISTRY }}/${{ env.KERNEL_IMAGE }}:${{ github.ref_name }} .
+          docker push ${{ env.REGISTRY }}/${{ env.KERNEL_IMAGE }}:${{ github.ref_name }}
+
+      - name: Build and push orchestration image
+        run: |
+          docker build -f deploy/Dockerfile.orchestration -t ${{ env.REGISTRY }}/${{ env.ORCHESTRATION_IMAGE }}:${{ github.ref_name }} .
+          docker push ${{ env.REGISTRY }}/${{ env.ORCHESTRATION_IMAGE }}:${{ github.ref_name }}
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to ContainerApps (staging)
+        run: |
+          az containerapp update \
+            --name eigenius-kernel \
+            --resource-group eigenius-staging-rg \
+            --image ${{ env.REGISTRY }}/${{ env.KERNEL_IMAGE }}:${{ github.ref_name }}
+
+          az containerapp update \
+            --name eigenius-orchestration \
+            --resource-group eigenius-staging-rg \
+            --image ${{ env.REGISTRY }}/${{ env.ORCHESTRATION_IMAGE }}:${{ github.ref_name }}

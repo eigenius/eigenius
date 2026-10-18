@@ -1,0 +1,91 @@
+[
+  {
+    "@id": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "BoundedBy",
+    "urn:eigenius:core:description": "A scalar `value` claimed to lie within the closed interval [`lower`, `upper`]. The IntervalArithmetic institution's AutoOnLoad QueryClass dispatches a Julia handler (`validate_bounded_by`) that uses `IntervalArithmetic.jl` to verify the inclusion rigorously: `Holds` when the inclusion is proved, `Fails` when refuted, `Undecidable` when the proof is inconclusive. See D27 §4.0.2.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:intervals:value",
+      "urn:eigenius:intervals:lower",
+      "urn:eigenius:intervals:upper"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:intervals:value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "value",
+    "urn:eigenius:core:description": "The scalar value being checked for interval membership.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:lower",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lower",
+    "urn:eigenius:core:description": "Inclusive lower bound of the interval the value is claimed to lie within.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:upper",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "upper",
+    "urn:eigenius:core:description": "Inclusive upper bound of the interval the value is claimed to lie within.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:IntervalFunction",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "IntervalFunction",
+    "urn:eigenius:core:description": "A function over intervals — a `formulas:FormulaTerm` carried as the target shape of the IntervalArithmetic institution's `if_intv_function` ImportFormat. Symmetric on the IntervalArithmetic side to Symbolics' `SymbolicExpression`: both wrap a FormulaTerm. The `m = id` Comorphism between them realises D32 §6.2's identity-on-FormulaTerm bridge: the export and import payloads are bit-identical, so the typed middle is the identity Lambda.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:intervals:term"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:intervals:term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "term",
+    "urn:eigenius:core:description": "The function's typed term — a `formulas:FormulaTerm` value (D32 §4). The chain validator type-checks the value against FormulaTerm's ctor schema at commit time.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:IntervalFunction"]
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:BoundsRequest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "BoundsRequest",
+    "urn:eigenius:core:description": "Composite OnDemand input class for `qc_compute_bounds`: pairs a `SymbolicExpression` (whose `term` is a FormulaTerm) with a `BoundedBy` carrying the domain `[lower, upper]` for the free variable `x`. FIBER dispatch packs both arguments into a single typed resource because the institution-runtime boundary is unary; the institution destructures and runs interval-arithmetic over the domain.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:intervals:expr",
+      "urn:eigenius:intervals:domain"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:intervals:expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr",
+    "urn:eigenius:core:description": "The SymbolicExpression to interval-extend. Its `term` carries the FormulaTerm the institution walks under interval-arithmetic semantics.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundsRequest"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:domain",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "domain",
+    "urn:eigenius:core:description": "Domain interval for the free variable `x`. Carried as a `BoundedBy` resource — its `lower` and `upper` define the evaluation range; `value` is unused on the input side of `qc_compute_bounds`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:intervals:BoundedBy"],
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundsRequest"]
+  }
+]

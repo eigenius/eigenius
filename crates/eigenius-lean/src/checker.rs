@@ -1,0 +1,417 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! In-process Lean 4 proof checking. Wraps
+//! [`nanoda_lib::util::ExportFile::check_all_declars`] behind a
+//! `Verdict`-returning surface so callers don't see nanoda's panic
+//! contract.
+//!
+//! ## Why panic-catch instead of structured errors?
+//!
+//! nanoda's type-checker reports failure by panicking with a
+//! diagnostic string (see `src/tc.rs` in the nanoda_lib git
+//! dependency, pinned at rev `6d2f037` in this crate's manifest).
+//! Until
+//! upstream offers a `Result`-returning entry point, we trap the
+//! panic with [`std::panic::catch_unwind`] and lift the message into
+//! [`Verdict::Fails`]. Per D28 §2.3, nanoda still runs in-process so
+//! we keep the small TCB; the catch only handles its current control
+//! flow.
+
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use eigenius_kernel::layer::Layer;
+use eigenius_kernel::nbe::term::Exp;
+use nanoda_lib::pretty_printer::PpOptions;
+use nanoda_lib::util::{Config, ExportFile};
+
+use crate::externalize;
+
+/// Result of checking a Lean export file against a target theorem.
+///
+/// `Holds` means nanoda accepted every declaration in the export and
+/// the target theorem was present; `Fails` means either the export
+/// failed to parse, the target name is absent, or the checker
+/// rejected at least one declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// Every declaration type-checks and the target name resolves.
+    Holds,
+    /// Verification refused the proof. `diagnostic` is the
+    /// human-readable message returned by nanoda (panic payload or
+    /// parser error). Treated as opaque by callers.
+    Fails {
+        /// Reason verification refused. Stable enough to log; not a
+        /// structured error code (yet — D28 enumerates these for
+        /// 20a.4's institution surface).
+        diagnostic: String,
+    },
+}
+
+/// Errors that prevent us from running the checker at all.
+/// Distinct from [`Verdict::Fails`], which is "checker ran and said
+/// no."
+#[derive(Debug, thiserror::Error)]
+pub enum CheckError {
+    /// Could not stage the export bytes into a tempfile that nanoda
+    /// can open. Path-only API is a vendor constraint; we hop through
+    /// disk on every call until upstream takes a `Reader`.
+    #[error("failed to stage export bytes: {0}")]
+    TempFile(#[from] std::io::Error),
+
+    /// The export was produced by a Lean the numeric correspondence was not written against.
+    ///
+    /// See [`SUPPORTED_LEAN_MINOR`] for why this is a hard stop rather than a warning.
+    #[error(
+        "export was produced by Lean {found}, but this build's Lean correspondence is written \
+         against {supported}.x — see D86 §3.1. Regenerate the export with the pinned toolchain, \
+         or update the correspondence and `SUPPORTED_LEAN_MINOR` together."
+    )]
+    UnsupportedLeanVersion {
+        /// `meta.lean.version` as the export declares it.
+        found: String,
+        /// The `major.minor` series this build understands.
+        supported: &'static str,
+    },
+
+    /// The export's first line is not the `lean4export` metadata header.
+    #[error("export carries no `meta.lean.version` header; it is not a lean4export file")]
+    MissingLeanVersion,
+}
+
+/// The Lean `major.minor` series this build's Lean correspondence is written against.
+///
+/// **Why this is checked, and why nothing checked it before.** A `lean4export` file declares
+/// three versions in its first line — the exporter's, the format's, and Lean's:
+///
+/// ```text
+/// {"meta":{"exporter":{"name":"lean4export","version":"3.1.0"},
+///          "format":{"version":"3.1.0"},
+///          "lean":{"githash":"f72c35b…","version":"4.29.1"}}}
+/// ```
+///
+/// `nanoda_lib`'s parser gates `format.version` against a supported range and parses
+/// `lean.version` into `LeanMeta` without ever looking at it. So the format was gated and Lean
+/// was not, and the gap is not cosmetic: what `Float` MEANS changed under us in Lean `4.33.0`.
+/// `Float` became a structure over `Float.Model` (a `UInt64` subtype), `Float.beq`/`add`/`neg`
+/// stopped being `opaque`, and `Float.lt`/`Float.le` changed signature from
+/// `Float → Float → Prop` to `Float → Float → Bool`.
+///
+/// **The failure that gap produces is silent, which is why it is a hard stop.** The terms
+/// `externalize.rs` builds — `@LE.le.{0} Float instLEFloat x y`, and `(x == y) = true` over
+/// `instBEqFloat` — still elaborate under `4.33`, so nothing fails to parse and nothing fails to
+/// type-check. What changes is that Lean's kernel can now reduce them and `nanoda_lib` still
+/// cannot, so nanoda becomes INCOMPLETE relative to Lean: it refuses definitional equalities Lean
+/// accepts, and proofs that are fine in Lean come back as `Verdict::Fails` with a diagnostic
+/// about defeq that names no version. D86 §3.1 has the table.
+///
+/// **The pin is the toolchain, and this constant must track it.** Every `lean-toolchain` in
+/// `lean/` reads `leanprover/lean4:v4.29.1`; `lean_toolchain_pin_matches_the_supported_series`
+/// in `tests/lean_version_gate_test.rs` fails if this constant and those files disagree, so the
+/// two cannot drift. Moving past `4.29` means updating the correspondence and this constant in
+/// one change, not discovering the skew from a confusing defeq failure months later.
+///
+/// The check is on `major.minor`: a patch bump cannot change a definition's shape, and gating it
+/// would fail loudly for no reason.
+pub const SUPPORTED_LEAN_MINOR: &str = "4.29";
+
+/// Read `meta.lean.version` from a `lean4export` file's first line.
+///
+/// Split out from the gate so the test suite can assert on the parse independently of the
+/// comparison, and because `nanoda_lib` exposes no accessor for it — `LeanMeta` is private, so
+/// the header is read here rather than taken off the parsed `ExportFile`.
+pub fn lean_version_of(bytes: &[u8]) -> Option<String> {
+    let first = bytes.split(|b| *b == b'\n').next()?;
+    let meta: serde_json::Value = serde_json::from_slice(first).ok()?;
+    Some(
+        meta.get("meta")?
+            .get("lean")?
+            .get("version")?
+            .as_str()?
+            .to_string(),
+    )
+}
+
+/// `4.29.1` -> `4.29`. `None` when there is no `major.minor` to take.
+fn minor_series(version: &str) -> Option<&str> {
+    let (major, rest) = version.split_once('.')?;
+    let minor = rest.split('.').next()?;
+    if major.is_empty() || minor.is_empty() {
+        return None;
+    }
+    Some(&version[..major.len() + 1 + minor.len()])
+}
+
+/// Refuse an export produced by a Lean whose `Float` semantics this build was not written
+/// against. See [`SUPPORTED_LEAN_MINOR`].
+fn gate_lean_version(bytes: &[u8]) -> Result<(), CheckError> {
+    let found = lean_version_of(bytes).ok_or(CheckError::MissingLeanVersion)?;
+    match minor_series(&found) {
+        Some(series) if series == SUPPORTED_LEAN_MINOR => Ok(()),
+        _ => Err(CheckError::UnsupportedLeanVersion {
+            found,
+            supported: SUPPORTED_LEAN_MINOR,
+        }),
+    }
+}
+
+/// Check a `lean4export`-format JSON export for the named theorem.
+///
+/// `bytes` is the verbatim export-file content (newline-delimited
+/// JSON, semver 3.1.x). `target_name` is the fully-qualified Lean
+/// name of the theorem to verify — it must be present in the export
+/// or the call returns [`Verdict::Fails`]. `permitted_axioms` is the
+/// allowlist of axioms the proof may depend on; any axiom outside
+/// this list causes [`Verdict::Fails`] (per
+/// `unpermitted_axiom_hard_error: true`).
+///
+/// `expected` is D74's statement-level check. When `Some`, the claim's own proposition is
+/// externalized into the SAME `TcCtx` the export was parsed into and compared to the target's
+/// type with nanoda's `def_eq` — so the proof is bound to the claim because the goal was
+/// manufactured from the claim. When `None` the call is the pre-D74 name-level check
+/// alone: "a theorem called `target_name` type-checks", which does not say what it proves.
+///
+/// Both sides must share one arena for `def_eq` to be callable at all, which is why this lives
+/// inside `check_proof` rather than beside it (D74 §6.2) — the alternative pays a second parse
+/// of the same bytes to keep this signature.
+///
+/// The function returns `CheckError` only for *infrastructure*
+/// failures (cannot create tempfile). Anything the checker has an
+/// opinion on — bad parse, missing target, type error, a statement
+/// that is not the claim's — comes back as a `Verdict`.
+pub fn check_proof(
+    bytes: &[u8],
+    target_name: &str,
+    permitted_axioms: &[String],
+    expected: Option<&ExpectedStatement<'_>>,
+) -> Result<Verdict, CheckError> {
+    use std::io::Write;
+
+    // The export must come from the Lean this build's correspondence targets — but only when
+    // there is a correspondence in play. `expected.is_some()` is exactly the condition under
+    // which `externalize` runs, and externalization is the only thing here that hard-codes what
+    // Lean constants mean: `LE.le` with `instLEFloat`, `OfScientific.ofScientific`, `Neg.neg`,
+    // `Subtype`. A name-level check (`expected: None`) asserts only that the export is internally
+    // sound and holds the target — Lean's own declarations against Lean's own kernel rules, which
+    // nanoda's format-version gate already covers and which no correspondence of ours touches.
+    //
+    // A skew does not make a proof wrong, it makes the verdict meaningless, so it is a
+    // `CheckError` and not a `Verdict::Fails` — the claim is unjudgeable, not refuted.
+    if expected.is_some() {
+        gate_lean_version(bytes)?;
+    }
+
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    tmp.as_file_mut().write_all(bytes)?;
+    tmp.as_file_mut().flush()?;
+
+    let config = Config {
+        export_file_path: Some(tmp.path().to_path_buf()),
+        use_stdin: false,
+        permitted_axioms: Some(permitted_axioms.to_vec()),
+        unpermitted_axiom_hard_error: true,
+        // Allow Nat + String literal extensions during checking.
+        // Any proof against modern Lean stdlib pulls these through
+        // the `OfNat` / `OfScientific` instance chain even when the
+        // user's source mentions no literals directly (e.g. `0.0`
+        // expands to `OfScientific.ofScientific 0 …`). The
+        // checker's literal-extension config is a parser knob, not
+        // an axiom-acceptance one — turning it on doesn't widen the
+        // soundness surface; it's just nanoda's way of saying "the
+        // proof carries a primitive literal you didn't pre-declare".
+        nat_extension: true,
+        string_extension: true,
+        // The parser uses `pp_declars` + `unknown_pp_declar_hard_error`
+        // as a precondition check: if the export doesn't declare
+        // `target_name`, `to_export_file` returns Err. We never
+        // actually pretty-print (pp_to_stdout=false, no output path).
+        pp_declars: Some(vec![target_name.to_string()]),
+        pp_options: PpOptions::default(),
+        unknown_pp_declar_hard_error: true,
+        pp_output_path: None,
+        pp_to_stdout: false,
+        num_threads: 1,
+        print_success_message: false,
+        print_axioms: false,
+        unsafe_permit_all_axioms: false,
+    };
+
+    let export = match config.to_export_file() {
+        Ok((ef, _skipped)) => ef,
+        Err(e) => {
+            return Ok(Verdict::Fails {
+                diagnostic: format!("parse/load: {e}"),
+            });
+        }
+    };
+
+    // `check_all_declars` panics on type errors. `AssertUnwindSafe`
+    // is sound here: we discard the `ExportFile` on panic and don't
+    // expose any partially-checked state.
+    if let Err(p) = catch_unwind(AssertUnwindSafe(|| export.check_all_declars())) {
+        return Ok(Verdict::Fails {
+            diagnostic: panic_payload_to_string(p),
+        });
+    }
+
+    // Check 1 passed: the export is internally sound and `target_name` is present. That is all
+    // it establishes. D74's check is what relates the named theorem to the claim.
+    let Some(expected) = expected else {
+        return Ok(Verdict::Holds);
+    };
+
+    // Same containment as check 1, for the same reason. nanoda asserts liberally inside
+    // `def_eq` — `subst_expr_levels` panics on a universe-arity mismatch rather than returning
+    // `false`, and `externalize` cannot rule out every such shape ahead of it. An institution
+    // that aborts the process instead of returning a verdict takes the kernel with it.
+    match catch_unwind(AssertUnwindSafe(|| {
+        check_statement(&export, target_name, expected)
+    })) {
+        Ok(v) => Ok(v),
+        Err(p) => Ok(Verdict::Fails {
+            diagnostic: format!(
+                "the statement check panicked comparing `{target_name}` against the claim's \
+                 proposition: {}",
+                panic_payload_to_string(p)
+            ),
+        }),
+    }
+}
+
+/// The claim's proposition, and what externalizing it needs.
+pub struct ExpectedStatement<'a> {
+    /// The claim's `eigentt:proposition`, decoded.
+    pub proposition: &'a Exp,
+    /// Resolves a chain IRI's `core:short_name` for D30's mangling.
+    pub layer: &'a Layer,
+}
+
+/// D74 — externalize `expected` and compare it to `target_name`'s type under `def_eq`.
+///
+/// Runs under `EnvLimit::ByName(target)` via `with_tc_and_declar`, which is the environment
+/// nanoda itself checks that declaration under (D74 §6.5): it cuts the environment off AT the
+/// declaration, so δ-unfolding cannot reach anything the proof's own check could not.
+fn check_statement(
+    export: &ExportFile<'_>,
+    target_name: &str,
+    expected: &ExpectedStatement<'_>,
+) -> Verdict {
+    // The declars map is keyed by `NamePtr`, an interning handle, so finding one by spelling
+    // means rendering each — the same scan the parser's `pp_declars` precondition already did.
+    let info = export.with_ctx(|ctx| {
+        export
+            .declars
+            .iter()
+            .find(|(n, _)| externalize::render_name(ctx, **n) == target_name)
+            .map(|(_, d)| *d.info())
+    });
+    let Some(info) = info else {
+        // Unreachable in practice: `unknown_pp_declar_hard_error` already failed the parse.
+        return Verdict::Fails {
+            diagnostic: format!("`{target_name}` is not declared in the export"),
+        };
+    };
+
+    // One checker for the whole pass. `TypeChecker::ctx` (the accessor this repo's nanoda fork
+    // adds, D74 §4.6) lets externalization build through it, which is what makes a sub-term
+    // inferrable under a binder — `Fst`/`Snd` need that, and `TypeChecker::new` cannot be called
+    // once a binder is open.
+    export.with_tc_and_declar(info, |tc| {
+        let uparams: Vec<String> = tc
+            .ctx
+            .read_levels(info.uparams)
+            .iter()
+            .filter_map(|l| match tc.ctx.read_level(*l) {
+                nanoda_lib::level::Level::Param(n, _) => Some(externalize::render_name(tc.ctx, n)),
+                _ => None,
+            })
+            .collect();
+
+        // **Only the declarations the target's own environment holds.** `with_tc_and_declar` runs
+        // under `EnvLimit::ByName(target)`, which cuts the environment off AT the target's index,
+        // so `def_eq` can reach nothing declared later. Building the name table from ALL of them
+        // instead let externalization resolve a constant `def_eq` would then fail to find, and
+        // nanoda's `infer_const` answers that with a PANIC — caught upstream and reported as "the
+        // statement check panicked", which says nothing a reader can act on.
+        //
+        // Resolving against the same set is what turns that into `UnknownConstant`, naming both
+        // the chain IRI and the Lean name it resolved to. That is the module's own discipline (see
+        // `externalize`'s header: *"a constant the export does not declare cannot be `def_eq` to
+        // anything in it"*, resolved up front for exactly this reason); it just was not applied to
+        // the environment limit.
+        //
+        // Measured on the notebook demo's near-miss: a claim about `patient_2` checked against
+        // `healthy_patient_1`, where `patient_2` is declared LATER in the same export.
+        let limit = export
+            .declars
+            .get_index_of(&info.name)
+            .unwrap_or(export.declars.len());
+        let in_scope: Vec<_> = export.declars.keys().copied().take(limit).collect();
+        let names = externalize::NameTable::build(tc.ctx, &in_scope);
+
+        // Universe arity per declaration. A `Const` whose level list does not match makes
+        // nanoda's `subst_expr_levels` assert — a panic inside `def_eq`, not a `false` — so
+        // externalization needs the arities up front (D74 §6.5).
+        let arities: std::collections::HashMap<_, _> = export
+            .declars
+            .iter()
+            .take(limit)
+            .map(|(n, d)| (*n, tc.ctx.read_levels(d.info().uparams).len()))
+            .collect();
+
+        let goal = match externalize::externalize(
+            expected.proposition,
+            tc,
+            &names,
+            expected.layer,
+            &uparams,
+            &arities,
+        ) {
+            Ok(g) => g,
+            Err(e) => {
+                return Verdict::Fails {
+                    diagnostic: format!("cannot externalize the claim's proposition: {e}"),
+                }
+            }
+        };
+
+        // D74 §6.5 — the environment nanoda checks this declaration under, cut off AT it, so
+        // δ-unfolding cannot reach anything the proof's own check could not.
+        // Compared on THIS checker, not a nested one. `TypeChecker::new` asserts
+        // `dbj_level_counter == 0`, and externalizing a binder leaves free variables behind, so
+        // opening a second checker here panics — which is exactly what it did.
+        if tc.def_eq(goal, info.ty) {
+            Verdict::Holds
+        } else {
+            Verdict::Fails {
+                diagnostic: format!(
+                    "`{target_name}` proves a statement that is not the claim's proposition"
+                ),
+            }
+        }
+    })
+}
+
+/// Best-effort recovery of a panic message. Rust panics may carry
+/// either a `&'static str`, a `String`, or an arbitrary type — the
+/// first two cover ~all `panic!()` and `unwrap()` cases.
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else {
+        "<opaque panic payload>".to_string()
+    }
+}

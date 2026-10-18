@@ -1,0 +1,51 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// What a ClinVar release says about an allele (D99 8b).
+//
+// "Absent from ClinVar" is a statement about a database state, so its subject is a RELEASE — a
+// finite artifact, fixed once published — not the allele. Querying a release is a `prov:Activity`;
+// its result is Observed, by a `prov:ObservationTrace` whose `prov:was_generated_by` is the query and
+// whose `prov:used` is the release. Where no query was run on the chain, the statement is Declared
+// by whoever reports it.
+//
+// No predicate here derives anything about the allele. The retrieval failure in UAB experiment 02
+// ("the absence of ours reads as the absence of a problem") is the step from `NotListed` to a claim
+// about the allele, and that step would need a declared bridge.
+//
+// Not a ClinVar import: a release is named, not loaded. Chain-loaded, above `clinical` (D99 §9).
+
+namespace core     = "urn:eigenius:core";
+namespace lexicon  = "urn:eigenius:lexicon";
+namespace variant  = "urn:eigenius:variant";
+namespace clinical = "urn:eigenius:clinical";
+namespace clinvar  = "urn:eigenius:clinvar";
+
+class clinvar:Release : lexicon:Entity {
+    description = "One ClinVar release. ClinVar publishes monthly; a statement about what ClinVar lists is about one release, and a later release may list what an earlier one did not.";
+    recommends clinvar:release_date;
+}
+
+property clinvar:release_date : core:string {
+    description = "The release's date, ISO-8601. Absent where a source reports a lookup without saying which release it consulted.";
+    domain clinvar:Release;
+}
+
+data clinvar:NotListed : clinvar:Release -> variant:Allele -> Prop {
+    description = "The release has no record of the allele. Says nothing about the allele: absence from a release is not evidence of benignity.";
+}
+
+data clinvar:ListedAs : clinvar:Release -> variant:Allele -> clinical:AcmgTier -> Prop {
+    description = "The release lists the allele with the germline classification. ClinVar's classification values include the five ACMG/AMP tiers and others (conflicting classifications, risk factor, drug response), which are not modelled.";
+}

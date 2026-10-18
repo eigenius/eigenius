@@ -1,0 +1,553 @@
+// encoding — the D62 encoding-pipeline contract layer.
+//
+// NOT in kernel/src/bootstrap BOOTSTRAP_CHAIN, and no longer planned for it (D62 §11.3 said to
+// insert it after `lexicon`). It is loaded as a user layer — by the demo, by the artifact tests,
+// and by any run that emits these classes — which keeps a vocabulary change off the bootstrap
+// manifest and therefore out of the reseed path. Validated by `kernel/tests/encoding_validates.rs`.
+// It references lexicon:, reference:, reflection:, eigentt: and justification:.
+//
+// PURPOSE. The encoding pipeline (D62) turns a document into typed, witnessed reasoning
+// by moving each unit through a per-unit state machine (segment → parse → resolve /
+// disambiguate / recover / reformulate → assemble). This layer declares the **typed
+// contracts** for that state machine: every stage is `resource → resource`, so each is
+// testable in isolation and the pipeline state is chain-committed and auditable.
+//
+// REUSE, DON'T MINT. The encoded proposition
+// reuses eigentt:proposition (eigentt:Term); warrants reuse
+// prov:rationale; source works reuse reference:Reference; lexicon scope/entries
+// reuse lexicon:Lexicon / lexicon:LexicalEntry. New vocabulary here is only the
+// pipeline-state shapes that have no existing equivalent.
+
+namespace core        = "urn:eigenius:core";
+namespace eigentt     = "urn:eigenius:eigentt";
+namespace reference   = "urn:eigenius:reference";
+namespace lexicon     = "urn:eigenius:lexicon";
+namespace enc         = "urn:eigenius:encoding";
+namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
+
+// ════════════════════════════════════════════════════════════════════
+// S0 — DiscourseUnit: the parsing unit + provenance
+// ════════════════════════════════════════════════════════════════════
+
+class enc:DiscourseUnit {
+    description = "One unit of source text the pipeline attempts to encode — typically a clause/claim (the granularity the grammar parses best). Carries provenance (source work + character span + section) so every downstream EncodedClaim traces back to its span. Non-prose units (equations, citations) are tagged via enc:unit_kind and routed out of the parser (equations → FormulaTerm, citations → reference:Citation).";
+    requires enc:prose, enc:unit_kind;
+    recommends enc:source_document, enc:section, enc:span_start, enc:span_end;
+}
+
+property enc:prose : core:string {
+    description = "The verbatim source text of this unit (the string handed to the parser for prose units).";
+    domain enc:DiscourseUnit;
+}
+
+property enc:unit_kind : core:resource {
+    description = "What kind of unit this is (prose / equation / citation / table) — selects the routing: only `prose` enters the DCG parser.";
+    class_types enc:DiscourseUnitKind;
+    domain enc:DiscourseUnit;
+}
+
+property enc:source_document : core:resource {
+    description = "The published work this unit is drawn from — the bibliographic provenance root.";
+    class_types reference:Reference;
+    domain enc:DiscourseUnit;
+}
+
+property enc:section : core:string {
+    description = "Human-readable section/location label within the source document (e.g. 'Results §2.1').";
+    domain enc:DiscourseUnit;
+}
+
+property enc:span_start : core:integer {
+    description = "0-based character offset of this unit's start in the source document.";
+    domain enc:DiscourseUnit;
+}
+
+property enc:span_end : core:integer {
+    description = "Character offset (exclusive) of this unit's end in the source document.";
+    domain enc:DiscourseUnit;
+}
+
+// Unit-kind enumeration (individuals, like reference:CitationType) — a small closed
+// vocabulary, not a parallel epistemic enum.
+class enc:DiscourseUnitKind {
+    description = "The kind of a DiscourseUnit, selecting how it is routed: prose → DCG parser; equation → FormulaTerm capture; citation → reference:Citation; table → structured capture.";
+}
+
+resource enc:kind_prose : enc:DiscourseUnitKind {
+    core:short_name = "prose";
+    core:description = "Natural-language prose — routed to the DCG parser (S2).";
+}
+resource enc:kind_equation : enc:DiscourseUnitKind {
+    core:short_name = "equation";
+    core:description = "A formula/equation — captured as a FormulaTerm/EigenTT term, not parsed as prose.";
+}
+resource enc:kind_citation : enc:DiscourseUnitKind {
+    core:short_name = "citation";
+    core:description = "An in-text citation — captured as a reference:Citation, not parsed as prose.";
+}
+resource enc:kind_table : enc:DiscourseUnitKind {
+    core:short_name = "table";
+    core:description = "Tabular/figure content — structured capture, deferred.";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S1 — ScopedUnit: a DiscourseUnit annotated with its lexicon scope (thin)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:ScopedUnit {
+    description = "A DiscourseUnit annotated with the lexicon scope its parse is ranked against (D65). Thin by design — target-discovery is lazy (S5a), triggered only when a parse attempt finds a missing lexeme; this carries only the scope, often defaulted.";
+    requires enc:unit;
+    recommends enc:scope;
+}
+
+property enc:unit : core:resource {
+    description = "The DiscourseUnit this ScopedUnit annotates.";
+    class_types enc:DiscourseUnit;
+    domain enc:ScopedUnit;
+}
+
+property enc:scope : core:resource_array {
+    description = "Ordered lexicon:Lexicon IRIs defining the parse scope (resolution-precedence order; D65 §4). Empty/absent = unscoped (whole chain).";
+    class_types lexicon:Lexicon;
+    domain enc:ScopedUnit;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S5a — LexicalGap: the on-demand target-discovery record
+// ════════════════════════════════════════════════════════════════════
+
+class enc:LexicalGap {
+    description = "A token a parse attempt could not look up (S5a). Records how it was disposed: bound to an existing lexicon entry found by search, a newly-injected entry, or left unresolvable. The gap stream is a first-class coverage signal (D62 §9).";
+    requires enc:gap_token, enc:gap_disposition;
+    recommends enc:gap_unit, enc:bound_entry;
+}
+
+property enc:gap_token : core:string {
+    description = "The surface token (or multiword span) that failed lexical lookup.";
+    domain enc:LexicalGap;
+}
+
+property enc:gap_unit : core:resource {
+    description = "The ScopedUnit whose parse this gap blocked.";
+    class_types enc:ScopedUnit;
+    domain enc:LexicalGap;
+}
+
+property enc:gap_disposition : core:resource {
+    description = "How the gap was resolved: bound to an existing entry, injected as a new entry, or unresolvable.";
+    class_types enc:GapDisposition;
+    domain enc:LexicalGap;
+}
+
+property enc:bound_entry : core:resource {
+    description = "The lexicon:LexicalEntry this token was bound to (for the bound/injected dispositions).";
+    class_types lexicon:LexicalEntry;
+    domain enc:LexicalGap;
+}
+
+class enc:GapDisposition {
+    description = "The disposition of a LexicalGap.";
+}
+resource enc:gap_bound : enc:GapDisposition {
+    core:short_name = "bound";
+    core:description = "Bound to an existing lexicon entry found by search (synonym/hypernym/inflection).";
+}
+resource enc:gap_injected : enc:GapDisposition {
+    core:short_name = "injected";
+    core:description = "A new lexicon:LexicalEntry was proposed (LLM) and committed (felicity-gated).";
+}
+resource enc:gap_unresolvable : enc:GapDisposition {
+    core:short_name = "unresolvable";
+    core:description = "No target found and none injectable — a recorded vocabulary gap (fail-closed).";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S4 — DecisionPoint: a structural-disambiguation choice
+// ════════════════════════════════════════════════════════════════════
+//
+// Minimal provenanced record now; the typed-content (Prop-valued warrant) formalization
+// is deferred to the D61 rewrite, which harvests these records.
+
+class enc:DecisionPoint {
+    description = "Records a structural-disambiguation choice (S4): which reading was selected among multiple felicitous parses of one unit, and why. All candidates already type-check, so this is auditable selection, not generation. (Typed-content warrant deferred to D61.)";
+    requires enc:decision_unit, enc:selected_claim;
+    recommends enc:candidate_count, prov:rationale, enc:selected_by, enc:runner_up_skeletons;
+}
+
+property enc:decision_unit : core:resource {
+    description = "The ScopedUnit whose parse forest this decision selected from.";
+    class_types enc:ScopedUnit;
+    domain enc:DecisionPoint;
+}
+
+property enc:selected_claim : core:resource {
+    description = "The EncodedClaim produced by the chosen reading.";
+    class_types enc:EncodedClaim;
+    domain enc:DecisionPoint;
+}
+
+property enc:candidate_count : core:integer {
+    description = "How many felicitous readings the forest offered before selection (>1 by construction).";
+    domain enc:DecisionPoint;
+}
+
+// Selection-authority enumeration (individuals, like DiscourseUnitKind) — WHO made the choice.
+// Every candidate reading type-checks, so there is no kernel veto on selection; the recorded
+// authority + rationale + runners-up are the audit trail (d63-reading-selection.md).
+class enc:SelectionAuthority {
+    description = "On whose authority a DecisionPoint's reading was selected: a human skeleton pin, the (untrusted, recorded) reading ranker, or no choice at all because a sole reading survived.";
+}
+
+resource enc:authority_pin : enc:SelectionAuthority {
+    core:short_name = "pin";
+    core:description = "A human-verified skeleton pin (expected-readings format) — declared selection; fails closed on zero or several matches.";
+}
+resource enc:authority_ranker : enc:SelectionAuthority {
+    core:short_name = "ranker";
+    core:description = "The reading ranker (D63 reading-selection) — an untrusted LLM choice in document context, live or replayed from a recording; audited via rationale, runners-up, and the reading-adjudication ledger.";
+}
+resource enc:authority_sole : enc:SelectionAuthority {
+    core:short_name = "sole";
+    core:description = "The forest's sole surviving reading — no selection existed to make.";
+}
+
+property enc:selected_by : core:resource {
+    description = "The SelectionAuthority that chose the reading — a closed enumeration (allows_only, the epistemic_status pattern): adding an authority is a deliberate vocabulary edit, never a silent mint. Absent on records emitted before the reading ranker existed (those state the pin authority in their rationale text).";
+    class_types enc:SelectionAuthority;
+    allows_only enc:authority_pin, enc:authority_ranker, enc:authority_sole;
+    domain enc:DecisionPoint;
+}
+
+property enc:runner_up_skeletons : core:value_array {
+    description = "The non-chosen candidates' sense-erased skeletons in the ranker's stated preference order — what the choice was made against. Emitted by the ranker authority only.";
+    element_type = core:string;
+    domain enc:DecisionPoint;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S3 — AnaphorBinding: a resolved referent hole (D64 / D67 §3)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:AnaphorBinding {
+    description = "Records one RESOLVED referent hole (D64): the antecedent the kernel's re-gate ACCEPTED for an anaphor (pronoun / possessor / demonstrative) in a unit's encoded reading. The proposer only ranks (untrusted, recorded — proposals.json); the restrictor veto + closed re-gate decide, so this is the accepted-binding audit — the anaphora sibling of DecisionPoint. The antecedent is machine-readable: a resource reference for a named individual or landed claim, the D47 type_expr encoding for a kind term (which has no IRI); the surface is the display form the proposer saw.";
+    requires enc:binding_unit, enc:hole_var, enc:antecedent_surface;
+    recommends enc:antecedent_resource, enc:antecedent_resources, enc:antecedent_term, enc:bound_by, prov:rationale, enc:confidence;
+}
+
+property enc:binding_unit : core:resource {
+    description = "The ScopedUnit whose encoded reading carries this binding.";
+    class_types enc:ScopedUnit;
+    domain enc:AnaphorBinding;
+}
+
+property enc:hole_var : core:string {
+    description = "The hole's binder name in the open parse (e.g. `$demref$0_0`) — joins this record to the reading's typed skeleton.";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_surface : core:string {
+    description = "The accepted antecedent's display surface (the form presented to the proposer) — always recorded; the machine-readable identity is antecedent_resource / antecedent_term.";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_resource : core:resource {
+    description = "The accepted antecedent, when it is a chain resource — a named individual, or a landed EncodedClaim (D67 §4).";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_resources : core:resource_array {
+    description = "The accepted antecedent SET (D68 §5), when a plural reference resolved distributively to several landed claims — one reference per member, in run order.";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_term : core:inductive {
+    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:Term of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
+    class_types eigentt:Term;
+    expected_type lexicon:Entity;
+    domain enc:AnaphorBinding;
+}
+
+// Binding-authority enumeration (the SelectionAuthority pattern): WHO ranked the candidates the
+// kernel then vetoed/accepted. The kernel's re-gate is the same whatever the authority.
+class enc:BindingAuthority {
+    description = "On whose ranking an AnaphorBinding's antecedent was reached: the deterministic recency floor, the live (untrusted, recorded) anaphora proposer, or a replayed recording.";
+}
+
+resource enc:binding_recency : enc:BindingAuthority {
+    core:short_name = "recency";
+    core:description = "The deterministic recency floor — every in-scope candidate in most-recent-first order; the kernel's restrictor veto is the entire filter.";
+}
+resource enc:binding_proposer : enc:BindingAuthority {
+    core:short_name = "proposer";
+    core:description = "The live anaphora proposer (D64 §4) — an untrusted LLM ranking in document context, recorded to proposals.json.";
+}
+resource enc:binding_replay : enc:BindingAuthority {
+    core:short_name = "replay";
+    core:description = "A replayed proposal recording (proposals.json) — deterministic, no LLM; a replay miss fails closed and is counted.";
+}
+
+property enc:bound_by : core:resource {
+    description = "The BindingAuthority behind this binding — a closed enumeration (allows_only, the epistemic_status pattern): adding an authority is a deliberate vocabulary edit, never a silent mint.";
+    class_types enc:BindingAuthority;
+    allows_only enc:binding_recency, enc:binding_proposer, enc:binding_replay;
+    domain enc:AnaphorBinding;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S5b — CutItem: an explicit, justified non-encoding (fail-closed)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:CutItem {
+    description = "A unit that could not be encoded within the current grammar/vocabulary, recorded explicitly with a reason and disposition rather than dropped or force-fit (fail-closed; D62 §3). Part of the coverage feedback loop (D62 §9). (Typed-content formalization deferred to D61.)";
+    requires enc:cut_unit, enc:cut_kind;
+    recommends prov:rationale;
+}
+
+property enc:cut_unit : core:resource {
+    description = "The DiscourseUnit that could not be encoded.";
+    class_types enc:DiscourseUnit;
+    domain enc:CutItem;
+}
+
+property enc:cut_kind : core:resource {
+    description = "Why the cut: a grammar gap (construction unsupported) vs an unresolvable vocabulary gap vs out-of-scope (non-encodable content).";
+    class_types enc:CutKind;
+    domain enc:CutItem;
+}
+
+class enc:CutKind {
+    description = "The reason class for a CutItem.";
+}
+resource enc:cut_grammar : enc:CutKind {
+    core:short_name = "grammar_gap";
+    core:description = "The lexemes resolved but the grammar could not compose the construction (S5b exhausted).";
+}
+resource enc:cut_vocabulary : enc:CutKind {
+    core:short_name = "vocabulary_gap";
+    core:description = "An unresolvable lexical gap (no target, none injectable).";
+}
+resource enc:cut_out_of_scope : enc:CutKind {
+    core:short_name = "out_of_scope";
+    core:description = "Content not intended for prose encoding (e.g. a raw data table).";
+}
+resource enc:cut_ambiguous : enc:CutKind {
+    core:short_name = "ambiguous";
+    core:description = "Multiple readings survived and the run's selection authority did not choose (no matching pin, a replay abstention, or no authority configured). The unit parses; the residual is a selection gap, not a grammar or vocabulary gap.";
+}
+resource enc:cut_unresolved : enc:CutKind {
+    core:short_name = "unresolved_referent";
+    core:description = "Every surviving reading carries a referent hole no discourse antecedent resolved (D64/D67 §3) — an open parse. The unit parses; the residual is an anaphora gap.";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S6 — EncodedClaim: a committed, graded, witnessed Prop
+// ════════════════════════════════════════════════════════════════════
+//
+// DECLARED, not Derived (D73 §6 — supersedes the 2026-08-10 settlement).
+//
+// The parser is a FORMULATION INSTRUMENT: it produces a well-formed proposition and a fidelity
+// record. It does not produce a warrant, because "this encoding is faithful to what the author
+// wrote" is its own proposition — D61's subject, and unbuilt. Since the parse cannot warrant
+// fidelity, the only honest status for its output is Declared: some agent takes responsibility.
+//
+// Three propositions stay distinct and must not collapse into one witness:
+//
+//   1. this text parses to this well-typed term — the artifact fact, witnessed by the ProgramTrace
+//      on the ENCODING artifact, bounded by the program's type (D73 §3.3)
+//   2. this encoding is faithful to what the author wrote — D61, unwarranted today
+//   3. what the author wrote is true — never established by either; only ever declared
+//
+// The 2026-08-10 settlement split the world on PARSED vs CURATED. The operative axis is WHO
+// ASSERTS: encoding a source document is asserted by the document's authors (e.g. wrn:authors);
+// an agent formulating its own claim is asserted by the agent running the pipeline. D72 is what
+// makes the first expressible — wrn:authors is a resolvable prov:Agent, so a claim from a
+// paper cites the people who made it rather than the program that transcribed it.
+
+class enc:EncodedClaim : justification:Declaration {
+    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (eigentt:proposition), produced by the pipeline and attested by the felicity gate. DECLARED, not Derived (D73 §6): the parser establishes that the text parses to this well-typed term, not that the term is faithful to what the author wrote (D61, unbuilt) nor that what the author wrote is true. prov:was_attributed_to names the agent taking responsibility — the source document's authors when encoding a paper, the pipeline's operating agent when an agent formulates its own claim. Carries its source unit (provenance). A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
+    requires enc:from_unit, eigentt:proposition;
+    recommends enc:confidence;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The discourse-kind axis (D68 §2) — what the claim IS in the document's own terms,
+// orthogonal to the reflection: epistemic-SOURCE lattice (how it is warranted).
+// ════════════════════════════════════════════════════════════════════
+//
+// A landed claim carries BOTH axes as classes: is_a = [enc:EncodedClaim, enc:<Kind>]. The
+// discourse restrictor check ("these findings" resolves only to findings) rides the checker's
+// multi-class inhabitation + the PER-KIND curated alignment facts, which live in a separate
+// chain-loaded layer (ontologies/encoding/claim-kind-alignment.esl — they reference lexicon
+// sense classes this file's validation chain does not have). enc:Assertion is deliberately
+// aligned to NOTHING: an unmarked claim is not discourse-referable (fail-closed). A CLOSED set:
+// adding a kind is a vocabulary edit, never a silent mint.
+
+class enc:Claim {
+    description = "The abstract discourse-referable claim root (D68 §2): the resource a discourse anaphor («these findings») can bind — the reified assertion, whatever its epistemic source. Names the root the reflection: source lattice deliberately lacks, at the enc: level where discourse needs it. Subkinds are the closed discourse-kind classes below.";
+}
+
+class enc:Finding : enc:Claim {
+    description = "A claim the document presents as an established result of its own investigation («These findings show …»). Discourse kind, not epistemic grade: a finding may land Derived or Observed.";
+}
+class enc:Observation : enc:Claim {
+    description = "A claim the document presents as something observed/noticed («These observations suggest …»).";
+}
+class enc:Classification : enc:Claim {
+    description = "A claim assigning items to categories («These classifications were highly concordant …»).";
+}
+class enc:Hypothesis : enc:Claim {
+    description = "A claim the document marks as conjectured, typically by its matrix frame («We hypothesized that …»). Referable as a hypothesis; never as a finding.";
+}
+class enc:Suggestion : enc:Claim {
+    description = "A claim the document presents as suggested/indicated rather than established («… suggest that …» as the matrix frame).";
+}
+class enc:Assertion : enc:Claim {
+    description = "The unmarked default: a plain declarative with no frame evidence and no classifier verdict. Deliberately aligned to no lexicon class — an unmarked claim is not discourse-referable (fail-closed); re-classification is a re-land, not a mutation.";
+}
+
+property enc:from_unit : core:resource {
+    description = "The ScopedUnit this claim was encoded from — the provenance link back to the source span (via enc:unit → enc:DiscourseUnit).";
+    class_types enc:ScopedUnit;
+    domain enc:EncodedClaim;
+}
+
+property enc:confidence : core:float {
+    description = "Pipeline confidence (0..1) — on an EncodedClaim, confidence in the encoding; on an AnaphorBinding, the proposer's stated confidence in its top-ranked antecedent. Advisory; not a grade. Low confidence routes to human review (D61).";
+    domain enc:EncodedClaim, enc:AnaphorBinding;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S6 — ReasoningStructure: the assembled per-document encoding
+// ════════════════════════════════════════════════════════════════════
+
+// DERIVED — and this is the one place in the encoding artifact that genuinely is.
+//
+// THE TWO OBJECTS (second pass). Encoding a document produces two kinds of thing,
+// and they take opposite epistemic categories:
+//
+//   1. THE PROCESS's output — this class. Applying the parse engine to bytes is a program run:
+//      a function of (engine, source_sha256) -> structure. That is Derived in the plain sense,
+//      recorded by ONE prov:ProgramTrace for the run. The trace is provenance and mints no
+//      witness — a run record grounds nothing, which is why the three grounds have no `Derived`.
+//   2. THE PROPOSITIONS — enc:EncodedClaim, one per claim, DECLARED by a named agent. The parser
+//      chooses the FORM; it does not assert the content.
+//
+// Until 2026-08-22 the artifact had this exactly inverted at the level that mattered: no trace on
+// the structure at all, and N ProgramTraces on the CLAIMS — one per sentence — each minting
+// IsDerivedAs(claim, P) where P was a proposition about the world. Wrong on both counts. Wrong
+// CARDINALITY, because one parse run is one program execution, not one per sentence; and wrong
+// PROPOSITION, because what the run establishes is that this structure came out of this engine
+// over these bytes, never that any claim in it is true.
+//
+// The structure's own proposition needs no new vocabulary. Nothing CITES "the run happened" the way
+// a certificate cites a claim's warrant — it is provenance — so the D39 §4.1 default
+// `Asserts(structure_iri)` is adequate: the structure's identity already pins the engine, the bytes
+// and the claim set. The three-grounds change made that reading the only one available: there is no
+// longer a constructor that could cite a run.
+
+class enc:ReasoningStructure {
+    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing. DERIVED: this is the output of a program run over hashed input, and prov:derivation points at the single ProgramTrace recording that run. The claims it assembles are Declared, by an agent — the parse fixes their form, not their content.";
+    requires enc:claims, prov:derivation;
+    recommends enc:document, enc:source_path, enc:source_sha256;
+}
+
+property enc:claims : core:resource_array {
+    description = "The EncodedClaims assembled from the document.";
+    class_types enc:EncodedClaim;
+    domain enc:ReasoningStructure;
+}
+
+property enc:document : core:resource {
+    description = "The source work this structure encodes.";
+    class_types reference:Reference;
+    domain enc:ReasoningStructure;
+}
+
+property enc:source_path : core:string {
+    description = "Where the parsed bytes came from — the run's input location, stated once per document. Run provenance, not bibliography: the WORK is enc:document, and the same work re-parsed from a different file is the same Reference with a different source_path.";
+    domain enc:ReasoningStructure;
+}
+
+property enc:source_sha256 : core:string {
+    description = "SHA-256 of the exact bytes this structure was derived from, so a prose edit is visible on the chain and not only in whichever propositions it happened to change. Previously smuggled into enc:section on every unit, a field meant for a human-readable location within the document; stated once here instead.";
+    domain enc:ReasoningStructure;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ProposalDraw — the run's proposer transcript (D71 §9)
+// ════════════════════════════════════════════════════════════════════
+//
+// A formalization run commits its LLM exchanges to its own `doc-<id>` WORKING branch, never to the
+// branch the claims land on. Two records, two questions: an enc:DecisionPoint says WHAT WAS CHOSEN,
+// for a reader of the graph, and travels in the artifact; a ProposalDraw says WHAT THE PROPOSER WAS
+// ASKED AND SAID, so the document re-runs without an LLM, and stays on the working branch, which is
+// prunable. Neither subsumes the other — a DecisionPoint carries no presented pool and does not
+// exist at all for sense ranking or discourse-kind classification.
+//
+// Draws pinned on the same branch as the glossary that produced their pool make the 2026-08-12
+// failure inexpressible: a draw recorded against a DIFFERENT Stage-A glossary, replayed here, was
+// answering a different question. On a branch the two are committed by the same run.
+
+class enc:ProposalDraw {
+    description = "One recorded proposer exchange on a formalization run: the exact question put to an untrusted proposer and the answer it gave. Committed to the run's doc-<id> working branch, never to the branch the claims land on. Replay reads these back in place of the draw files; a changed question MISSES, it never silently replays a stale answer.";
+    requires enc:draw_seam, enc:draw_key, enc:draw_record;
+    recommends enc:draw_model, prov:timestamp;
+}
+
+class enc:DrawSeam {
+    description = "Which proposer seam an exchange came from. Four, matching the four record/replay pairs in the pipeline: sense ranking, reading selection, anaphora proposal, discourse-kind classification.";
+}
+
+resource enc:seam_sense_rank : enc:DrawSeam {
+    core:description = "The contextual sense reranker (D65 §4.1) — per word, the candidate senses in seed order and the permutation returned.";
+}
+resource enc:seam_reading_selection : enc:DrawSeam {
+    core:description = "The reading ranker (D63 reading-selection) — the surviving readings as presented, and the one chosen (or an abstention).";
+}
+resource enc:seam_anaphora : enc:DrawSeam {
+    core:description = "The anaphora proposer (D64) — the assembled candidates for a referent hole and the proposer's ranking over them.";
+}
+resource enc:seam_discourse_kind : enc:DrawSeam {
+    core:description = "The discourse-kind classifier (D68) — a claim's frame evidence and the kind class returned.";
+}
+
+property enc:draw_seam : core:resource {
+    description = "Which proposer produced this exchange — a closed enumeration (allows_only, the SelectionAuthority pattern): a new seam is a deliberate vocabulary edit, never a silent mint.";
+    class_types enc:DrawSeam;
+    allows_only enc:seam_sense_rank, enc:seam_reading_selection, enc:seam_anaphora, enc:seam_discourse_kind;
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_key : core:string {
+    description = "The replay key this exchange answers — everything that was part of the question, composed exactly as the seam's key function composes it. Stored so a draw is inspectable and addressable without decoding the record; replay recomputes the key from the record rather than trusting this field.";
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_record : core:string {
+    description = "The seam's own record type, serialized verbatim (RankRecord, SelectionRecord, and their siblings). Deliberately a transcript rather than a modelled structure: those Rust types ARE the replay contract — the key function reads them field by field — so modelling them a second time in ESL would create two definitions of one contract with nothing keeping them in step, and the first divergence would be a silent replay of the wrong answer. One field, one source of truth (D71 §9.2).";
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_model : core:string {
+    description = "The model that answered, when the exchange was live (e.g. 'claude-opus-5'). Absent for deterministic proposers. Advisory: a draw is keyed on the question, not on who answered it, so a model change does not invalidate a recording — it just means the recorded answer is the old model's.";
+    domain enc:ProposalDraw;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// NOT an institution (D71)
+// ════════════════════════════════════════════════════════════════════
+//
+// This file used to declare `enc:FormalizeDocument` (an institution:Institution) and
+// `enc:qc_formalize_unit` (an OnDemand QueryClass over enc:ScopedUnit), per D62 §8. Both were
+// DELETED on `2026-08-19`: nothing ever implemented `enc_sig:formalize_unit`, and D71 concluded the
+// shape was wrong, not merely unbuilt. Prose formalization has no satisfaction relation of its own
+// (it borrows the kernel validator and the felicity re-gate, which D14 §1.1 excludes from the
+// protocol), no fibre (enc:EncodedClaim is a reflection:DeclaredResource, graded in the reasoning
+// fibre), and answers no queries about its results — one of D14 §1.2's four criteria. It is a
+// SERVICE over the kernel's DocumentPipeline, emitting the artifact these classes describe.
+//
+// The institution shape is reserved for D61 faithfulness verification, which does satisfy all four:
+// it declares its own Institution, an AutoOnLoad QueryClass bound to enc:EncodedClaim returning
+// institution:Verdict, and it promotes Derived -> Verified. It gates the vocabulary above without
+// this file declaring anything institution-shaped.

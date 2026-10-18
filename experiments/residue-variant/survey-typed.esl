@@ -1,0 +1,45 @@
+// The survey sentence as a predicate of its subject — a TRANSPARENT DEFINITION over the parse.
+//
+// «A nationwide survey reports ⟨x⟩ as a desmopressin-responsive AVPR2 genotype» is the term
+// `claims.esl`'s `claim_1` carries, with `avpr2:Leu44` abstracted to `x`. So
+// `SurveyReportsResponsive(avpr2:Leu44)` unfolds to exactly `claim_1`'s proposition, and a
+// certificate citing `claim_1` for it matches by conversion, not by assertion.
+//
+// `x` is an `Entity`: the sentence is about a residue, and a definition over the parse must accept
+// what the parse says. Lifting it to a variant-level claim is `bridge.esl`'s job.
+//
+// Rebuild this body from `claims.esl` whenever the claims are regenerated: it is the selected
+// reading, and a different reading is a different proposition.
+
+namespace lexicon      = "urn:eigenius:lexicon";
+namespace eigentt      = "urn:eigenius:eigentt";
+namespace logic        = "urn:eigenius:logic";
+namespace measurements = "urn:eigenius:measurements";
+namespace ontology     = "urn:eigenius:ontology";
+namespace umlscui      = "urn:eigenius:umlscui";
+namespace wn           = "urn:eigenius:wn";
+namespace rv           = "urn:eigenius:uab:residue-variant";
+
+// Reading the body: a survey s (n00644503, «a detailed critical inspection») that is nationwide
+// (a00526984 above its standard), and an AVPR2 genotype g (n04934043, compound with the gene
+// C1332124) that is responsive (a01999306 above its standard) and related to desmopressin
+// (`compound_kind` with C0011701 — the hyphen compound «desmopressin-responsive» read without naming
+// the relation; the ranker chose this over «responsive to desmopressin»), such that s reports x as g
+// (v00966809, `report X as Y`: object, predicative complement, subject).
+def rv:SurveyReportsResponsive(x : lexicon:Entity) : Prop =
+    forall (x0 : Prop) =>
+        (forall (x1 : exists x1 : wn:n00644503 =>
+                measurements:gt(wn:deg_a00526984(x1), wn:std_a00526984)) =>
+            (forall (x2 : Prop) =>
+                (forall (x3 : exists x3 : wn:n04934043 =>
+                        logic:And(
+                            logic:And(
+                                measurements:gt(wn:deg_a01999306(x3), wn:std_a01999306),
+                                ontology:compound_kind(x3, umlscui:C0011701)
+                            ),
+                            ontology:compound(x3, umlscui:C1332124)
+                        )) =>
+                    wn:v00966809_as(x, eigentt:fst(x3), eigentt:fst(x1)) -> x2)
+                -> x2)
+            -> x0)
+        -> x0;

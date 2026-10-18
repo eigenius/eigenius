@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+
+# Copyright 2026 The Eigenius Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Setup for the lean-verification notebook
+# (`notebooks/examples/lean-verification.json`).
+#
+# Loads the pre-generated demo fixture
+# (`notebooks/examples/lean-verification-demo.eigon.json`) which
+# bundles the nine chain resources the audit chain walks through:
+# the Patient class, the `Healthy` axiom its propositions apply, two
+# named individuals, a justification:Declaration about each (one of which
+# carries the `canonical_proposition` the proof is checked against),
+# RuntimePackageMirror, LeanProofPayload (the `lean4export` bytes),
+# and LeanProofTerm. AutoOnLoad fires
+# `qc_proof_check` against the LeanInstitution as the LeanProofTerm
+# lands; nanoda re-checks the proof and the institution compares the
+# target's type against the claim's externalized proposition with
+# `def_eq` (D74 §6.3). On Holds a Verdict AND a `prov:VerificationTrace`
+# materialise on the chain alongside the term — the trace is what makes
+# the chain admit a `Verified` witness for the claim.
+#
+# Intended flow:
+#
+#   1. `just up` — start the docker compose stack.
+#   2. `./notebooks/examples/lean-verification-setup.sh` — this script.
+#      Fast — the LeanInstitution is in-process, no Docker / Lake /
+#      env image needed (D28 §2.3 / Phase 20a.4).
+#   3. Open <http://localhost:8080/notebooks/> in a browser.
+#   4. Import `notebooks/examples/lean-verification.json`.
+#   5. Click "Run All".
+#
+# What's committed
+# ----------------
+#
+# Nine resources under the `urn:eigenius:demo:lean:*` namespace:
+#   - Patient                       — the class
+#   - Healthy                       — the predicate, an eigentt:Axiom
+#   - patient_1 / patient_2         — named individuals (eigentt:Axiom). Entities: no proposition
+#   - claim_patient_1_healthy       — justification:Declaration, carrying Healthy(patient_1)
+#   - claim_patient_2_healthy       — the same shape about patient_2
+#   - mirror                        — RuntimePackageMirror (the Lake project)
+#   - proof_payload                 — LeanProofPayload (verbatim lean4export bytes)
+#   - proof_term                    — LeanProofTerm (wires everything together)
+#
+# The NEAR-MISS is a second document, `lean-verification-near-miss.eigon.json`,
+# and is deliberately NOT loaded here: it binds the same proof to the claim
+# about patient_2, an AutoOnLoad gate returning Fails refuses the whole commit,
+# and the notebook's Step 6 is where that refusal is the point.
+
+set -euo pipefail
+
+ENDPOINT="${1:-http://localhost:50051}"
+ORCHESTRATOR="${2:-http://localhost:8080}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+FIXTURE="$SCRIPT_DIR/lean-verification-demo.eigon.json"
+
+if [ ! -f "$FIXTURE" ]; then
+    echo "ERROR: fixture not found at $FIXTURE"
+    echo "Generate it first: cargo run -p eigenius-lean --example gen_verification_demo"
+    exit 1
+fi
+
+echo "Building eigenius CLI (one-time)..."
+(cd "$REPO_DIR" && cargo build -q -p eigenius-cli)
+EIGENIUS="$REPO_DIR/target/debug/eigenius --endpoint $ENDPOINT"
+
+echo "=== Eigenius lean-verification notebook setup ==="
+echo "Kernel:        $ENDPOINT"
+echo "Orchestrator:  $ORCHESTRATOR"
+echo "Fixture:       $FIXTURE"
+echo
+
+# Step 0: Health check. Same retry pattern as kinase-institutions-setup.sh
+# — the orchestrator's /health goes ready before the kernel's gRPC
+# listener accepts connections, so we probe the kernel directly via a
+# trivial inspect call.
+echo "--- Step 0: Health check ---"
+if ! curl -sf "$ORCHESTRATOR/health" >/dev/null; then
+    echo "ERROR: Orchestrator not reachable at $ORCHESTRATOR/health"
+    echo "Start the stack first: docker compose up -d (or: just up)"
+    exit 1
+fi
+
+KERNEL_READY=0
+for attempt in $(seq 1 30); do
+    if $EIGENIUS inspect "urn:eigenius:core:Class" >/dev/null 2>&1; then
+        KERNEL_READY=1
+        break
+    fi
+    if [ "$attempt" -eq 1 ]; then
+        echo -n "Waiting for kernel listener at $ENDPOINT"
+    fi
+    echo -n "."
+    sleep 1
+done
+echo
+
+if [ "$KERNEL_READY" -ne 1 ]; then
+    echo "ERROR: Kernel not reachable at $ENDPOINT after 30 attempts"
+    echo "Check 'docker compose logs kernel' for startup errors."
+    exit 1
+fi
+
+echo "Stack healthy."
+echo
+
+# Step 1: Commit the fixture. The kernel's AutoOnLoad dispatcher
+# fires `qc_proof_check` against the LeanInstitution as the
+# LeanProofTerm lands; the institution returns Verdict::Holds and a
+# matching Verdict resource is committed alongside.
+echo "--- Step 1: Load demo fixture ---"
+$EIGENIUS load "$FIXTURE"
+echo
+
+# Step 2: Smoke check. Query for the Verdict resource whose subject
+# is the demo proof_term and confirm it says "Holds". If the proof
+# bytes drifted, the toolchain bumped without regenerating the
+# fixture, or the statement check rejected, this surfaces here
+# rather than from inside the notebook.
+echo "--- Step 2: Smoke check (verdict = Holds) ---"
+$EIGENIUS query \
+    'MATCH "urn:eigenius:institution:Verdict"(?v) {
+        "urn:eigenius:institution:verdict_subject": "urn:eigenius:demo:lean:proof_term",
+        "urn:eigenius:core:ctor_name":              ?ctor
+     }
+     RETURN [] { verdict_iri: ?v, ctor: ?ctor }'
+echo
+
+echo "=== Setup complete ==="
+echo
+echo "Next steps:"
+echo "  1. Open <$ORCHESTRATOR/notebooks/> in a browser."
+echo "  2. Click \"Import…\" and select"
+echo "       notebooks/examples/lean-verification.json"
+echo "  3. Click \"Run All\"."

@@ -1,0 +1,97 @@
+[workspace]
+resolver = "2"
+members = [
+    "kernel",
+    "crates/eigenius-config",
+    "crates/eigenius-embedder-candle",
+    "crates/eigenius-obograph",
+    "crates/eigenius-schemaorg",
+    "crates/eigenius-schemaorg-worker",
+    "crates/eigenius-wordnet",
+    "crates/eigenius-ncbi-gene",
+    "crates/eigenius-umls",
+    "crates/eigenius-specialist",
+    "crates/eigenius-lexicon-align",
+    "crates/eigenius-pmi-registry",
+    "crates/eigenius-encoding",
+    "crates/eigenius-oci",
+    "crates/runtime-substrate",
+    "crates/eigenius-julia",
+    "crates/eigenius-lean",
+    "crates/eigenius-lean-runtime",
+    "crates/eigenius-lean-worker",
+    "crates/eigenius-r-worker",
+    "crates/eigenius-r",
+    "crates/eigenius-statistics",
+    "storage/tikv",
+    "storage/rocksdb",
+    "cli",
+]
+exclude = [
+    "spikes/napi-rs-async",
+]
+# `eigenius-lean-worker`'s build.rs (`crates/eigenius-lean-worker/build.rs`)
+# compiles a C bridge against Lean's `lean.h`, which ships with the Lean
+# toolchain via elan. Devs and CI runners that build the workspace must
+# have `lean` on PATH (or `EIGENIUS_LEAN_INCLUDE_DIR` / `LEAN_SYSROOT`
+# pointing at an installed toolchain). The CI workflow at
+# `.github/workflows/ci.yml` installs elan + the pinned toolchain via
+# the `lean-toolchain` file at `lean/runtime-worker/lean-toolchain`
+# before running cargo. Local devs typically have elan installed
+# already to author Lake projects; the version in `lean-toolchain`
+# is what `elan` will install on first use.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/eigenius/eigenius"
+
+[workspace.dependencies]
+# Shared dependencies across workspace crates
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1", features = ["full"] }
+tonic = "0.14"
+# tonic 0.14 split prost integration out of the core crate: message
+# types + the `include_proto!` macro now live in `tonic-prost`, and
+# the build-time codegen moved to `tonic-prost-build`. The core
+# `tonic` crate carries only the transport + service plumbing.
+tonic-prost = "0.14"
+# `tonic-web` lets the kernel speak the gRPC-Web wire protocol over
+# HTTP/1.1 in addition to native gRPC over HTTP/2 — same RPC surface,
+# different transport. The orchestrator's `KernelClient` (running in
+# Deno) uses gRPC-Web through Deno's native `fetch()` rather than
+# `node:http2`'s polyfill, which has multi-second per-request latency
+# spikes and session-reuse hangs that make notebook-driven queries
+# unusable. Tonic-web is a transparent middleware wrapper — same
+# tonic service, same gRPC semantics; the kernel handles both clients
+# (CLI uses HTTP/2 gRPC, orchestrator uses HTTP/1.1 gRPC-Web) from a
+# single socket.
+tonic-web = "0.14"
+prost = "0.14"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Testing
+proptest = "1"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+# `ci` profile — middle ground between `dev` (no opt) and `release` (full LTO,
+# slow to build). Used by Dockerfile.kernel and Dockerfile.orchestration when
+# `CARGO_PROFILE=ci` is passed as a build arg from the CI workflow. Compile
+# time on a cold runner: ~3-5 min, vs. ~12-15 min for `release`. Binary is
+# functionally identical for e2e purposes (we don't benchmark in e2e).
+[profile.ci]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+debug = false
+incremental = false
+strip = "debuginfo"
+
+[patch.crates-io]
+tonic-web = { path = "patches/tonic-web" }

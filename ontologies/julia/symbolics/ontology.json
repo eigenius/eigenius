@@ -1,0 +1,240 @@
+[
+  {
+    "@id": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicExpression",
+    "urn:eigenius:core:description": "A Symbolics.jl expression as a typed resource. v1 carries the expression as a Julia source string in `expression_source` plus the list of free variables in `variables` (the institution declares the variables via `Symbolics.@variables` before parsing the source). v2 will lift `expression_source` to a typed EigenTT inductive shape mirroring `SymbolicUtils.BasicSymbolic` cases (`Sym, Term, Add, Mul, Const`; note `Pow` is folded into other cases in SymbolicUtils 4 — see D27 §4.1.1 verified note).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expression_source",
+      "urn:eigenius:julia:symbolics:variables"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:expression_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expression_source",
+    "urn:eigenius:core:description": "Julia source representing a Symbolics expression, e.g. `\"ic50_param / (ic50_param + c)\"`. The institution `Symbolics.@variables`-declares the names listed in `variables`, then `Meta.parse`s + `eval`s this source in a scope where Symbolics' overloaded operators dispatch.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 4096,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:symbolics:SymbolicExpression"]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:variables",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variables",
+    "urn:eigenius:core:description": "Free variable names appearing in `expression_source`. Each is declared via `Symbolics.@variables` before the source is parsed.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:symbolics:SymbolicExpression"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:SimplifiesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SimplifiesTo",
+    "urn:eigenius:core:description": "Claims that calling `Symbolics.simplify` on `expr` yields `simplified_form` (heuristic — Symbolics 7's `simplify` is NOT normalising; calling it twice need not converge to a unique canonical form). AutoOnLoad re-runs simplify and compares structural equality; Verdict::Holds on match, Verdict::Undecidable on disagreement (the rewriter may have evolved between commit and re-validation).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr",
+      "urn:eigenius:julia:symbolics:simplified_form"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr",
+    "urn:eigenius:core:description": "Reference to a SymbolicExpression that is the input to a relation.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:SimplifiesTo",
+      "urn:eigenius:julia:symbolics:Substitutes",
+      "urn:eigenius:julia:symbolics:Differentiates",
+      "urn:eigenius:julia:symbolics:SymbolicSubstitutionInput",
+      "urn:eigenius:julia:symbolics:SymbolicDifferentiationInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:simplified_form",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "simplified_form",
+    "urn:eigenius:core:description": "The result of `simplify(expr)` — explicitly NOT 'normal form'. See SimplifiesTo description.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:symbolics:SimplifiesTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:Substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Substitutes",
+    "urn:eigenius:core:description": "Claims that substituting `substitution_var := substitution_value_source` in `expr` yields `result`. AutoOnLoad re-runs `Symbolics.substitute` and confirms structural equality.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr",
+      "urn:eigenius:julia:symbolics:substitution_var",
+      "urn:eigenius:julia:symbolics:substitution_value_source",
+      "urn:eigenius:julia:symbolics:result"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:substitution_var",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "substitution_var",
+    "urn:eigenius:core:description": "Name of the variable being substituted. Must appear in `expr.variables`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:Substitutes",
+      "urn:eigenius:julia:symbolics:SymbolicSubstitutionInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:substitution_value_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "substitution_value_source",
+    "urn:eigenius:core:description": "Julia source for the substituted value. Either a numeric literal (`\"42.0\"`) or a Symbolics expression (`\"k_d * 2\"`). The institution parses + evaluates this in the same Symbolics scope as `expr`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 1024,
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:Substitutes",
+      "urn:eigenius:julia:symbolics:SymbolicSubstitutionInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:result",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "result",
+    "urn:eigenius:core:description": "Resulting SymbolicExpression after substitution / differentiation / simplification.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:Substitutes",
+      "urn:eigenius:julia:symbolics:Differentiates"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:Differentiates",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Differentiates",
+    "urn:eigenius:core:description": "Claims that the symbolic derivative of `expr` with respect to `differentiation_var` is `result`. AutoOnLoad re-runs `Symbolics.derivative` and confirms structural equality (modulo `simplify`).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr",
+      "urn:eigenius:julia:symbolics:differentiation_var",
+      "urn:eigenius:julia:symbolics:result"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:differentiation_var",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "differentiation_var",
+    "urn:eigenius:core:description": "Name of the variable to differentiate with respect to.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:Differentiates",
+      "urn:eigenius:julia:symbolics:SymbolicDifferentiationInput"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:SatisfiesEquation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SatisfiesEquation",
+    "urn:eigenius:core:description": "Claims that `expr_lhs` and `expr_rhs` are equivalent under Symbolics' default rewriter. AutoOnLoad simplifies both sides and compares; Verdict::Holds on convergence to identical simplified forms, Verdict::Undecidable on disagreement (since `simplify` is heuristic, not a decision procedure). For polynomial fragments, the institution falls back to `Symbolics.groebner_basis` for a Holds/Fails verdict.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr_lhs",
+      "urn:eigenius:julia:symbolics:expr_rhs"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:expr_lhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr_lhs",
+    "urn:eigenius:core:description": "Left-hand side of an equation / equivalence claim.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:SatisfiesEquation",
+      "urn:eigenius:julia:symbolics:SymbolicEquivalenceInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:expr_rhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr_rhs",
+    "urn:eigenius:core:description": "Right-hand side of an equation / equivalence claim.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:symbolics:SatisfiesEquation",
+      "urn:eigenius:julia:symbolics:SymbolicEquivalenceInput"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:SymbolicSubstitutionInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicSubstitutionInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_substitute: an expression, a variable, and a value source.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr",
+      "urn:eigenius:julia:symbolics:substitution_var",
+      "urn:eigenius:julia:symbolics:substitution_value_source"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:SymbolicDifferentiationInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicDifferentiationInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_differentiate: an expression and a variable.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr",
+      "urn:eigenius:julia:symbolics:differentiation_var"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:SymbolicEquivalenceInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicEquivalenceInput",
+    "urn:eigenius:core:description": "OnDemand / Decidable input class for qc_check_equivalence: two SymbolicExpressions.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:expr_lhs",
+      "urn:eigenius:julia:symbolics:expr_rhs"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:SymbolicSymbolSet",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicSymbolSet",
+    "urn:eigenius:core:description": "OnDemand result class for qc_extract_symbols: the free-variable names in an expression, as returned by `Symbolics.get_variables`.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:symbols"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:symbols",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "symbols",
+    "urn:eigenius:core:description": "Free variable names appearing in an expression.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:symbolics:SymbolicSymbolSet"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:LatexString",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "LatexString",
+    "urn:eigenius:core:description": "OnDemand result class for qc_to_latex: a LaTeX rendering of an expression. Backed by `Latexify.latexify` (separate package; the institution's image must include Latexify.jl).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:symbolics:latex"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:latex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "latex",
+    "urn:eigenius:core:description": "LaTeX source string.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:symbolics:LatexString"]
+  }
+]

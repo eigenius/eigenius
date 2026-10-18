@@ -1,0 +1,487 @@
+---
+// Getting-started page — hand-authored, NOT a Starlight docs page.
+// Mirrors the visual treatment of the landing page (same topnav,
+// section structure, footer) but the content is a guided on-ramp:
+// a small hero, the notebook screenshot, install in three steps,
+// a payoff section that ties what just happened to the warrant
+// taxonomy, and routing into the deeper sections.
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import AudienceCard from "../components/AudienceCard.astro";
+import { Image } from "astro:assets";
+import notebookScreenshot from "../assets/eigenius_notebook_ux.png";
+
+const description =
+  "Run the Eigenius notebook on your laptop in about fifteen minutes. Clone the repo, bring up docker compose, open the drug-screening walkthrough, and watch a typed reasoning chain commit cell by cell.";
+---
+
+<BaseLayout title="Get started — Eigenius" description={description} current="start">
+    <!-- ───────── Hero (smaller than the landing hero) ───────── -->
+    <section class="start-hero">
+      <div class="start-hero-inner">
+        <span class="hero-eyebrow">Get started · ~15 minutes, no account</span>
+        <h1 class="start-headline">
+          Run the notebook.<br />Commit a chain.<br />Audit a claim.
+        </h1>
+        <p class="start-pitch">
+          Eigenius runs on your laptop. The walkthrough is a notebook;
+          each cell commits a typed artifact to the chain, and the
+          kernel type-checks the composition as it goes. By the end
+          you have a machine-checkable audit trail from six raw
+          plate-reader readings to a published-style designation.
+        </p>
+        <div class="hero-actions">
+          <a class="cta cta-primary" href="#install">
+            Install with Docker
+          </a>
+          <a
+            class="cta cta-secondary"
+            href="https://github.com/eigenius/eigenius"
+          >
+            View on GitHub <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── See it ───────── -->
+    <section class="section section-see-it">
+      <div class="section-inner">
+        <span class="section-eyebrow">See it</span>
+        <h2 class="section-title">
+          The notebook is the platform.
+        </h2>
+        <p class="section-prose">
+          Every cell commits a typed chain artifact. The right pane
+          surfaces the audit trail the kernel just type-checked &mdash;
+          not a rendered summary, the actual chain. Below is the
+          drug-screening walkthrough partway through.
+        </p>
+        <figure class="screenshot">
+          <Image
+            src={notebookScreenshot}
+            alt="Eigenius notebook UX: a left pane of cells progressively committing typed chain artifacts (Observed, Derived, Declared), with a right pane showing the live chain state — types resolved, AutoOnLoad cascades fired, the type-checker's verdicts visible."
+            widths={[800, 1200, 1600, 2000]}
+            sizes="(max-width: 60rem) 100vw, 1600px"
+            format="webp"
+            quality={85}
+          />
+        </figure>
+      </div>
+    </section>
+
+    <!-- ───────── Install in three steps ───────── -->
+    <section id="install" class="section section-install">
+      <div class="section-inner">
+        <span class="section-eyebrow">Install</span>
+        <h2 class="section-title">
+          Three steps to a running chain.
+        </h2>
+        <p class="section-prose">
+          The end-to-end demo runs entirely in Docker &mdash; no Rust
+          or Deno on the host required. If you'd rather build from
+          source, follow
+          <a href="/docs/platform/02-installation/">
+            Platform &sect;2 &mdash; Installation
+          </a> instead.
+        </p>
+
+        <ol class="steps">
+          <li class="step">
+            <span class="step-num">01</span>
+            <div class="step-body">
+              <h3 class="step-heading">Clone and start the stack</h3>
+              <pre class="step-code"><code>git clone https://github.com/eigenius/eigenius
+cd eigenius
+docker compose up -d</code></pre>
+              <p class="step-caption">
+                Requires Docker Desktop or Docker Engine + Compose v2.
+                The first run pulls images and seeds the layer chain
+                &mdash; allow a couple of minutes.
+              </p>
+            </div>
+          </li>
+
+          <li class="step">
+            <span class="step-num">02</span>
+            <div class="step-body">
+              <h3 class="step-heading">Open the notebook</h3>
+              <pre class="step-code"><code>http://localhost:8080/notebooks/</code></pre>
+              <p class="step-caption">
+                No login. Everything runs on your laptop. The
+                orchestrator serves the React notebook and proxies
+                EigenQL/ESL into the kernel over gRPC.
+              </p>
+            </div>
+          </li>
+
+          <li class="step">
+            <span class="step-num">03</span>
+            <div class="step-body">
+              <h3 class="step-heading">
+                Run the drug-screening walkthrough
+              </h3>
+              <p class="step-caption">
+                Open <code>examples/stats-and-reasoning.json</code>
+                and run cells top to bottom. About five minutes
+                end-to-end. Watch the AutoOnLoad cascades fire as the
+                statistics institution emits its verdict and the
+                reasoning institution composes the certificate.
+              </p>
+              <p class="step-actions">
+                <a
+                  class="cta cta-secondary"
+                  href="/examples/drug-screening/"
+                >
+                  Read the walkthrough first
+                </a>
+                <a
+                  class="cta cta-secondary"
+                  href="/docs/platform/14-notebook/"
+                >
+                  Platform &sect;14 &mdash; Notebook reference
+                </a>
+              </p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ───────── You just did ───────── -->
+    <section class="section section-payoff">
+      <div class="section-inner">
+        <span class="section-eyebrow">You just did</span>
+        <h2 class="section-title">
+          The chain, now machine-inspectable.
+        </h2>
+        <p class="section-prose">
+          By the time the last cell runs, you have committed:
+        </p>
+        <ul class="payoff-list">
+          <li>
+            <span class="warrant-chip warrant-chip-observed">
+              Observed
+            </span>
+            six raw plate-reader IC₅₀ measurements, each carrying
+            its instrument provenance.
+          </li>
+          <li>
+            <span class="warrant-chip warrant-chip-derived">
+              Derived
+            </span>
+            a deterministic statistical verdict, recomputable by
+            anyone with read access to the chain.
+          </li>
+          <li>
+            <span class="warrant-chip warrant-chip-declared">
+              Declared
+            </span>
+            a chain-resident methodology &mdash; the polymorphic
+            domain bridge from statistical claim to compound
+            classification, on the record as its own citable
+            artifact.
+          </li>
+          <li>
+            <span class="warrant-chip warrant-chip-derived">
+              Derived
+            </span>
+            the final conclusion as a typed proof term the kernel
+            checked at commit time. No prose, no hidden assumptions.
+          </li>
+        </ul>
+        <p class="section-prose">
+          A reviewer (or another AI agent, or a regulator) can now
+          walk back from the conclusion to the raw data in finite
+          steps, re-execute any deterministic step, and refute any
+          premise without disputing the rest.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Where to next ───────── -->
+    <section class="section section-next">
+      <div class="section-inner">
+        <span class="section-eyebrow">Where to next</span>
+        <h2 class="section-title">
+          Three directions from here.
+        </h2>
+        <div class="audience-grid">
+          <AudienceCard
+            audience="Learn the concepts"
+            tagline="The framework's vocabulary in narrative form."
+            bullets={[
+              "The four-warrant taxonomy: Observed, Derived, Verified, Declared",
+              "Domain bridges: cross-vocabulary translation as data",
+              "Institutions: how runtimes cooperate without sharing a language",
+            ]}
+            href="/concepts/"
+            linkLabel="Read the concepts →"
+          />
+          <AudienceCard
+            audience="See more examples"
+            tagline="Worked end-to-end walkthroughs."
+            bullets={[
+              "Drug screening: the statistics + reasoning pair",
+              "Kinase potency mapping: five Julia institutions in concert",
+              "Lean-verified primary endpoint (planned)",
+            ]}
+            href="/examples/"
+            linkLabel="Browse examples →"
+          />
+          <AudienceCard
+            audience="Read the reference"
+            tagline="Surface languages, queries, and the platform."
+            bullets={[
+              "ESL — declare ontologies and typed programs",
+              "EigenQL — query the layered Eigon graph",
+              "Composition, formula language, platform internals",
+            ]}
+            href="/docs/"
+            linkLabel="Open the docs →"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Help ───────── -->
+    <section class="section section-help">
+      <div class="section-inner">
+        <span class="section-eyebrow">Help</span>
+        <h2 class="section-title">
+          Stuck? Found a bug?
+        </h2>
+        <p class="section-prose">
+          Project tracking lives on GitHub. Use Discussions for
+          open-ended questions and design conversations; file an
+          Issue with the smallest reproduction you can manage when
+          something is broken. For private deployments and commercial
+          questions, see the contact note in the repo README.
+        </p>
+        <p class="hero-actions">
+          <a
+            class="cta cta-secondary"
+            href="https://github.com/eigenius/eigenius/discussions"
+          >
+            Join the discussion <span aria-hidden="true">↗</span>
+          </a>
+          <a
+            class="cta cta-secondary"
+            href="https://github.com/eigenius/eigenius/issues"
+          >
+            File an issue <span aria-hidden="true">↗</span>
+          </a>
+          <a
+            class="cta cta-secondary"
+            href="https://github.com/eigenius/eigenius"
+          >
+            View on GitHub <span aria-hidden="true">↗</span>
+          </a>
+        </p>
+      </div>
+    </section>
+
+</BaseLayout>
+
+<style>
+  /* Page-unique styles. Shared chrome lives in custom.css and in
+     the TopNav / SiteFooter components. */
+
+  /* ───────── Hero (smaller than landing) ───────── */
+  .start-hero {
+    padding: 3rem 1.5rem 3.5rem 1.5rem;
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .start-hero-inner {
+    max-width: 40rem;
+  }
+
+  .start-headline {
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 0.5rem 0 1rem 0;
+  }
+
+  .start-pitch {
+    font-size: clamp(1rem, 1.4vw, 1.15rem);
+    color: var(--sl-color-gray-3);
+    line-height: 1.55;
+    max-width: 52ch;
+  }
+
+  /* "See it" — tinted-section variant used for the screenshot. */
+  .section-see-it {
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
+  }
+
+  /* ───────── Screenshot ───────── */
+  .screenshot {
+    margin: 2rem 0 0 0;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.6rem;
+    overflow: hidden;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.2),
+      0 24px 48px rgba(0, 0, 0, 0.35);
+    background: var(--sl-color-bg-nav);
+  }
+
+  .screenshot :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* ───────── Install steps ───────── */
+  .steps {
+    list-style: none;
+    margin: 2rem 0 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 3rem 1fr;
+    gap: 1.25rem;
+    align-items: start;
+    padding: 1.25rem 1.25rem 1.25rem 1rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.5rem;
+    background: var(--sl-color-bg-nav);
+  }
+
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 0.4rem;
+    background: var(--eigenius-brand-bg);
+    color: var(--sl-color-text-accent);
+    font-weight: 700;
+    font-size: 0.85rem;
+    font-feature-settings: "tnum";
+    border: 1px solid var(--eigenius-brand-deep);
+  }
+
+  .step-body {
+    min-width: 0;
+  }
+
+  .step-heading {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0.15rem 0 0.7rem 0;
+    color: var(--sl-color-text);
+  }
+
+  .step-code {
+    background: var(--sl-color-bg);
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.4rem;
+    padding: 0.8rem 1rem;
+    margin: 0.5rem 0 0.7rem 0;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--sl-color-text);
+  }
+
+  .step-code code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+      Consolas, monospace;
+    white-space: pre;
+  }
+
+  .step-caption {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--sl-color-gray-3);
+    line-height: 1.55;
+  }
+
+  .step-caption code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+      Consolas, monospace;
+    background: var(--sl-color-bg);
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.25rem;
+    font-size: 0.88em;
+  }
+
+  .step-actions {
+    display: flex;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    margin: 1rem 0 0 0;
+  }
+
+  /* ───────── You just did (warrant chips) ───────── */
+  .payoff-list {
+    list-style: none;
+    margin: 1.5rem 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    max-width: 60ch;
+  }
+
+  .payoff-list li {
+    font-size: 1rem;
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+  }
+
+  .warrant-chip {
+    display: inline-block;
+    margin-right: 0.6rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 0.3rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: 0.1em;
+    border: 1px solid;
+  }
+
+  .warrant-chip-observed {
+    background: var(--warrant-observed-bg);
+    border-color: var(--warrant-observed);
+    color: var(--warrant-observed);
+  }
+
+  .warrant-chip-derived {
+    background: var(--warrant-derived-bg);
+    border-color: var(--warrant-derived);
+    color: var(--warrant-derived);
+  }
+
+  .warrant-chip-declared {
+    background: var(--warrant-declared-bg);
+    border-color: var(--warrant-declared);
+    color: var(--warrant-declared);
+  }
+
+
+  /* ───────── Narrow viewport adjustments ───────── */
+  @media (max-width: 40rem) {
+    .step {
+      grid-template-columns: 1fr;
+      gap: 0.8rem;
+    }
+    .step-num {
+      width: 2rem;
+      height: 2rem;
+      font-size: 0.78rem;
+    }
+  }
+</style>

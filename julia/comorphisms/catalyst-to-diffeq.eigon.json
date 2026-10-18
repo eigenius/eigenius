@@ -1,0 +1,25 @@
+[
+  {
+    "@id": "urn:eigenius:comorphisms:catalyst_to_diffeq:m_id_ode_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
+    "urn:eigenius:core:short_name": "m_id_ode_problem",
+    "urn:eigenius:core:description": "Identity EigenTT term on `diffeq:OdeProblem`. Body is a `program:Var` referencing the bound parameter, so this Lambda has type `OdeProblem -> OdeProblem`. Realises the typed middle `m` of the Catalyst -> DiffEq Comorphism: both endpoints speak the same OdeProblem shape (the Catalyst-side ExportFormat extracts a FormulaTerm-typed OdeProblem via `compile_to_ode`; the DiffEq-side ImportFormat takes the same shape as input), so the cross-institution boundary needs no payload translation. The actual compilation work happens inside the ExportFormat's `procedure` — same pattern as the Symbolics -> IntervalArithmetic identity comorphism, lifted from FormulaTerm to OdeProblem.",
+    "urn:eigenius:program:parameter": "p",
+    "urn:eigenius:program:parameter_type": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+      "urn:eigenius:program:name": "p"
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:comorphisms:catalyst_to_diffeq",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:core:short_name": "catalyst_to_diffeq",
+    "urn:eigenius:core:description": "Cross-institution Comorphism — Catalyst -> DiffEq. The triple (s, m, t) where s = `ef_cat_to_ode_input` (Catalyst-side compilation of a CatalystToOdeInput to a FormulaTerm-typed OdeProblem via `compile_to_ode`), m = `m_id_ode_problem` (the identity Lambda on OdeProblem), t = `if_diffeq_problem` (DiffEq-side reify of the OdeProblem payload). The chain-side formalisation of D27 §4.4.4: a typed compilation pipeline from a chain-committed reaction network to a chain-committed integrator-ready problem. Marked `exact: false` because mass-action ODE compilation is faithful to the network's *deterministic* limit but the network admits other dynamical interpretations (jumps, SDEs) under the same structure — same exactness story as D27 §4.4.4 sketches.",
+    "urn:eigenius:institution:export_format": "urn:eigenius:catalyst:formats:ef_cat_to_ode_input",
+    "urn:eigenius:institution:transformation": "urn:eigenius:comorphisms:catalyst_to_diffeq:m_id_ode_problem",
+    "urn:eigenius:institution:import_format": "urn:eigenius:diffeq:formats:if_diffeq_problem",
+    "urn:eigenius:institution:exact": false
+  }
+]

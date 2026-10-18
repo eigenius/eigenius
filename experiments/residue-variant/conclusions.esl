@@ -1,0 +1,88 @@
+// Three conclusions over the survey sentence (`claims.esl` `claim_1`) and the bridge
+// (`bridge.esl`). Each certificate is checked against its type at commit; A and B are refused,
+// C commits.
+//
+//   A  DDAVPResponsive(Leu44)       the survey's subject, lifted by the bridge     → refused
+//   B  DDAVPResponsive(c.131T>C)    the patient's variant, lifted by the bridge    → refused
+//   C  SurveyReportsResponsive(Leu44)   the survey sentence itself (control)       → commits
+//
+// A is unstatable: `DDAVPResponsive` is indexed by `Variant`, and `Leu44` is a `Residue`.
+// B is statable but has no grounds: the bridge needs `SurveyReportsResponsive(c.131T>C)`, and the
+// only witness is `claim_1`'s, for `SurveyReportsResponsive(Leu44)`. The witness key hashes the
+// proposition, and `c.131T>C` and `Leu44` are distinct terms.
+//
+// The instance of each `instantiate` is ascribed its class, `(avpr2:c_131T_C : avpr2:Variant)`.
+// `instantiate` fixes its domain `T` from the instance's inferred type, and an individual's
+// inferred type is its principal one — a record of its properties refined by its classes — which
+// does not unify with the rule's `forall (v : avpr2:Variant)`. The ascription picks the class; the
+// kernel checks it by `is_a`, so `(avpr2:Leu44 : avpr2:Variant)` would be refused for A's reason.
+
+namespace core          = "urn:eigenius:core";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace avpr2         = "urn:eigenius:uab:avpr2";
+namespace rv            = "urn:eigenius:uab:residue-variant";
+
+// ── A — the survey's subject is a residue ─────────────────────────────────────────────────────
+resource rv:concl_leu44 : justification:Conclusion {
+    core:description = "DDAVPResponsive(Leu44) — the survey's report lifted through the bridge at its own subject. Refused: Leu44 is a Residue, and DDAVPResponsive is stated of a Variant.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   instantiate(
+                       (avpr2:Leu44 : avpr2:Variant),
+                       declared(
+                           "urn:eigenius:uab:residue-variant:bridge",
+                           forall (v : avpr2:Variant) =>
+                               rv:SurveyReportsResponsive(v) -> avpr2:DDAVPResponsive(v),
+                           ()
+                       )
+                   ),
+                   declared(
+                       "urn:eigenius:uab:residue-variant:claim_1",
+                       rv:SurveyReportsResponsive(avpr2:Leu44),
+                       ()
+                   )
+               )),
+               type_expr(justification:Grounds( avpr2:DDAVPResponsive(avpr2:Leu44) )) );
+}
+
+// ── B — the patient's variant ─────────────────────────────────────────────────────────────────
+resource rv:concl_c131 : justification:Conclusion {
+    core:description = "DDAVPResponsive(c.131T>C) — the bridge instantiated at the patient's variant, citing the survey sentence for its antecedent. Refused: the survey sentence is about Leu44, so there is no witness for SurveyReportsResponsive(c.131T>C).";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   instantiate(
+                       (avpr2:c_131T_C : avpr2:Variant),
+                       declared(
+                           "urn:eigenius:uab:residue-variant:bridge",
+                           forall (v : avpr2:Variant) =>
+                               rv:SurveyReportsResponsive(v) -> avpr2:DDAVPResponsive(v),
+                           ()
+                       )
+                   ),
+                   declared(
+                       "urn:eigenius:uab:residue-variant:claim_1",
+                       rv:SurveyReportsResponsive(avpr2:c_131T_C),
+                       ()
+                   )
+               )),
+               type_expr(justification:Grounds( avpr2:DDAVPResponsive(avpr2:c_131T_C) )) );
+}
+
+// ── C — the survey sentence itself (control) ──────────────────────────────────────────────────
+resource rv:concl_survey : justification:Conclusion {
+    core:description = "SurveyReportsResponsive(Leu44) — the survey sentence, cited for what it says. Commits: the definition unfolds to claim_1's proposition.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:uab:residue-variant:claim_1",
+                   rv:SurveyReportsResponsive(avpr2:Leu44),
+                   ()
+               )),
+               type_expr(justification:Grounds( rv:SurveyReportsResponsive(avpr2:Leu44) )) );
+}

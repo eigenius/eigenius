@@ -1,0 +1,34 @@
+// C-0020 as the document states it, on its own layer because it does not type.
+//
+// D100 rung 1's result. The sentence is:
+//
+//     «p.Ile380Val is carried by 4 hemizygous males.»
+//
+// Its subject is `xiap:p_Ile380Val`, a `variant:ProteinAllele`. `xiap:HemizygousMaleCount` is
+// indexed by `variant:NucleotideAllele`, because the count gnomAD produced is a count of genotypes
+// at X-123900531-A-G. So the sentence, encoded faithfully, does not type — and `variant:TranslatesTo`
+// supplies no route by which it could, because it is not injective: several codons encode one
+// residue, so knowing the protein allele does not determine the nucleotide allele whose genotypes
+// were counted.
+//
+// The certificate closes that gap by hand, in its `reading` field: "Subject p.Ile380Val =
+// X-123900531-A-G (c.1138A>G)". That is a human asserting an identity the evidence does not carry,
+// and `bridge.esl` states it as what it is — a `justification:Declaration` with an accountable
+// agent — rather than letting it pass unremarked inside a prose field.
+//
+// Kept on a separate layer so the vocabulary and the observation stay clean; the test loads this one
+// expecting errors, which is the point.
+
+namespace core    = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace units   = "urn:eigenius:units";
+namespace xiap    = "urn:eigenius:uab:xiap";
+
+resource xiap:claim_c0020_as_written : core:Resource {
+    core:short_name  = "c0020-as-written";
+    core:description = "C-0020's sentence encoded with the subject the document names: the PROTEIN allele. Refused — a ProteinAllele does not inhabit NucleotideAllele. This resource exists to be refused.";
+
+    eigentt:proposition = type_expr(
+        xiap:HemizygousMaleCount(xiap:p_Ile380Val, units:mk_quantity(r"4", 0))
+    );
+}

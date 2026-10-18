@@ -1,0 +1,1162 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Hand-written lexer for ESL (Eigenius Surface Language).
+//!
+//! Tokenizes ESL source into a stream of tokens with position tracking.
+//! Whitespace and comments (// line, /* block */) are discarded.
+
+use crate::esl::error::{EslError, Position};
+
+/// Token types for ESL.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    // Top-level keywords
+    Namespace,
+    Class,
+    Property,
+    Resource,
+    Program,
+    Data,
+    /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
+    MergeComorphism,
+    /// D37 §3.3 — the `for` keyword separating a merge_comorphism's
+    /// IRI from its target class. Reserved globally so it can't be
+    /// shadowed by user-defined identifiers.
+    For,
+    /// D43 §3.1 — `text_index <iri> { target_property = ...; text_analyzer = "..."; }`.
+    /// Sugar over a `core:TextIndex` Resource declaration: `compile_index` emits exactly
+    /// the resource `resource <iri> : core:TextIndex { … }` emits, with the class supplied
+    /// by the keyword.
+    TextIndex,
+    /// D43 §3.1 — `vector_index <iri> { target_property = ...; vec_model = ...; ... }`.
+    /// Sugar over a `core:VectorIndex` Resource declaration, exactly as for
+    /// [`TokenKind::TextIndex`].
+    VectorIndex,
+
+    // Expression keywords
+    Let,
+    /// `alias name = expr, name = expr, ... in body` —
+    /// compile-time substitution form in `type_expr(...)` position.
+    /// Distinct from `Let` which marks a kernel-level definitional
+    /// binding (`Decl::Def` in NbE; the `let x : T = e; body` form
+    /// in the program-body parser). Aliases inline at lowering time
+    /// and never appear in `Exp`. Future type-position kernel-let
+    /// (real δ-binding) would reuse `Let`; reserving `alias` now
+    /// keeps the two distinguishable forever.
+    Alias,
+    /// `in` keyword — terminates the binding list of an
+    /// `alias name = expr, ... in body` form. Two letters; not used
+    /// as an identifier anywhere in the existing ESL codebase, so the
+    /// reservation costs nothing.
+    In,
+    Case,
+    Match,
+    Returning,
+    Construct,
+    Map,
+    Reduce,
+    /// D37 §3.1 — `lambda x : T => body` (the typed, English-word
+    /// form). Distinct from `Backslash` (`\`) and `Lambda` (`λ`),
+    /// which produce the untyped lambda surface used in `program`
+    /// bodies.
+    LambdaKw,
+    /// D37 §3.5 — `pi x : T => U` value-typed Pi expression.
+    Pi,
+    /// `forall (P : Prop) => body`. Alias for `pi` with
+    /// proposition-authoring semantics; parses to the same AST.
+    Forall,
+    /// `exists` — opens a Sigma (dependent pair) binder, the dual of `forall`.
+    Exists,
+    /// D48 Phase J Layer 3 — `fun (i : T) => body` lambda in type
+    /// position. Used as a motive for `match … returning <motive>`
+    /// over indexed inductives. Compiles to `Exp::Lam`.
+    Fun,
+    /// `axiom Name : <type-expr>` top-level declaration.
+    /// Commits a `core:Axiom` chain resource with the type expression
+    /// encoded via the D47 codec.
+    Axiom,
+    /// `def name(p : T, ...) : R = <type-expr>` — a chain-resident TRANSPARENT definition (D66).
+    /// Commits an `eigentt:Definition` whose body decode substitutes at each use, unlike
+    /// [`TokenKind::Axiom`], whose IRI stays rigid and never unfolds.
+    Def,
+    /// D52 §12 — `macro ns:Name(p1 : T1, ...) : RetT => body`
+    /// top-level smart-constructor declaration. Compile-time AST
+    /// substitution only; not a runtime function. Distinct from
+    /// `Fun` (`fun (x : T) => body` inside `type_expr(...)` is a
+    /// type-level lambda).
+    Macro,
+    /// Sort literal `Prop` (= `Sort(0)`).
+    Prop,
+    /// Sort literal `Set` (= `Sort(1)`).
+    SetKw,
+    /// Sort literal `Type` (followed by an integer level
+    /// in `Type N` parses; `Type 0` is `Sort(1)`, `Type N` is `Sort(N+1)`).
+    TypeKw,
+    /// `Sort` — the general sort form.
+    SortKw,
+    /// `universe` — binds level variables.
+    Universe,
+    /// D37 §3.3 — `=>` returns/produces. Used in `lambda` bodies
+    /// (after the parameter list) and inline `merge_comorphism`
+    /// bodies. Distinct from `Arrow` (`->`) which separates the
+    /// untyped lambda's parameter from its body and types in
+    /// non-dependent arrows.
+    FatArrow,
+
+    // Literals
+    StringLit(String),
+    IntLit(i64),
+    FloatLit(f64),
+    /// An exact rational (D94), from either surface form: the decimal suffix `0.05r`, or the
+    /// canonical `r"37/180"`. Two forms because the suffix cannot express a rational whose
+    /// reduced denominator is not 2^a·5^b — and `37/180`, degrees to radians, is exactly such a
+    /// value (D93). The canonical form is what the printer emits.
+    RatLit(crate::numeric::Rational),
+    /// A unit of measure (D93), from `u"s^-1·m^2"`. Canonical form only, and unlike `RatLit`
+    /// there is no second surface: a unit has no decimal spelling to abbreviate.
+    UnitLit(crate::units::Unit),
+    BoolLit(bool),
+
+    // Identifier (bare word: name, breed, short_name)
+    Ident(String),
+    /// A qualified name `ns:name`, lexed atomically (tight `:`, no surrounding
+    /// whitespace). Making qualified names a single token frees the standalone
+    /// `:` (`Colon`) to mean *only* the binder / annotation colon (`x : T`,
+    /// `(e : T)`), removing the namespace-vs-annotation ambiguity (D63 §8.2).
+    QualName(String, String),
+
+    // Operators
+    Eq,        // =
+    Arrow,     // ->
+    Backslash, // \ (lambda)
+    Lambda,    // λ (lambda, unicode)
+    Dot,       // .
+    Semicolon, // ;
+    Colon,     // :
+    Comma,     // ,
+    Less,      // < (size bound in `j : Size < i`, Phase 11b step 15h)
+    // Arithmetic operators — used by the formula(...) sublanguage
+    // (Phase 19f.3) and by parse_value for unary minus on numeric
+    // literals (`ex:value = -1.5;` preserves its old shape via the
+    // parser). Tokens emitted unconditionally; consumers outside the
+    // formula path only ever see Minus, never the others.
+    Plus,  // +
+    Minus, // -
+    Star,  // *
+    Slash, // /
+    Caret, // ^
+
+    // Structural
+    LParen,   // (
+    RParen,   // )
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+
+    // End of input
+    Eof,
+}
+
+/// A token with its source position.
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub pos: Position,
+}
+
+/// Tokenize an ESL source string.
+pub fn tokenize(input: &str) -> Result<Vec<Token>, EslError> {
+    let mut lexer = Lexer::new(input);
+    let mut tokens = Vec::new();
+    loop {
+        let token = lexer.next_token()?;
+        let is_eof = token.kind == TokenKind::Eof;
+        tokens.push(token);
+        if is_eof {
+            break;
+        }
+    }
+    Ok(tokens)
+}
+
+struct Lexer<'a> {
+    input: &'a str,
+    bytes: &'a [u8],
+    pos: usize,
+    line: usize,
+    col: usize,
+}
+
+impl<'a> Lexer<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            bytes: input.as_bytes(),
+            pos: 0,
+            line: 1,
+            col: 1,
+        }
+    }
+
+    fn position(&self) -> Position {
+        Position {
+            line: self.line,
+            column: self.col,
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn peek_at(&self, offset: usize) -> Option<u8> {
+        self.bytes.get(self.pos + offset).copied()
+    }
+
+    fn advance(&mut self) -> Option<u8> {
+        let ch = self.bytes.get(self.pos).copied()?;
+        self.pos += 1;
+        if ch == b'\n' {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
+        Some(ch)
+    }
+
+    fn skip_whitespace_and_comments(&mut self) {
+        loop {
+            match self.peek() {
+                Some(b' ' | b'\t' | b'\r' | b'\n') => {
+                    self.advance();
+                }
+                Some(b'/') if self.peek_at(1) == Some(b'/') => {
+                    // Line comment
+                    while let Some(ch) = self.advance() {
+                        if ch == b'\n' {
+                            break;
+                        }
+                    }
+                }
+                Some(b'/') if self.peek_at(1) == Some(b'*') => {
+                    // Block comment
+                    self.advance(); // /
+                    self.advance(); // *
+                    loop {
+                        match self.advance() {
+                            Some(b'*') if self.peek() == Some(b'/') => {
+                                self.advance();
+                                break;
+                            }
+                            None => break,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn next_token(&mut self) -> Result<Token, EslError> {
+        self.skip_whitespace_and_comments();
+
+        let pos = self.position();
+
+        let ch = match self.peek() {
+            None => {
+                return Ok(Token {
+                    kind: TokenKind::Eof,
+                    pos,
+                })
+            }
+            Some(ch) => ch,
+        };
+
+        // FatArrow `=>` vs single Eq `=`. The `=>` token (D37 §3.1)
+        // marks the lambda-body separator in typed lambda literals
+        // and inline `merge_comorphism` bodies. Same lookahead shape
+        // as `-` / `->` below.
+        if ch == b'=' {
+            if self.peek_at(1) == Some(b'>') {
+                self.advance();
+                self.advance();
+                return Ok(Token {
+                    kind: TokenKind::FatArrow,
+                    pos,
+                });
+            }
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Eq,
+                pos,
+            });
+        }
+
+        // Single-character tokens
+        let simple = match ch {
+            b'(' => Some(TokenKind::LParen),
+            b')' => Some(TokenKind::RParen),
+            b'{' => Some(TokenKind::LBrace),
+            b'}' => Some(TokenKind::RBrace),
+            b'[' => Some(TokenKind::LBracket),
+            b']' => Some(TokenKind::RBracket),
+            b';' => Some(TokenKind::Semicolon),
+            b',' => Some(TokenKind::Comma),
+            b'.' => Some(TokenKind::Dot),
+            b'\\' => Some(TokenKind::Backslash),
+            b'<' => Some(TokenKind::Less),
+            b'+' => Some(TokenKind::Plus),
+            b'*' => Some(TokenKind::Star),
+            b'/' => Some(TokenKind::Slash),
+            b'^' => Some(TokenKind::Caret),
+            _ => None,
+        };
+
+        if let Some(kind) = simple {
+            self.advance();
+            return Ok(Token { kind, pos });
+        }
+
+        // Colon — could be standalone : or part of an identifier (ns:name handled in lex_ident)
+        if ch == b':' {
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Colon,
+                pos,
+            });
+        }
+
+        // Arrow ->  /  Minus -
+        //
+        // `-` followed by `>` is the function-arrow token used in
+        // program type signatures and lambda binders. Any other `-`
+        // emits as a `Minus` token; the parser decides whether it's
+        // unary minus on a numeric literal (existing
+        // `ex:value = -1.5;` shape, handled in `parse_value`),
+        // unary or binary inside `formula(...)` (the Pratt parser
+        // handles both cases), or an error in any other position.
+        // Older sign-folding-at-lex behaviour (`-1.5` → single
+        // `FloatLit(-1.5)` token) was retired in Phase 19f.3 because
+        // it produced surprises inside `formula(x-2)` (the lexer
+        // would have consumed `-2` as a signed literal, leaving no
+        // operator between `x` and `2`).
+        if ch == b'-' {
+            if self.peek_at(1) == Some(b'>') {
+                self.advance();
+                self.advance();
+                return Ok(Token {
+                    kind: TokenKind::Arrow,
+                    pos,
+                });
+            }
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Minus,
+                pos,
+            });
+        }
+
+        // String literal
+        if ch == b'"' {
+            return self.lex_string(pos);
+        }
+
+        // Number
+        if ch.is_ascii_digit() {
+            return self.lex_number(pos);
+        }
+
+        // Rational literal in canonical form — `r"37/180"`. Checked BEFORE the identifier
+        // branch, which would otherwise take the `r`.
+        if ch == b'r' && self.peek_at(1) == Some(b'"') {
+            return self.lex_rational_string(pos);
+        }
+
+        // Unit literal — `u"s^-1·m^2"` (D93). Same placement and the same rule as `r"…"`: only an
+        // IMMEDIATELY following quote triggers it, so `u` as a universe-level variable (`Sort u`)
+        // and `f(u, "x")` stay an identifier.
+        if ch == b'u' && self.peek_at(1) == Some(b'"') {
+            return self.lex_unit_string(pos);
+        }
+
+        // Lambda unicode: λ is U+03BB, encoded as CE BB in UTF-8
+        if ch == 0xCE && self.peek_at(1) == Some(0xBB) {
+            self.advance();
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Lambda,
+                pos,
+            });
+        }
+
+        // Quoted identifier — `'obo-foundry'`, `'program'`.
+        if ch == b'\'' {
+            return self.lex_quoted_identifier(pos);
+        }
+
+        // Identifier or keyword
+        if ch.is_ascii_alphabetic() || ch == b'_' {
+            return self.lex_identifier(pos);
+        }
+
+        Err(EslError::lexer(
+            pos,
+            format!("unexpected character: '{}'", ch as char),
+        ))
+    }
+
+    /// `r"37/180"` — a rational in canonical form. Refuses a non-canonical spelling rather than
+    /// normalising it, for the same reason the codec does: two spellings of one value would hash
+    /// differently (D94).
+    fn lex_rational_string(&mut self, pos: Position) -> Result<Token, EslError> {
+        self.advance(); // the `r`
+        let tok = self.lex_string(pos.clone())?;
+        let TokenKind::StringLit(s) = tok.kind else {
+            return Err(EslError::lexer(
+                pos,
+                "expected a string after `r`".to_string(),
+            ));
+        };
+        let r = crate::numeric::Rational::parse_canonical(&s).map_err(|e| {
+            EslError::lexer(
+                pos.clone(),
+                format!("invalid rational literal `r\"{s}\"`: {e}"),
+            )
+        })?;
+        Ok(Token {
+            kind: TokenKind::RatLit(r),
+            pos,
+        })
+    }
+
+    /// `u"s^-1·m^2"` — a unit in canonical form. Refuses a non-canonical spelling rather than
+    /// normalising it, for the reason `lex_rational_string` gives.
+    fn lex_unit_string(&mut self, pos: Position) -> Result<Token, EslError> {
+        self.advance(); // the `u`
+        let tok = self.lex_string(pos.clone())?;
+        let TokenKind::StringLit(s) = tok.kind else {
+            return Err(EslError::lexer(
+                pos,
+                "expected a string after `u`".to_string(),
+            ));
+        };
+        let u = crate::units::Unit::parse_canonical(&s).map_err(|e| {
+            EslError::lexer(pos.clone(), format!("invalid unit literal `u\"{s}\"`: {e}"))
+        })?;
+        Ok(Token {
+            kind: TokenKind::UnitLit(u),
+            pos,
+        })
+    }
+
+    fn lex_string(&mut self, pos: Position) -> Result<Token, EslError> {
+        self.advance(); // opening "
+                        // Accumulate RAW BYTES and decode UTF-8 once at the end. Pushing each byte as `c as char`
+                        // would be Latin-1 decoding: a multibyte char (`—` = E2 80 94, `β`, an accent) would split
+                        // into per-byte mojibake (`â…`), corrupting every non-ASCII gloss and surface form on load.
+        let mut bytes: Vec<u8> = Vec::new();
+        loop {
+            match self.advance() {
+                None => return Err(EslError::lexer(pos, "unterminated string literal")),
+                Some(b'"') => break,
+                Some(b'\\') => match self.advance() {
+                    Some(b'"') => bytes.push(b'"'),
+                    Some(b'\\') => bytes.push(b'\\'),
+                    Some(b'n') => bytes.push(b'\n'),
+                    Some(b'r') => bytes.push(b'\r'),
+                    Some(b't') => bytes.push(b'\t'),
+                    Some(c) => {
+                        return Err(EslError::lexer(
+                            pos,
+                            format!("invalid escape: '\\{}'", c as char),
+                        ))
+                    }
+                    None => return Err(EslError::lexer(pos, "unterminated escape")),
+                },
+                Some(c) => bytes.push(c),
+            }
+        }
+        let s = String::from_utf8(bytes)
+            .map_err(|_| EslError::lexer(pos.clone(), "invalid UTF-8 in string literal"))?;
+        Ok(Token {
+            kind: TokenKind::StringLit(s),
+            pos,
+        })
+    }
+
+    fn lex_number(&mut self, pos: Position) -> Result<Token, EslError> {
+        // `-` is no longer consumed here — the lexer always emits a
+        // separate `Minus` token (Phase 19f.3). Sign folding now
+        // happens in `parse_value` for the `ex:value = -1.5;` shape
+        // (unary minus on a numeric literal), or implicitly in the
+        // formula(...) Pratt parser's prefix-minus rule.
+        let start = self.pos;
+        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            self.advance();
+        }
+        let mut is_float = false;
+        if self.peek() == Some(b'.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
+            is_float = true;
+            self.advance();
+            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+                self.advance();
+            }
+        }
+        if self.peek().is_some_and(|c| c == b'e' || c == b'E') {
+            is_float = true;
+            self.advance();
+            if self.peek().is_some_and(|c| c == b'+' || c == b'-') {
+                self.advance();
+            }
+            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+                self.advance();
+            }
+        }
+
+        let text = &self.input[start..self.pos];
+
+        // The `r` suffix makes the literal EXACT: `0.05r` is 1/20, where a bare `0.05` is the
+        // binary64 3602879701896397/2^56. Different numbers, which is why the marker is on the
+        // surface rather than inferred from the slot's type (D94).
+        //
+        // Guarded against swallowing an identifier: `5rem` is not a rational followed by `em`.
+        if self.peek() == Some(b'r')
+            && !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_')
+        {
+            let text = text.to_string();
+            self.advance(); // the `r`
+            let r = crate::numeric::Rational::parse_decimal(&text).map_err(|e| {
+                EslError::lexer(
+                    pos.clone(),
+                    format!("invalid rational literal `{text}r`: {e}"),
+                )
+            })?;
+            return Ok(Token {
+                kind: TokenKind::RatLit(r),
+                pos,
+            });
+        }
+
+        if is_float {
+            let val: f64 = text
+                .parse()
+                .map_err(|_| EslError::lexer(pos.clone(), format!("invalid float: {text}")))?;
+            Ok(Token {
+                kind: TokenKind::FloatLit(val),
+                pos,
+            })
+        } else {
+            let val: i64 = text
+                .parse()
+                .map_err(|_| EslError::lexer(pos.clone(), format!("invalid integer: {text}")))?;
+            Ok(Token {
+                kind: TokenKind::IntLit(val),
+                pos,
+            })
+        }
+    }
+
+    /// Read a quoted name segment — the text between a pair of `'`.
+    ///
+    /// **Charset is `[A-Za-z0-9_-]+`, and `#` is excluded deliberately.** Fourteen families of
+    /// kernel-minted binder name — `TC#`, `G#`, `CB#`, `IDX#`, `IH#`, `A#`, `HB#`, `HA#`, `HM#`,
+    /// `HV#`, `AR#`, `ADV#`, `DIST#`, `AGG#` — are collision-free *because* `#` cannot occur in an
+    /// ESL identifier, and the recursor and iota reduction both state that as their argument. A
+    /// quote admitting arbitrary text would make `'HB#0_1'` writable and break all fourteen at
+    /// once, with the failure showing up as an eliminator capturing a user-written name — which
+    /// the type checker would accept.
+    ///
+    /// The restricted charset costs nothing: across every shipped ontology, experiment and demo,
+    /// the only character an IRI local name uses that a bare identifier cannot is `-` (5 IRIs),
+    /// the only other unspellable shape is a leading digit (8 content hashes), and **no chain IRI
+    /// contains `#` at all**.
+    fn lex_quoted_segment(&mut self, pos: &Position) -> Result<String, EslError> {
+        self.advance(); // opening quote
+        let mut out = String::new();
+        loop {
+            let Some(ch) = self.peek() else {
+                return Err(EslError::lexer(
+                    pos.clone(),
+                    "unterminated quoted identifier".to_string(),
+                ));
+            };
+            if ch == b'\'' {
+                self.advance();
+                break;
+            }
+            if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-' {
+                out.push(ch as char);
+                self.advance();
+            } else {
+                return Err(EslError::lexer(
+                    pos.clone(),
+                    format!(
+                        "`{}` is not allowed in a quoted identifier — the charset is \
+                         [A-Za-z0-9_-]. `#` in particular is reserved: kernel-minted binder \
+                         names rely on it being unspellable",
+                        ch as char
+                    ),
+                ));
+            }
+        }
+        if out.is_empty() {
+            return Err(EslError::lexer(
+                pos.clone(),
+                "empty quoted identifier".to_string(),
+            ));
+        }
+        Ok(out)
+    }
+
+    /// A quoted identifier, possibly the namespace half of a qualified name.
+    fn lex_quoted_identifier(&mut self, pos: Position) -> Result<Token, EslError> {
+        let first = self.lex_quoted_segment(&pos)?;
+        if let Some(local) = self.tight_qualified_tail(&pos)? {
+            return Ok(Token {
+                kind: TokenKind::QualName(first, local),
+                pos,
+            });
+        }
+        Ok(Token {
+            kind: TokenKind::Ident(first),
+            pos,
+        })
+    }
+
+    /// After a name segment: if a `:` follows immediately (no whitespace) and a name segment
+    /// follows that, consume both and return the local half. Otherwise consume nothing.
+    ///
+    /// The local half may itself be quoted — `obo:'obo-foundry'` — which is the shape that
+    /// actually occurs, since it is local names rather than prefixes that resist spelling.
+    fn tight_qualified_tail(&mut self, pos: &Position) -> Result<Option<String>, EslError> {
+        if self.peek() != Some(b':') {
+            return Ok(None);
+        }
+        match self.peek_at(1) {
+            Some(b'\'') => {
+                self.advance(); // ':'
+                Ok(Some(self.lex_quoted_segment(pos)?))
+            }
+            Some(c) if c.is_ascii_alphabetic() || c == b'_' => {
+                self.advance(); // ':'
+                let mut name = String::new();
+                loop {
+                    while let Some(ch) = self.peek() {
+                        if ch.is_ascii_alphanumeric() || ch == b'_' {
+                            name.push(ch as char);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    // **A further TIGHT `:segment` continues the name.**
+                    // `ex:Nat:succ` lexes as one `QualName("ex", "Nat:succ")`, which is
+                    // what lets a constructor be named by its type when two inductives
+                    // in one file declare the same short name — the case
+                    // `resolve_ctor_iri` currently tells the author to work around by
+                    // renaming.
+                    //
+                    // Safe because **tightness is already the discriminator**: this
+                    // function only runs on a `:` with no whitespace before it, and the
+                    // language already requires spaces around a binder / annotation
+                    // colon (`x:T` has always lexed as `QualName("x", "T")`). So
+                    // `ex:Nat : Prop` is untouched — the annotation colon is
+                    // space-surrounded and never reaches here.
+                    match (self.peek(), self.peek_at(1)) {
+                        (Some(b':'), Some(c2)) if c2.is_ascii_alphabetic() || c2 == b'_' => {
+                            self.advance(); // ':'
+                            name.push(':');
+                        }
+                        _ => break,
+                    }
+                }
+                Ok(Some(name))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn lex_identifier(&mut self, pos: Position) -> Result<Token, EslError> {
+        let mut word = String::new();
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_alphanumeric() || ch == b'_' {
+                word.push(ch as char);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let kind = match word.as_str() {
+            // Top-level keywords
+            "namespace" => TokenKind::Namespace,
+            "class" => TokenKind::Class,
+            "property" => TokenKind::Property,
+            "resource" => TokenKind::Resource,
+            "program" => TokenKind::Program,
+            "data" => TokenKind::Data,
+            // D37 §3.3 — typed merge witness declaration.
+            "merge_comorphism" => TokenKind::MergeComorphism,
+            "for" => TokenKind::For,
+            // D43 §3.1 — index Resource declarations as top-level keywords.
+            // Sugar over `resource <iri> : core:TextIndex { ... }` /
+            // `resource <iri> : core:VectorIndex { ... }`, lowered by `compile_index`
+            // to exactly the resource the longhand emits.
+            "text_index" => TokenKind::TextIndex,
+            "vector_index" => TokenKind::VectorIndex,
+            // Expression keywords
+            "let" => TokenKind::Let,
+            "alias" => TokenKind::Alias,
+            "in" => TokenKind::In,
+            "case" => TokenKind::Case,
+            "match" => TokenKind::Match,
+            "returning" => TokenKind::Returning,
+            "Construct" => TokenKind::Construct,
+            "map" => TokenKind::Map,
+            "reduce" => TokenKind::Reduce,
+            // D37 §3.1, §3.5 — typed lambda literal + Pi type expr.
+            // Distinct from `\` / `λ` (Backslash / Lambda tokens),
+            // which produce the untyped lambda surface.
+            "lambda" => TokenKind::LambdaKw,
+            "pi" => TokenKind::Pi,
+            // Proposition / indexed-type authoring.
+            "forall" => TokenKind::Forall,
+            "exists" => TokenKind::Exists,
+            "fun" => TokenKind::Fun,
+            "axiom" => TokenKind::Axiom,
+            "def" => TokenKind::Def,
+            "macro" => TokenKind::Macro,
+            "Prop" => TokenKind::Prop,
+            "Set" => TokenKind::SetKw,
+            "Type" => TokenKind::TypeKw,
+            // Lean's general sort form, `Sort <level>`. Safe to reserve: the only
+            // two `Sort` occurrences in the tree are a comment and an English word inside a
+            // lexicon `form` string literal, neither of which the lexer sees as an identifier.
+            "Sort" => TokenKind::SortKw,
+            // `universe u v;` binds level variables for the rest of the file.
+            "universe" => TokenKind::Universe,
+            // Literals
+            "true" => TokenKind::BoolLit(true),
+            "false" => TokenKind::BoolLit(false),
+            // Identifier
+            _ => TokenKind::Ident(word),
+        };
+
+        // Tight qualified name `ns:name`: a plain identifier immediately
+        // followed (no whitespace) by `:` and another identifier lexes as a
+        // single `QualName` token. This is what frees a space-surrounded `:`
+        // to mean the binder / annotation colon (`x : T`, `(e : T)`) without
+        // colliding with the namespace separator. Only plain identifiers form a
+        // namespace (keywords never do), so keyword tokens are left untouched.
+        if let TokenKind::Ident(ns) = &kind {
+            let ns = ns.clone();
+            if let Some(name) = self.tight_qualified_tail(&pos)? {
+                return Ok(Token {
+                    kind: TokenKind::QualName(ns, name),
+                    pos,
+                });
+            }
+        }
+
+        Ok(Token { kind, pos })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kinds(input: &str) -> Vec<TokenKind> {
+        tokenize(input)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.kind)
+            .filter(|k| *k != TokenKind::Eof)
+            .collect()
+    }
+
+    #[test]
+    fn top_level_keywords() {
+        assert_eq!(
+            kinds("namespace class property resource program"),
+            vec![
+                TokenKind::Namespace,
+                TokenKind::Class,
+                TokenKind::Property,
+                TokenKind::Resource,
+                TokenKind::Program,
+            ]
+        );
+    }
+
+    #[test]
+    fn expression_keywords() {
+        assert_eq!(
+            kinds("let case Construct map reduce"),
+            vec![
+                TokenKind::Let,
+                TokenKind::Case,
+                TokenKind::Construct,
+                TokenKind::Map,
+                TokenKind::Reduce,
+            ]
+        );
+    }
+
+    #[test]
+    fn identifiers() {
+        assert_eq!(
+            kinds("name breed short_name Dog"),
+            vec![
+                TokenKind::Ident("name".into()),
+                TokenKind::Ident("breed".into()),
+                TokenKind::Ident("short_name".into()),
+                TokenKind::Ident("Dog".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn qualified_name_tokens() {
+        // A tight `ns:name` lexes as one atomic `QualName` token (the namespace
+        // separator), distinct from a space-surrounded binder/annotation `:`.
+        assert_eq!(
+            kinds("core:string ex:Dog"),
+            vec![
+                TokenKind::QualName("core".into(), "string".into()),
+                TokenKind::QualName("ex".into(), "Dog".into()),
+            ]
+        );
+        // A space-surrounded `:` stays a standalone `Colon` (binder / annotation).
+        assert_eq!(
+            kinds("x : Set"),
+            vec![
+                TokenKind::Ident("x".into()),
+                TokenKind::Colon,
+                TokenKind::SetKw,
+            ]
+        );
+    }
+
+    #[test]
+    fn string_literal() {
+        assert_eq!(
+            kinds(r#""hello" "world\n""#),
+            vec![
+                TokenKind::StringLit("hello".into()),
+                TokenKind::StringLit("world\n".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn numbers() {
+        // Phase 19f.3: `-` no longer folds into the numeric literal at
+        // the lexer level — it always emits `Minus` (sign folding
+        // happens in the parser, where context determines whether it's
+        // unary minus on a literal or the binary subtraction operator
+        // inside a formula(...) expression).
+        assert_eq!(
+            kinds("42 2.72 -7 1e10"),
+            vec![
+                TokenKind::IntLit(42),
+                TokenKind::FloatLit(2.72),
+                TokenKind::Minus,
+                TokenKind::IntLit(7),
+                TokenKind::FloatLit(1e10),
+            ]
+        );
+    }
+
+    #[test]
+    fn arithmetic_operators_emit_distinct_tokens() {
+        // The formula(...) sublanguage uses these directly (Pratt
+        // parser); outside formula(...) only `Minus` is consumed by
+        // `parse_value` for unary-minus on numeric literals.
+        assert_eq!(
+            kinds("+ - * / ^"),
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::Caret,
+            ]
+        );
+    }
+
+    #[test]
+    fn arrow_still_takes_priority_over_minus() {
+        // `->` must continue to parse as Arrow even after the lexer
+        // started emitting bare `-` as Minus.
+        assert_eq!(
+            kinds("a -> b"),
+            vec![
+                TokenKind::Ident("a".into()),
+                TokenKind::Arrow,
+                TokenKind::Ident("b".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn booleans() {
+        assert_eq!(
+            kinds("true false"),
+            vec![TokenKind::BoolLit(true), TokenKind::BoolLit(false)]
+        );
+    }
+
+    #[test]
+    fn operators_and_structural() {
+        assert_eq!(
+            kinds("= -> ; : , . ( ) { } [ ] \\"),
+            vec![
+                TokenKind::Eq,
+                TokenKind::Arrow,
+                TokenKind::Semicolon,
+                TokenKind::Colon,
+                TokenKind::Comma,
+                TokenKind::Dot,
+                TokenKind::LParen,
+                TokenKind::RParen,
+                TokenKind::LBrace,
+                TokenKind::RBrace,
+                TokenKind::LBracket,
+                TokenKind::RBracket,
+                TokenKind::Backslash,
+            ]
+        );
+    }
+
+    #[test]
+    fn lambda_unicode() {
+        assert_eq!(
+            kinds("λx"),
+            vec![TokenKind::Lambda, TokenKind::Ident("x".into())]
+        );
+    }
+
+    #[test]
+    fn comments() {
+        assert_eq!(
+            kinds("class // line comment\nproperty /* block */ resource"),
+            vec![TokenKind::Class, TokenKind::Property, TokenKind::Resource]
+        );
+    }
+
+    #[test]
+    fn position_tracking() {
+        let tokens = tokenize("class\n  property").unwrap();
+        assert_eq!(tokens[0].pos, Position { line: 1, column: 1 });
+        assert_eq!(tokens[1].pos, Position { line: 2, column: 3 });
+    }
+
+    #[test]
+    fn full_program() {
+        let input = r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            class ex:Document {
+                description = "A document";
+                requires ex:text;
+            }
+
+            property ex:text : core:string {
+                description = "Text content";
+            }
+
+            program ex:summarize : ex:Document -> ex:Document {
+                let summary : core:string = HttpRequest(input);
+                Construct ex:Document { text = summary }
+            }
+        "#;
+        let tokens = tokenize(input).unwrap();
+        assert!(tokens.len() > 30);
+        assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn unterminated_string_error() {
+        let result = tokenize(r#""hello"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn string_literal_preserves_utf8() {
+        // Multibyte chars must survive lexing intact — before this, `c as char` decoded each UTF-8
+        // byte as Latin-1, so `—`/`β` came out as per-byte mojibake (`â…`) and corrupted every
+        // non-ASCII gloss and surface form on load.
+        assert_eq!(
+            kinds(r#""Repeat Pattern — β-catenin café""#),
+            vec![TokenKind::StringLit(
+                "Repeat Pattern — β-catenin café".into()
+            )]
+        );
+    }
+
+    #[test]
+    fn namespace_declaration() {
+        assert_eq!(
+            kinds(r#"namespace core = "urn:eigenius:core" ;"#),
+            vec![
+                TokenKind::Namespace,
+                TokenKind::Ident("core".into()),
+                TokenKind::Eq,
+                TokenKind::StringLit("urn:eigenius:core".into()),
+                TokenKind::Semicolon,
+            ]
+        );
+    }
+
+    #[test]
+    fn program_with_lambda() {
+        assert_eq!(
+            kinds(r#"\x -> x"#),
+            vec![
+                TokenKind::Backslash,
+                TokenKind::Ident("x".into()),
+                TokenKind::Arrow,
+                TokenKind::Ident("x".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn construct_with_fields() {
+        assert_eq!(
+            kinds("Construct ex:Dog { name = x , breed = y }"),
+            vec![
+                TokenKind::Construct,
+                TokenKind::QualName("ex".into(), "Dog".into()),
+                TokenKind::LBrace,
+                TokenKind::Ident("name".into()),
+                TokenKind::Eq,
+                TokenKind::Ident("x".into()),
+                TokenKind::Comma,
+                TokenKind::Ident("breed".into()),
+                TokenKind::Eq,
+                TokenKind::Ident("y".into()),
+                TokenKind::RBrace,
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod exact_literal_tests {
+    use super::*;
+
+    fn kinds(src: &str) -> Vec<TokenKind> {
+        tokenize(src)
+            .expect("lexes")
+            .into_iter()
+            .map(|t| t.kind)
+            .filter(|k| *k != TokenKind::Eof)
+            .collect()
+    }
+
+    fn rat(s: &str) -> TokenKind {
+        TokenKind::RatLit(crate::numeric::Rational::parse_canonical(s).unwrap())
+    }
+
+    #[test]
+    fn the_suffix_makes_a_decimal_exact() {
+        // `0.05r` is 1/20. A bare `0.05` is the binary64 3602879701896397/2^56 — a different
+        // number, which is why the marker is on the surface (D94).
+        assert_eq!(kinds("0.05r")[0], rat("1/20"));
+        assert_eq!(kinds("0.05")[0], TokenKind::FloatLit(0.05));
+    }
+
+    #[test]
+    fn the_canonical_form_expresses_what_a_decimal_cannot() {
+        // 37/180 — degrees to radians (D93) — has no terminating decimal, so the suffix form
+        // cannot reach it. This is why there are two surface forms.
+        assert_eq!(kinds("r\"37/180\"")[0], rat("37/180"));
+        assert_eq!(kinds("r\"-1/3\"")[0], rat("-1/3"));
+        assert_eq!(kinds("r\"7\"")[0], rat("7"));
+    }
+
+    #[test]
+    fn an_integer_takes_the_suffix_too() {
+        assert_eq!(kinds("37r")[0], rat("37"));
+    }
+
+    #[test]
+    fn the_suffix_does_not_swallow_an_identifier() {
+        // `5rem` is an integer followed by an identifier, not a rational followed by `em`.
+        let k = kinds("5rem");
+        assert_eq!(k[0], TokenKind::IntLit(5));
+    }
+
+    #[test]
+    fn a_non_canonical_quoted_form_is_refused() {
+        // The same refusal the codec makes: two spellings of one value would hash differently.
+        for bad in ["r\"2/4\"", "r\"01\"", "r\"1/1\"", "r\"1.5\""] {
+            assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
+        }
+    }
+
+    // ── D93: `u"…"` ─────────────────────────────────────────────────────────
+
+    fn unit(s: &str) -> TokenKind {
+        TokenKind::UnitLit(crate::units::Unit::parse_canonical(s).unwrap())
+    }
+
+    #[test]
+    fn a_unit_literal_lexes_in_canonical_form() {
+        assert_eq!(kinds("u\"s^-1\u{b7}m^2\"")[0], unit("s^-1\u{b7}m^2"));
+        assert_eq!(kinds("u\"1\"")[0], unit("1"));
+    }
+
+    /// Refused, not normalised — `m·s^-1·m` denotes `s^-1·m^2`, and two spellings of one value
+    /// would hash differently.
+    #[test]
+    fn a_non_canonical_unit_literal_is_refused() {
+        // `angle` was a kind symbol once; kinds are not part of a unit now (D93).
+        for bad in [
+            "u\"m\u{b7}s^-1\u{b7}m\"",
+            "u\"m^1\"",
+            "u\"metre\"",
+            "u\"\"",
+            "u\"angle\"",
+        ] {
+            assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
+        }
+    }
+
+    /// `u` is the conventional universe-level variable (`Sort u`), so only an IMMEDIATELY following
+    /// quote makes a unit literal.
+    #[test]
+    fn a_bare_u_is_still_an_identifier() {
+        assert!(matches!(kinds("u")[0], TokenKind::Ident(_)));
+        let k = kinds("Sort u");
+        assert!(matches!(&k[1], TokenKind::Ident(n) if n == "u"));
+        let k = kinds("u \"m\"");
+        assert!(matches!(k[0], TokenKind::Ident(_)));
+        assert!(matches!(k[1], TokenKind::StringLit(_)));
+    }
+
+    #[test]
+    fn a_bare_r_is_still_an_identifier() {
+        assert!(matches!(kinds("r")[0], TokenKind::Ident(_)));
+    }
+}

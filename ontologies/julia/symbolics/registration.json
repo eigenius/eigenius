@@ -1,0 +1,172 @@
+[
+  {
+    "@id": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:institution_name": "Symbolics",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:description": "The Symbolics institution — D27 §4.1. Wraps Symbolics.jl + the lightweight ModelingToolkit pieces (Equation via `~`, `Differential`) for symbolic-algebra reasoning. ODESystem and the heavier MTK abstractions live with the DiffEq institution where they're consumed. `simplify` is heuristic; verdicts include `Undecidable` accordingly."
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:ef_expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_expression",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:symbolics:proc:extract_expression"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:if_expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_expression",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:symbolics:proc:reify_expression"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:if_simplifies_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_simplifies_to",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:symbolics:SimplifiesTo",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:symbolics:SimplifiesTo",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:symbolics:proc:reify_simplifies_to"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:if_substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_substitutes",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:symbolics:Substitutes",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:symbolics:Substitutes",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:symbolics:proc:reify_substitutes"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:if_differentiates",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_differentiates",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:symbolics:Differentiates",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:symbolics:Differentiates",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:symbolics:proc:reify_differentiates"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_validate_simplifies_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_simplifies_to",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs `Symbolics.simplify(expr)` and compares structural equality with `simplified_form`. Holds on match; Undecidable on disagreement (rewriter heuristic may have changed). Fails only on a parse / type error.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SimplifiesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:validate_simplifies_to",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_validate_substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_substitutes",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs `Symbolics.substitute(expr, var => value)` and compares structural equality with the claimed `result`. Substitution is deterministic (no rewriter heuristics), so the verdict is Holds/Fails.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:Substitutes",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:validate_substitutes",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_validate_differentiates",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_differentiates",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs `Symbolics.derivative(expr, var)` (with an `expand_derivatives` + `simplify` pass) and compares with `result`. Verdict::Holds on match modulo simplify; Undecidable on disagreement after both sides simplify.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:Differentiates",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:validate_differentiates",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_validate_satisfies_equation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_satisfies_equation",
+    "urn:eigenius:core:description": "AutoOnLoad. Simplifies both sides and compares; Holds on convergence to identical form, Undecidable on disagreement (heuristic). Polynomial fragments fall back to `Symbolics.groebner_basis` for a Holds/Fails verdict.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SatisfiesEquation",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:validate_satisfies_equation",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_simplify",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_simplify",
+    "urn:eigenius:core:description": "OnDemand. Returns `Symbolics.simplify(expr)`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:simplify",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_substitute",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_substitute",
+    "urn:eigenius:core:description": "OnDemand. Returns `Symbolics.substitute(expr, var => value)`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicSubstitutionInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:substitute",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_differentiate",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_differentiate",
+    "urn:eigenius:core:description": "OnDemand. Returns the symbolic derivative of `expr` with respect to `differentiation_var`, simplified.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicDifferentiationInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:differentiate",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_extract_symbols",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_extract_symbols",
+    "urn:eigenius:core:description": "OnDemand. Returns the free variable names in `expr` via `Symbolics.get_variables`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:symbolics:SymbolicSymbolSet",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:extract_symbols",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_to_latex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_to_latex",
+    "urn:eigenius:core:description": "OnDemand. Renders `expr` to LaTeX via `Latexify.latexify`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:symbolics:LatexString",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:to_latex",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:julia:symbolics:qc_check_equivalence",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_check_equivalence",
+    "urn:eigenius:core:description": "OnDemand + Decidable. Heuristic equivalence check: simplify both sides, compare. Verdict::Holds on convergence to identical form, Verdict::Undecidable on disagreement. Decidable role lets `Exp::NativeDecide` reduce in user programs (and accept Undecidable as passthrough per D14 §6.1).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:symbolics:SymbolicEquivalenceInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand",
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:symbolics:proc:check_equivalence",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:symbolics"
+  }
+]

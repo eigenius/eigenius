@@ -1,0 +1,103 @@
+[
+  {
+    "@id": "urn:eigenius:lean:LeanProject",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:runtime:RuntimePackage"],
+    "urn:eigenius:core:short_name": "LeanProject",
+    "urn:eigenius:core:description": "A user-authored Lean Lake project — the directory tree the authoring side stages into a `LeanEnvironment` image for `lean_export` / `dispatch_method` invocation. Inherits the `RuntimePackage` shape (name + manifest + source_tree + `language: lean`) and adds the two Lake-specific artefacts: `lakefile.lean` and `lake-manifest.json`. The 20a.5b worker treats this as the input shape for the `lean_export` RPC verb.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:lakefile",
+      "urn:eigenius:lean:lake_manifest"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:lean:lakefile",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lakefile",
+    "urn:eigenius:core:description": "Verbatim `lakefile.lean` content as a UTF-8 string. The substrate image-build pipeline writes this to disk inside the package's directory in the build context; `lake update` reads it to resolve dependencies.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProject"]
+  },
+  {
+    "@id": "urn:eigenius:lean:lake_manifest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lake_manifest",
+    "urn:eigenius:core:description": "Verbatim `lake-manifest.json` content as a UTF-8 string. Stored alongside `lakefile` so the image build is byte-deterministic: `lake update --keep-toolchain` resolves against this pinned manifest rather than the live registry. Mirrors the role `Manifest.toml` plays in the Julia runtime.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProject"]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanPackage",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:runtime:RuntimePackage"],
+    "urn:eigenius:core:short_name": "LeanPackage",
+    "urn:eigenius:core:description": "A reusable Lean library distinct from a `LeanProject` — typically a handler-side package baked into a `LeanEnvironment.included_packages` alongside the worker's own project. Same `lakefile` + `lake_manifest` shape as `LeanProject`; the distinction is semantic (project = proof source; package = supporting library) and surfaces in dispatch policy (the worker invokes `lean_export` only against `LeanProject` resources). Both subclasses of `RuntimePackage` so the substrate's chain-walk treats them uniformly when staging the build context.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:lakefile",
+      "urn:eigenius:lean:lake_manifest"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanPackagePin",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:runtime:RuntimePackagePin"],
+    "urn:eigenius:core:short_name": "LeanPackagePin",
+    "urn:eigenius:core:description": "Parsed Eigon view of one entry in a Lean `lake-manifest.json` — a single pinned dependency (Git URL + rev + package name). Inherits the `RuntimePackagePin` shape; the parsed projection lets EigenQL queries (`find every LeanEnvironment depending on Mathlib pinned at rev X`) work without re-parsing the manifest at query time. Optional in 20a.5a — emitted by the substrate's `lake_manifest_parse` helper landing in 20a.5b once a query consumer is written."
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanEnvironment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:short_name": "LeanEnvironment",
+    "urn:eigenius:core:description": "The unit of pinned Lean-side reproducibility (D26 §5.3 specialised for Lean). References the toolchain version, the Lake-resolved manifest hash, an axiom allowlist applied during nanoda re-verification, and a hard-error policy for unpermitted axioms. The image digest pinned on the underlying `RuntimeEnvironment` covers the toolchain bits; the axiom-allowlist + lockfile-hash fields here pin the policy bits that aren't in the OCI image digest's input set.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:lean_permitted_axioms",
+      "urn:eigenius:lean:lean_unpermitted_axiom_hard_error"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:lean:lake_lockfile_hash"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:lean:lean_permitted_axioms",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lean_permitted_axioms",
+    "urn:eigenius:core:description": "Allowlist of Lean axiom names accepted by every nanoda verification dispatched against proofs produced from this environment. Defaults to Lean's four trust-the-compiler axioms (`propext`, `Classical.choice`, `Quot.sound`, `Lean.trustCompiler`) per D28 §7.1. Tighter allowlists (e.g. constructive-only deployments excluding `Classical.choice`) are an explicit policy decision; the orchestrator's env-create path stamps the default unless the user opts out.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:lean:lean_unpermitted_axiom_hard_error",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lean_unpermitted_axiom_hard_error",
+    "urn:eigenius:core:description": "Whether encountering an axiom outside `lean_permitted_axioms` produces a hard verification error (`true`) or silent skipping (`false`). Mirrors nanoda's `Config.unpermitted_axiom_hard_error`. Defaults to `true` — silent skipping is a footgun for audit chains, but the policy is explicit so deployments handling third-party Lean code (e.g. mining axiom dependencies from imports) can opt out at the LeanEnvironment level rather than monkey-patching the verification path.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:lean:lake_lockfile_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lake_lockfile_hash",
+    "urn:eigenius:core:description": "SHA-256 hex digest of the `lake-manifest.json` baked into the `LeanEnvironment` image. Captured separately from the OCI image digest so a query can verify the lockfile didn't drift between image build and dispatch time without unpacking the image — the lockfile pin is the determinism anchor on the Lean dependency side, parallel to how the toolchain version pins the runtime side.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:lean:module_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "module_name",
+    "urn:eigenius:core:description": "Fully-qualified Lean module name (e.g. `TestProject.Foo` or `Mathlib.Topology.Basic`). Carried on the `target_module` input Resource to the `lean_export` worker verb — the dispatch ships every call_method input as an Eigon-CBOR Resource and the Lake worker reads this property to know which module to dump via `lake exe lean4export`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:lean:constant_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "constant_name",
+    "urn:eigenius:core:description": "Unqualified Lean declaration name (e.g. `foo`, `add_zero`). Carried on the `target_constant` input Resource to the `lean_export` worker verb — pinning a single constant keeps the export bounded (otherwise `lake exe lean4export <Module>` dumps the entire transitive imported environment, which is hundreds of MB for any project importing Lean stdlib).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  }
+]

@@ -1,0 +1,23 @@
+[package]
+name = "eigenius-storage-tikv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "TiKV-backed PersistentBackend implementation for the Eigenius kernel — distributed storage for multi-node production deployments. See architecture §10.7."
+keywords = ["eigenius", "tikv", "storage", "distributed", "knowledge-graph"]
+categories = ["database-implementations", "science"]
+
+# docs.rs builds with no TiKV cluster reachable; the tikv-client crate
+# is pure Rust so the build itself succeeds, but link-time dependencies
+# can shift across upstream versions. Build all features by default so
+# docs.rs surfaces every public API.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+tikv-client = "0.4"
+tokio.workspace = true
+serde.workspace = true

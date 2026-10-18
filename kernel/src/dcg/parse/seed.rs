@@ -1,0 +1,1894 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//! **Seeding** — surface tokens to the chart's leaf cells (bridge stage 2).
+//!
+//! For every token span (bounded by the longest multiword form) the surface is reduced to candidate
+//! lemmas via the [`Lemmatizer`], looked up in the lexical index, filtered by the parse scope, capped by
+//! the adaptive-supertagging sense cap (optionally reordered by the contextual reranker), and turned
+//! into parse [`Item`]s. A multiword entry (`cell line`, `act on`) seeds its whole span *alongside* the
+//! single-token items for its parts — the MWE-vs-compositional ambiguity is carried as competing chart
+//! edges, not resolved here.
+//!
+//! Also here: the productive MORPHOLOGY that has no lexical entry of its own (`-ly` adverbs, denominal
+//! and prefixed adjectives, degree-modified adverbs), and the leaf UNARY shifts (the bare-plural/mass
+//! kind shift, type-raising) — the same shifts the CKY re-applies to composed cells, so a compound noun
+//! shifts exactly like a leaf one.
+//!
+//! Shared by BOTH chart paths: [`Parser::seed_leaves`] is the single entry point the packed forest
+//! and the flat beamed chart both build their leaf cells from.
+
+use super::super::category::{
+    governs_named_preposition, inductive_iri, is_adjective_cat, is_binary_relation_cat, is_ctor,
+    is_vp_adjunct_prep, kind_of, slash_parts,
+};
+use super::super::chart::{beam_cell, cell_histogram, Chart};
+use super::super::derivation::Derivation;
+use super::super::lexicon::{FormEntries, LexEntry};
+use super::super::rules::constructions::coordinate_np;
+use super::*;
+
+impl Parser {
+    /// The lexical items for one token span's surface: the raw surface plus every
+    /// lemma the [`Lemmatizer`] yields across all parts of speech (so an inflected
+    /// or collocated form resolves to its base entries). Candidate strings are
+    /// de-duplicated before lookup. `scope` filters + ranks by lexicon (§4). `ranks`, when
+    /// present, is the per-sentence contextual sense ranking (`sense → rank`) that overrides the
+    /// static `sense_rank` ordering when the cap drops senses.
+    pub(super) fn lookup_span(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> Vec<Item> {
+        let s_lc = surface.trim().to_lowercase();
+        let candidates = self.candidate_lemmas(surface, lemmatizer);
+        // Cross-POS prune (GH#28): a surface that is a known function word is a lexicon artifact when
+        // read as a noun; drop the open-class NOMINAL readings of all its candidate lemmas (the
+        // compound-rule noise), keeping closed-class + open-class verb/adj/etc. A surface counts as a
+        // function word if (a) it ITSELF carries a closed-class grammatical reading, OR (b) it is a
+        // MULTI-TOKEN surface every token of which does — i.e. a multi-word UMLS entry spanning only
+        // function words (e.g. the concept "Do not" = `cat_n(C3840725)` over the tokens "do"+"not").
+        // Case (b) is the whole-sentence noun-pile BRIDGE (GH#28 dump 2026-06-30): per-token prune
+        // kills each function word's noun reading, but a bilexical stop-word concept bypassed the
+        // single-surface check, so every clause with such a span folded into one giant compound noun.
+        // The LLM reranker cannot remove it (a sole reading is never cap-truncated), so the prune must.
+        let has_closed = |surf: &str| {
+            self.lex
+                .entries_for(surf)
+                .iter()
+                .any(|e| e.in_lexicon.is_none())
+        };
+        let surface_is_function = self.config.pos_prune
+            && (has_closed(&s_lc) || {
+                let toks: Vec<&str> = s_lc.split_whitespace().collect();
+                toks.len() > 1 && toks.iter().all(|t| has_closed(t))
+            });
+        // Cross-POS ADJECTIVE prune (ALWAYS ON — a correctness fix, not the `pos_prune` experiment):
+        // a surface that carries a closed-class DETERMINER reading (a quantifier — its category is
+        // `cat_forall(num, λT. …)`) must not ALSO be read as an open-class gradable ADJECTIVE. WordNet
+        // ships `several`/`many`/`few`/`most`/`both` as descriptive adjectives; prenominally the
+        // attributive rule (`refine_attrib`) turns that `S[adj]\NP` into a spurious `gt(deg_a, std_a)`
+        // modifier ("more-several-than-standard cancers") that duplicates the determiner reading —
+        // over-generation, `experiments/parsing/near-encoded-bucket-analysis.md`. Keyed on the
+        // DETERMINER category, so a plain adjective (no closed-class determiner reading on the surface)
+        // is untouched. A rare PREDICATIVE use ("the problems were several") is given up with it; these
+        // words are quantifiers, not gradable properties, in this grammar.
+        let surface_is_determiner = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
+        // Cross-POS NOMINAL prune for a GLOSS-GOVERNED RELATIONAL word (ALWAYS ON — a correctness fix).
+        // A surface that governs a named preposition (`concordant WITH`, `dependent ON`, `essential
+        // FOR`, `associated WITH` — [`governs_named_preposition`]) must not ALSO be read as a common
+        // noun. The third sibling of the two prunes above, and the same argument: the nominal reading is
+        // a LEXICON ARTIFACT, here a UMLS qualifier concept whose term string happens to be an adjective
+        // (`concordant` -> C4553529 "Concordance").
+        //
+        // What it costs when the artifact survives: the nominal feeds the predicative kind-raise
+        // (`bare_nominal_shifts`), the copula predicates it, and the result asserts membership between
+        // two things that cannot be identical under ANY sense assignment — `is_a(classification,
+        // Concordance)` on «These classifications were highly concordant with PCR-based MSI phenotyping
+        // and with predicted MMR deficiency.», the page's last two `invalid` rows. The governed
+        // preposition's object is the ADJECTIVE'S COMPLEMENT, so nominalising the adjective strands it
+        // and it reattaches as an adjunct on the subject.
+        //
+        // PRUNED AT SEEDING, not at the kind-raise. Two reasons, both structural. (1) The bad reading
+        // arrives at two different sites — the leaf raise (`is_a(x, C)`) and the raise of a COMPOSED
+        // `cat_n(Σx:C. prep_with(x, …))` (`is_a(x, Σ…)`) — and killing the leaf entry removes the base
+        // both are built from, where a guard at the raise would have to catch each site. (2)
+        // `bare_nominal_shifts` takes a bare `Item` and `Grammar` deliberately carries NO lexicon, so
+        // "this surface also has a governed-preposition entry" is not knowable there; `lookup_span`
+        // holds the surface and is where the sibling surface-keyed prunes already live.
+        //
+        // A REFUSAL AT THE KIND-RAISE WAS ALREADY TRIED AND REFUTED (see `kind_raised_nps`): gated on
+        // `is_adjective_refined`, it was too broad — it also removed the legitimate "the group is an
+        // INDETERMINATE line" and re-gapped its unit. That guard asked "is this nominal adjective-
+        // refined?", true of the good case too. The discriminating fact is that here the nominal's HEAD
+        // IS the adjective, and that adjective governs a preposition.
+        let surface_is_governed_relational = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| governs_named_preposition(e.item.cat()));
+        // CASE-SENSITIVE ACRONYM MATCH ([`super::all_caps_symbol`]). The index is keyed on lowercased
+        // forms, so an all-caps nomenclature SYMBOL is otherwise reachable from the lowercase common
+        // noun it happens to spell. `CELL` — HGNC `NS` for the CELP pseudogene (C1413337) and OMIM
+        // `ACR` for CEL (C1413336) — is why `MSI cell lines from these four lineages…` carried 16
+        // skeletons that read `cell` as a GENE, via `named(…)`, which only a `cat_np` named individual
+        // can supply.
+        //
+        // Applied HERE and not in the index, for two reasons. The index deliberately "does lookup and
+        // nothing else" (its `LexicalLookup` note), and `entries_for` receives a LOWERCASED key — the
+        // observed token's casing is already gone by then. `lookup_span` still holds the raw surface,
+        // and it is where the sibling surface-keyed prunes (`surface_is_function`,
+        // `surface_is_determiner`) already live.
+        //
+        // Not fixable in the drop set, and it should not be: `drops.rs` keeps clean all-caps
+        // collisions DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and
+        // its `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase
+        // prose is not.
+        let surface_all_caps = super::all_caps_symbol(surface.trim());
+        let mut out = Vec::new();
+        for c in &candidates {
+            let mut entries = self.scoped(self.lex.entries_for(c), scope);
+            if !surface_all_caps {
+                entries.retain(|e| !super::all_caps_symbol(&e.form));
+            }
+            if surface_is_function {
+                entries.retain(|e| {
+                    e.in_lexicon.is_none()
+                        || !(is_ctor(e.item.cat(), "cat_n").is_some()
+                            || is_ctor(e.item.cat(), "cat_np").is_some())
+                });
+            }
+            if surface_is_determiner {
+                entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
+            }
+            if surface_is_governed_relational {
+                // Keyed PER ENTRY, not per surface (eigenius#61-adjacent, `2026-10-08`). The prune
+                // above asks "does ANY entry for this surface govern a preposition?" and then drops
+                // EVERY nominal, which deletes the common-noun reading of any word that is also a
+                // relational adjective. Measured: «the variant», «the patient» and «the dependent»
+                // were unparseable — `variant` governs «in», `patient` and `dependent` «with»/«on» —
+                // while their plurals parsed, because a derived plural is seeded without the
+                // competing adjectival entries. For an engagement whose subject IS variants, and a
+                // clinical corpus full of patients, that is not a corner.
+                //
+                // The discriminator the long note above reaches for — "the nominal's HEAD IS the
+                // adjective" — is recorded in the entry's own `sense`: a WordNet NOUN sense
+                // (`wn:<lemma>.n.<offset>`) is the source lexicon asserting that this lemma IS a
+                // common noun. `concordant`'s only nominal is `umls:C4553529` with NO WordNet noun
+                // sense on the surface, so it is a terminological name for a concept whose English
+                // realisation is adjectival — exactly the artifact that produced
+                // `is_a(classification, Concordance)`. `variant`'s four nominals are
+                // `wn:variant.n.…`, independent nouns that have nothing to do with its
+                // «in»-governing adjective `wn:variant.a.02505415`.
+                entries.retain(|e| {
+                    e.in_lexicon.is_none()
+                        || !(is_ctor(e.item.cat(), "cat_n").is_some()
+                            || is_ctor(e.item.cat(), "cat_np").is_some())
+                        || is_wordnet_noun_sense(e.sense.as_deref())
+                });
+            }
+            // **A `-s` surface cannot take a PLURAL subject** (verb-side number refinement). Morphology
+            // reduces `affects` to `affect`, and the lemma's entry is the BASE form, whose finite
+            // category encodes agreement with a plural/non-3sg subject — so seeding it at a 3sg span
+            // let `The genes affects cells.` parse. Traced 2026-07-26: the noun was correctly `pl`
+            // throughout and the verb supplied
+            // `fwd(bwd(cat_s(dcl, fin), cat_np(Entity, pl)), …)` alongside the correct `sg` one.
+            //
+            // The nominal counterpart of this is [`with_noun_num`], which REWRITES an underspecified
+            // `num_any`; a verb's subject number is already concrete in the lexicon, so the base-form
+            // entry is simply the wrong entry for this surface and is dropped rather than restamped.
+            //
+            // Deliberately keyed on the `-s` detachment alone
+            // ([`crate::dcg::regular_plural_stem`], shared with Morphy and the UMLS importer), NOT on
+            // "the candidate was reduced". The importer emits base + gerund/passive participles only,
+            // so a PAST-tense surface (`affected`, `ran`) is reachable ONLY through its lemma's finite
+            // entry; dropping on any reduction would gap every past-tense verb.
+            if crate::dcg::regular_plural_stem(&s_lc).as_deref() == Some(c.as_str()) {
+                entries.retain(|e| !has_plural_finite_subject(e.item.cat()));
+            }
+            if entries.is_empty() {
+                continue;
+            }
+            // Cross-lexicon concept dedup (D63, `docs/notes/d63-wordnet-umls-concept-unification.md`)
+            // runs AFTER the sense cap — see the `dedup_same_concept` call below the cap block, and the
+            // comment there for why the order (cap-then-dedup) is load-bearing (the `event` case).
+            // Adaptive-supertagging sense cap (GH #28): keep at most `cap` entries for this lemma —
+            // by contextual plausibility first (the reranker's `ranks`, when present), falling back
+            // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
+            // seed. The closed class (≤ cap entries) is untouched. A stable sort preserves seed
+            // order within a rank. (`cap` is the per-attempt cap from the widen loop.)
+            if let Some(cap) = cap {
+                // **The ranker's ELIMINATION signal.** The reranker returns a ranking that may OMIT
+                // senses it judges impossible in this sentence; an omitted sense is absent from
+                // `ranks`, so `sense_cap_key` sorts it after every ranked one. Without the cut below
+                // the cap would simply fill its quota from those rejects — which is exactly how `of`
+                // seeded a reading of `BRIP1 wt Allele` and `may` one of `Month of May`: the model
+                // ranked the correct sense #0 and the cap, obliged to take TWO, grabbed the next.
+                //
+                // So at the BASE cap, take no more than the ranker kept. **On widen (cap above the
+                // base) the cut is ignored** and the eliminated senses become seedable again — a
+                // wrong elimination therefore costs a slower parse, never a grammar gap.
+                // **The CLOSED CLASS is never eliminated.** It is the grammatical core — the
+                // determiner `each`, the preposition `of` — and the ranker is untrusted. Observed
+                // 2026-07-12: the model eliminated the determiner reading of `each` and kept UMLS's
+                // "Each (qualifier value)" instead. Counting the closed class is not enough:
+                // `sense_cap_key` sorts UNRANKED entries last, so a truncate would drop exactly the
+                // entry that must survive. So partition, and cap only the open class.
+                // **The reranker's ELIMINATION signal.** Its ranking may OMIT a sense it judges
+                // impossible here; an omitted sense is absent from `ranks`, so `sense_cap_key` sorts
+                // it after every ranked one. Without the cut below, the cap would simply fill its
+                // quota from those rejects — which is how `of` seeded a reading of `BRIP1 wt Allele`
+                // and `may` one of `Month of May`: the model ranked the correct sense #0, and the
+                // cap, obliged to take TWO, grabbed the next off the list.
+                //
+                // The cut applies at EVERY cap rung (see below), Pass 2 being the safety net — NOT
+                // base-cap-only as it once was. Base-cap-only let widen un-eliminate, which re-seeded
+                // the reranker's rejects onto every word the moment ONE word forced a wider cap (the
+                // `gene`/`C5849123` bug).
+                //
+                // KNOWN GAP (2026-07-12): the ranker can eliminate a CLOSED-CLASS reading — it
+                // dropped the determiner `each` in favour of UMLS's "Each (qualifier value)".
+                // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
+                // entry that should be exempt. Pass 2 (the ranks-`None` widen) recovers it (the sweep
+                // held at `grammar-gap 0`), but the grammatical core should not be eliminable at all.
+                //
+                // THE UNDERLYING SHAPE (characterised 2026-07-24): the cap is keyed per **SENSE**
+                // (`sense_cap_key` reads only sense fields) but truncates per **ENTRY**. One sense
+                // legitimately has SEVERAL entries — the same meaning in different grammatical
+                // categories: `with` (sense "with") is a noun-modifier `cat_pp/NP`, an argument marker
+                // `cat_pp_arg(prep_with)/NP` AND a VP-adjunct `((S\NP)\(S\NP))/NP`; a governed gradable
+                // adjective (one WordNet sense) is a predicative `S[adj]\NP`, a `cat_measure`, a
+                // `cat_measure/cat_pp_arg(prep)` and a positive-relational `(S[adj]\NP)/cat_pp_arg(prep)`.
+                // Those share one key, so the truncate cuts CATEGORIES of a sense the ranker KEPT,
+                // arbitrarily by emission order (a stable sort preserves it). Measured consequences: the
+                // WRN page's `concordant with …` unit GAPS at base cap and floods on widen (8 of its 16
+                // skeletons), `a_subj` seeds only at cap>=4, and Fix A (c)'s positive-relational entry —
+                // emitted 4th — never seeds at base cap, so it is inert on the page.
+                //
+                // TWO FIXES MEASURED AND REJECTED (2026-07-24), both parser-only:
+                //  (1) cap by SENSE (keep every category of each kept sense). Same-ranks A/B: readings
+                //      724 -> 757, total-skeletons 229 -> 248, **encoded 10 -> 0** (every unit lost
+                //      single-reading status) and the target unit stayed at 16. Cap-only readings fell
+                //      33% (1741 -> 1169, the avoided widen-floods) but the tracked STRUCTURAL lever
+                //      rose — extra categories per sense are genuine added ambiguity in the reranked
+                //      regime. Net loss; not shipped.
+                //  (1b) cap by SENSE, RE-TESTED 2026-07-25 on the tree that now carries the Eisner
+                //      guards (`LeftNotRaised` covering `KindRaised`, `RightNotKindRaised`, the
+                //      sortal-name guard), since the first rejection was blamed on duplicate
+                //      derivations those guards remove. It is STILL a loss: same-ranks replay gave
+                //      encoded 11 -> 4 (the guards recovered part of the earlier 10 -> 0, not enough)
+                //      and readings 347 -> 352. Crucially it does NOT fix what motivated the retry:
+                //      "does not lead to cell death" needs `lead`'s frame-04 PP-oblique sense
+                //      (02555908 "be conducive to" / 02635956 "tend to or result in"), and those are
+                //      SEPARATE SENSES among lead's 14 verb senses — not categorial variants of a KEPT
+                //      sense. Capping by sense cannot reach a sense the draw never kept. That unit is a
+                //      SENSE-RANKING problem (the documented ~5% temperature-0 draw variance over a
+                //      2-slot cap), not a cap-mechanics one.
+                //  (2) exempt the closed class (`in_lexicon.is_none()`) from the cap — the shape the
+                //      note above proposes. It FAILS `sense_reranker_overrides_static_cap_order`, which
+                //      is why the earlier attempt failed too: `in_lexicon.is_none()` means UNTAGGED, not
+                //      closed-class. Test fixtures and demo entries are untagged as well, and the cap
+                //      tests rely on their being capped, so the predicate exempts far more than the
+                //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
+                //      category-shape test), not the absence of a lexicon tag.
+                // ONE cap rule, in `apply_sense_cap` — counted by SENSE, keeping every category
+                // of a kept sense (D69 §7i), with the reranker's ELIMINATION cut applied at EVERY
+                // rung including widen. The rung-wide cut is what stops a sentence that widens for
+                // ONE word from flooding every OTHER word with that ranker's rejects (the `gene`
+                // /`C5849123` bug); its cost — a wrong elimination has no in-Pass-1 recovery — is
+                // paid by `recovery_ranks` (D69 §7g), not by loosening the cut here.
+                apply_sense_cap(&mut entries, ranks, cap);
+            }
+            // **Collapse entries that denote the SAME concept — AFTER the cap** (D63 cross-lexicon
+            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`). Structural `Exp`
+            // equality on `(cat, sem)` (full IRIs, never `pretty_term` which shortens an IRI to its
+            // local segment and could false-merge two senses); the same predicate as the forest-side
+            // [`Self::subsume_duplicates`]. Being an equality it **cannot drop a distinct reading**.
+            //
+            // The ORDER — cap FIRST, then dedup — is load-bearing. The reranker ranks RAW senses
+            // (pre-merge), so a cross-lexicon pair is TWO votes for ONE concept. When the reranker puts
+            // a concept's WordNet sense AND its UMLS twin in its top-`cap` positions, capping first
+            // keeps both and this dedup collapses them to ONE reading (the word's single best sense).
+            // Dedup-BEFORE-the-cap instead dropped the twin and let the cap BACKFILL the freed slot
+            // with a LOWER-ranked, contextually-wrong sense — the `event` case (2026-07-16): the ranker
+            // ranked event-*happening* #1 and its UMLS twin #2, the wrong event-*circumstance* sense
+            // #3; pre-cap dedup promoted circumstance into the cap, so `Each event alone …` never
+            // encoded. Cap-then-dedup keeps ≤ `cap` DISTINCT concepts and never seeds past the ranker's
+            // top-`cap` raw positions. (The 2026-07-11 measurement that first added the pre-cap dedup
+            // found it left encoded UNCHANGED — the freed slot was "immediately refilled"; that refill
+            // is this bug.) INERT until a pair is actually merged: distinct-lexicon senses carry
+            // different class IRIs, so `(cat, sem)` differs and nothing collapses. O(n²) over one
+            // lemma's (already cap-bounded) senses.
+            // **The cap is a fragile equilibrium, and removing INVALID entries exposes that** (measured
+            // 2026-07-26). The UMLS importer began pruning inflected duplicate forms
+            // (`convert::is_inflection_of_sibling`) — 52 505 entries a lemma-keyed lexicon should never
+            // have held. Cap-only, that moved exactly three units on the reference page: the germline
+            // unit 73 -> 41 (the intended effect — a plural surface stopped carrying a singular
+            // reading), and TWO units UP, 18 -> 52 and 40 -> 60, for a net +22.
+            //
+            // The rise is displacement, not new grammar. `entries_for("models")` and
+            // `entries_for("model")` draw on different concepts, and items compete for this cap per
+            // candidate and for `CELL_BEAM` per cell; removing entries frees room that refills with a
+            // different category — the added skeletons pair a 2-place predicate with a ONE-place one,
+            // i.e. the singular's VERB reading (`model`, `arrest`) surfacing where the plural form's
+            // noun-only entries used to sit. Those two units were encoding correctly only because the
+            // invalid entries happened to occupy the slots.
+            //
+            // So it is not an argument against pruning invalid forms — it is a second witness that the
+            // cap truncates by a criterion (emission order) that carries no linguistic content. See the
+            // long note above for two fixes already measured and rejected; this is the same shape.
+            dedup_same_concept(&mut entries);
+            // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
+            // that morphology *reduced* to this lemma was inflected (plural,
+            // for nouns); a surface equal to the lemma is singular. Refine the
+            // common noun's underspecified `num_any` to that number so
+            // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
+            // bites at composition.
+            let num = if *c == s_lc { "sg" } else { "pl" };
+            out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
+        }
+        // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
+        // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
+        // ("Genes are cell lines" → subclass_of) and its raised bare-argument NPs (`kind_of(t)`, §7.4).
+        // The SAME [`Self::bare_nominal_shifts`] rule runs here at leaf seeding and on composed cells in
+        // the CKY (both chart paths), so a compound noun shifts identically to a leaf noun.
+        let shifts: Vec<Item> = out
+            .iter()
+            .flat_map(|it| self.grammar.bare_nominal_shifts(it))
+            .collect();
+        out.extend(shifts);
+        out
+    }
+
+    /// Transparent `-ly` **adverb** items (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
+    /// If `surface` is a single `-ly` form whose adjective base is **known to the lexicon**
+    /// (data-driven probe — no hardcoded adverb list), seed identity-sem modifier items at the WRN
+    /// attachment categories ([`adverb_modifier_cats`]).
+    ///
+    /// **This is now the FALLBACK.** The rule was written when `data.adv` was unimported (D62
+    /// §8.7.5, deferred for want of a type for a predicate modifier) and its comment claimed
+    /// WordNet does not store productive `-ly` adverbs — 2975 of WordNet's 4481 adverb lemmas end
+    /// in `-ly`. The verb-adjunct PP fix adopted Luo & Shi: the importer now emits adverb synsets at
+    /// `ADV = (e -> t) -> (e -> t)`, and an imported sense seeds the same span with a CONJOINING
+    /// denotation. Identity is seeded only where the lexicon carries no adverb sense for the form,
+    /// and for the lexicalized DISCOURSE adverbs, which attach at `S/S` / `S\S` and are genuinely
+    /// transparent there.
+    ///
+    /// Empty when the surface isn't an `-ly` form, no adjective base resolves, the lexicon already
+    /// has an adverb sense, or the `Cat` inductives are unavailable.
+    /// Whether `surface` is a productive `-ly` adverb whose adjective base is **known to the
+    /// lexicon** (the data-driven recognition gate, D62 Phase 3). Shared by [`Self::adverb_items`]
+    /// (seeding) and [`Self::has_token`] (the missing-lexeme diagnostic), so a derived adverb counts
+    /// as *known* — not routed to lexical recovery.
+    pub(super) fn is_derived_adverb(&self, surface: &str) -> bool {
+        let s = surface.trim().to_lowercase();
+        adverb_bases(&s).iter().any(|b| {
+            self.lex
+                .entries_for(b)
+                .iter()
+                .any(|e| is_adjective_cat(e.item.cat()))
+        })
+    }
+
+    fn adverb_items(&self, surface: &str) -> Vec<Item> {
+        let s = surface.trim().to_lowercase();
+        let lexicalized = is_lexicalized_adverb(&s);
+        if !lexicalized && !self.is_derived_adverb(&s) {
+            return Vec::new();
+        }
+        // An IMPORTED adverb sense already seeds the MANNER positions, with Luo & Shi's `ADV`
+        // denotation instead of identity, so seeding them here too would add a reading that asserts
+        // strictly less and differs only by having dropped the adverb.
+        let imported = self
+            .lex
+            .entries_for(&s)
+            .iter()
+            .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "r"));
+        // Manner positions (adjective + VP modifier) are the FALLBACK, for a form the lexicon does
+        // not carry. The clause positions (`S/S`, `S\S`) are not: a discourse adverb really is
+        // transparent at the proposition level, and WordNet types `however`/`therefore`/`thus` as
+        // manner adverbs like any other, so the import does not supply that reading. Every one of
+        // the lexicalized set is in `data.adv`, which is why this is split rather than gated on
+        // `!lexicalized` — that left `however` with identity manner items beside the imported
+        // conjoining ones, the same position under two semantics.
+        let mut cats = Vec::new();
+        if !imported {
+            cats.extend(adverb_modifier_cats(&self.grammar.layer).unwrap_or_default());
+        }
+        if lexicalized {
+            cats.extend(sentence_modifier_cats(&self.grammar.layer).unwrap_or_default());
+        }
+        if cats.is_empty() {
+            return Vec::new();
+        }
+        // Identity sem `λx. x`: forward/backward application leaves the modified phrase's sem
+        // unchanged (β-reduces away at felicity), so the claim `Prop` is exactly the unmodified one.
+        let ident = Exp::Lam(
+            Patt::Var("ADV#x".to_string()),
+            Box::new(Exp::Var("ADV#x".to_string())),
+        );
+        cats.into_iter()
+            .map(|cat| Item::new(cat, ident.clone()))
+            .collect()
+    }
+
+    /// Whether `surface` is a morphologically-derived adjective whose parts are **known to the
+    /// lexicon** (D63 compound morphology, `docs/notes/d63-compound-morphology.md` §3): a
+    /// closed-prefix concatenation (`hypermutable` → `mutable`), a right-headed hyphen compound with a
+    /// reading ([`Self::hyphen_compound_items`]), or a denominal `X-<suffix>`. Shared by
+    /// [`Self::derived_adjective_items`] (seeding) and [`Self::has_token`] (the missing-lexeme
+    /// diagnostic), so a derived adjective counts as *known*. Mirrors [`Self::is_derived_adverb`].
+    pub(super) fn is_derived_adjective(&self, surface: &str) -> bool {
+        let s = surface.trim().to_lowercase();
+        // Slice 1: a closed-prefix stem that is a known adjective, or a hyphen compound with a reading.
+        let slice1 = prefix_adjective_bases(&s).iter().any(|b| {
+            self.lex
+                .entries_for(b)
+                .iter()
+                .any(|e| is_adjective_cat(e.item.cat()))
+        }) || !self.hyphen_compound_items(&s).is_empty();
+        // Slice 2: `X-<suffix>` (denominal) where X is a known noun and the relation verb is available.
+        slice1 || self.denominal_suffix_item(&s).is_some()
+    }
+
+    /// Derived-adjective items (D63 compound morphology §3). If `surface` is a recognized derived
+    /// adjective ([`Self::is_derived_adjective`]), seed its `ADJ` `Item`(s) on the whole-token span,
+    /// modifying nouns through the existing attributive-adjective refine rule (the `attrib` rule in
+    /// `combine_nominal_mod`'s table):
+    ///   * **Slice 1** (`hypermutable`, `double-stranded`) — the base adjective's own items, the
+    ///     prefix / hyphen modifier transparent (identity sem, like the `-ly` adverbs), so
+    ///     `hypermutable ≡ mutable`;
+    ///   * **Slice 2** (`X-based`) — a constructed `λx. base(x, kind_of(X))` predicate over the
+    ///     `base` verb axiom ([`Self::denominal_based_item`]).
+    ///
+    /// Empty when no base resolves.
+    fn derived_adjective_items(&self, surface: &str) -> Vec<Item> {
+        let s = surface.trim().to_lowercase();
+        // A hyphenated surface whose SPACE form is a real entry denotes THAT — the multiword
+        // reading wins over the right-headed-head identity rule, which would drop the left half
+        // (D69 §7h). `candidate_lemmas` seeds the multiword entry for this same span.
+        if s.contains('-') && !self.lex.entries_for(&s.replace('-', " ")).is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        // Slice 1, closed prefix (identity): reuse the base adjective's own items.
+        for b in prefix_adjective_bases(&s) {
+            for e in self.lex.entries_for(&b) {
+                if is_adjective_cat(e.item.cat()) {
+                    out.push(e.item);
+                }
+            }
+        }
+        // Slice 1, hyphen compound: what the left half contributes depends on what it is.
+        out.extend(self.hyphen_compound_items(&s));
+        // Slice 2 (denominal `X-<suffix>`): the constructed `rel(…)` predicate over the element's verb.
+        if let Some(it) = self.denominal_suffix_item(&s) {
+            out.push(it);
+        }
+        out
+    }
+
+    /// The readings of a right-headed hyphen compound `L-H` whose head `H` is a known adjective (D63
+    /// compound morphology §3, Slice 1). What `L` contributes depends on what `L` is:
+    ///
+    /// * a **bound prefix** is a prefix, whatever the lexicon holds for the same letters (`Pan` is
+    ///   the chimpanzee genus, `anti` an adjective). A transparent one ([`is_transparent_hyphen_prefix`],
+    ///   `pan-essential`) reads as `H`, identity in v1 like `hypermutable`; the others
+    ///   ([`OPAQUE_HYPHEN_PREFIXES`]) have NO reading — `non-` negates and `anti-` reverses, so the
+    ///   identity reading would invert the claim;
+    /// * an **adjective** modifies the head (`double-stranded`): the head's own items, `L`
+    ///   transparent (identity sem, v1). This takes precedence when `L` is also a noun — `double` is
+    ///   one in WordNet, and a nominal reading of every adjective modifier multiplies the readings of
+    ///   ordinary compounds (the reference page went from 652 to 796);
+    /// * a **noun or name** that is not an adjective keeps its content without a relation the compound does not write:
+    ///   `λx. H(x) ∧ compound_kind(x, L)` (`compound(x, L)` for a name), the vague modifier relation
+    ///   the N-N compound rule uses (`ontology.esl`). Where `H` governs a preposition, the compound may
+    ///   also be the phrase it abbreviates (`desmopressin-responsive` ≡ `responsive to desmopressin`,
+    ///   one proposition with one representation, §2a): the head's relational entry
+    ///   `(S[adj]\NP)/cat_pp_arg(prep_P)` ([`governs_named_preposition`]) applied to `L` — a common
+    ///   noun as its kind (`kind_of(C)`, as a bare argument commits), a name as itself. That reading is
+    ///   a CANDIDATE, not the reading: in `helicase-dead` the noun names what is dead, and `dead`'s
+    ///   governed `to` gives «unresponsive to helicases». Selection chooses between them.
+    ///
+    /// Empty unless `surface` is `L-H`.
+    fn hyphen_compound_items(&self, surface: &str) -> Vec<Item> {
+        let Some((left, head)) = hyphen_compound_parts(surface) else {
+            return Vec::new();
+        };
+        let head_entries = self.lex.entries_for(head);
+        let head_adjectives = || {
+            head_entries
+                .iter()
+                .filter(|e| is_adjective_cat(e.item.cat()))
+        };
+        if is_transparent_hyphen_prefix(left) {
+            return head_adjectives().map(|e| e.item.clone()).collect();
+        }
+        if OPAQUE_HYPHEN_PREFIXES.contains(&left) {
+            return Vec::new();
+        }
+        let left_entries = self.lex.entries_for(left);
+        if left_entries.iter().any(|e| is_adjective_cat(e.item.cat())) {
+            return head_adjectives().map(|e| e.item.clone()).collect();
+        }
+        let mut out = Vec::new();
+        let and = inductive_iri(&self.grammar.layer, "urn:eigenius:logic:And");
+        for l in &left_entries {
+            // (the complement a governed preposition takes, the modifier relation, its argument)
+            let (complement, relation, modifier) = match is_ctor(l.item.cat(), "cat_n") {
+                Some([t, _]) => (kind_of(t.clone()), COMPOUND_KIND, l.item.sem().clone()),
+                _ if is_ctor(l.item.cat(), "cat_np").is_some() => {
+                    (l.item.sem().clone(), COMPOUND, l.item.sem().clone())
+                }
+                _ => continue,
+            };
+            // The vague reading: `λx. H(x) ∧ relation(x, L)`.
+            if let Some(and) = &and {
+                for h in head_adjectives() {
+                    let x = "__hyc_theta";
+                    let sem = Exp::Lam(
+                        Patt::Var(x.to_string()),
+                        Box::new(Exp::const_applied(
+                            and.clone(),
+                            Vec::new(),
+                            vec![
+                                Exp::App(
+                                    Box::new(h.item.sem().clone()),
+                                    Box::new(Exp::Var(x.to_string())),
+                                ),
+                                Exp::App(
+                                    Box::new(Exp::App(
+                                        Box::new(Exp::EigonAxiom(
+                                            Iri::parse(relation).expect("modifier axiom iri"),
+                                        )),
+                                        Box::new(Exp::Var(x.to_string())),
+                                    )),
+                                    Box::new(modifier.clone()),
+                                ),
+                            ],
+                        )),
+                    );
+                    out.push(Item::with_cost(h.item.cat().clone(), sem, h.item.cost()));
+                }
+            }
+            // The phrase the compound may abbreviate: `H P L`.
+            for h in head_entries
+                .iter()
+                .filter(|e| governs_named_preposition(e.item.cat()))
+            {
+                let Some((_m, adjective, _pp)) = slash_parts(h.item.cat(), "fwd") else {
+                    continue;
+                };
+                out.push(Item::with_cost(
+                    adjective.clone(),
+                    Exp::App(Box::new(h.item.sem().clone()), Box::new(complement.clone())),
+                    h.item.cost(),
+                ));
+            }
+        }
+        out
+    }
+
+    /// The denominal-suffix adjective `X-E` (D63 compound morphology §3b, generalized from the shipped
+    /// `-based` slice — see [`DENOMINAL_SUFFIXES`]): `X-<suffix>` (X a known common noun) seeds a
+    /// predicative `ADJ` (`S[adj]\NP`) with sem `λθ. rel(…)`, reusing the element's WordNet verb axiom —
+    /// *not* a freshly-minted relation. The verb entry carries the bare 2-place axiom as its sem (like
+    /// the demo `affects`; imported WordNet verbs likewise). Argument order is set by the suffix's
+    /// `theta_is_object` (passive-participle `rel(θ, X)` vs adjective/active `rel(X, θ)`). Treating the
+    /// coarse 2-place axiom as the relation is the v1 representation; the faithful `rel(theme, ground)`
+    /// roles and the phrasal `E link X` convergence are the passive-voice / alignment tracks
+    /// (`docs/notes/d63-{passive-voice-handling,denominal-suffix-alignment}.md`).
+    /// `None` unless `surface` is `X-<suffix>` for a known suffix, X resolves to a common noun, the
+    /// element's relation verb is in the lexicon, and the `S[adj]\NP` inductives resolve.
+    fn denominal_suffix_item(&self, surface: &str) -> Option<Item> {
+        let s = surface.trim().to_lowercase();
+        let (x_form, tail) = s.rsplit_once('-')?;
+        if x_form.len() < 2 {
+            return None;
+        }
+        let &(_, rel_lemma, theta_is_object) =
+            DENOMINAL_SUFFIXES.iter().find(|(suf, _, _)| *suf == tail)?;
+        // The element's relation — a binary-relation verb (transitive or argument-PP) carries the raw
+        // 2-place `Entity → Entity → Prop` axiom as its sem.
+        let rel_ax = self
+            .lex
+            .entries_for(rel_lemma)
+            .into_iter()
+            .find(|e| is_binary_relation_cat(e.item.cat()))
+            .map(|e| e.item.sem().clone())?;
+        // X's entity: the noun's class realized as its kind (`kind_of(C)`), as a bare argument commits.
+        let x_class = self.lex.entries_for(x_form).into_iter().find_map(|e| {
+            match is_ctor(e.item.cat(), "cat_n") {
+                Some([t, _]) => Some(t.clone()),
+                _ => None,
+            }
+        })?;
+        let x_ent = kind_of(x_class);
+        let adj_cat = predicative_adjective_cat(&self.grammar.layer)?;
+        // sem `λθ. rel(first, second)` — argument order by voice (`theta_is_object`): θ in the object
+        // slot for a passive participle (`θ is based on X` → `rel(θ, X)`), the noun in the object slot
+        // for an adjective/active element (`θ resembles X` → `rel(X, θ)`).
+        let tv = "__den_theta";
+        let theta = Exp::Var(tv.to_string());
+        let (first, second) = if theta_is_object {
+            (theta, x_ent)
+        } else {
+            (x_ent, theta)
+        };
+        let sem = Exp::Lam(
+            Patt::Var(tv.to_string()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(Box::new(rel_ax), Box::new(first))),
+                Box::new(second),
+            )),
+        );
+        Some(Item::new(adj_cat, sem))
+    }
+
+    /// Degree-modified adverb items (D62 §2 #5b — `more commonly`, `most notably`, `less frequently`):
+    /// a degree word (`more`/`most`/`less`) over a known adverb (derived `-ly` or lexicalized) forms a
+    /// transparent **sentence** adverb. Two-token span; the degree contributes nothing to the claim
+    /// (transparent, like the bare adverb), so the whole phrase reuses [`sentence_modifier_cats`] +
+    /// [`adverb_modifier_cats`] with the identity sem. Empty unless `w0` is a degree word and `w1` a
+    /// recognized adverb.
+    fn degree_adverb_items(&self, w0: &str, w1: &str) -> Vec<Item> {
+        let d = w0.trim().to_lowercase();
+        if !matches!(d.as_str(), "more" | "most" | "less" | "least") {
+            return Vec::new();
+        }
+        let a = w1.trim().to_lowercase();
+        if !self.is_derived_adverb(&a) && !is_lexicalized_adverb(&a) {
+            return Vec::new();
+        }
+        let mut cats = adverb_modifier_cats(&self.grammar.layer).unwrap_or_default();
+        cats.extend(sentence_modifier_cats(&self.grammar.layer).unwrap_or_default());
+        if cats.is_empty() {
+            return Vec::new();
+        }
+        let ident = Exp::Lam(
+            Patt::Var("ADV#x".to_string()),
+            Box::new(Exp::Var("ADV#x".to_string())),
+        );
+        cats.into_iter()
+            .map(|cat| Item::new(cat, ident.clone()))
+            .collect()
+    }
+
+    /// Seed the LEAF cells of a CKY chart — the shared front-end of both the unpacked path
+    /// ([`Self::parse_at_cap`]) and the packed forest (D63 blueprint §11 3c.3). Multi-span MWE
+    /// [`Self::lookup_span`] + hole-freshening (`$anaphor$`/`$quant$`) + `-ly`/degree adverbs +
+    /// fronted participials + leaf forward type-raising, optionally per-cell beamed. Returns the
+    /// `n × n` chart (only leaf spans `[i,j]` populated) and the accumulated beam-drop count.
+    /// Behaviour-identical to the inline seeding it replaces — the packed path calls it with
+    /// `beam = None` (packing bounds via k-best, not a beam).
+    /// Drop a preposition's VP-adjunct reading at position `p` when the ADJECTIVE head immediately to
+    /// its left (`[p-1]`) subcategorizes for exactly that preposition (`X / cat_pp_arg(prep_P)`, X a
+    /// `cat_measure` or `S[adj]\NP`) and the surface at `p` offers the matching `cat_pp_arg(prep_P)`
+    /// argument marker. The governed PP is then the head's argument, never a free adjunct — so the
+    /// `And`-introducing entry (`is_vp_adjunct_prep`) is removed. Adjective-scoped by design (see the
+    /// call site); verbs are excluded because they can genuinely both govern and adjunct one preposition.
+    /// Single-token head/preposition adjacency (the page's shape); an intervening adverb slips it.
+    fn suppress_governed_adjunct(&self, chart: &mut Chart, n: usize) {
+        for p in 1..n {
+            // The preposition governed by an adjective head immediately to the left.
+            let governed_prep: Option<Exp> = chart[p - 1][p - 1].iter().find_map(|it| {
+                let (_m, res, arg) = slash_parts(it.cat(), "fwd")?;
+                let [prep] = is_ctor(arg, "cat_pp_arg")? else {
+                    return None;
+                };
+                (is_ctor(res, "cat_measure").is_some() || is_adjective_cat(res))
+                    .then(|| prep.clone())
+            });
+            let Some(prep) = governed_prep else {
+                continue;
+            };
+            // Disambiguate only when this surface offers BOTH the matching argument marker and a
+            // competing VP-adjunct reading — otherwise there is nothing spurious to drop.
+            let has_matching_arg = chart[p][p].iter().any(|it| {
+                matches!(slash_parts(it.cat(), "fwd"),
+                    Some((_m, a, _)) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
+            });
+            let has_adjunct = chart[p][p].iter().any(|it| is_vp_adjunct_prep(it.cat()));
+            if has_matching_arg && has_adjunct {
+                chart[p][p].retain(|it| !is_vp_adjunct_prep(it.cat()));
+            }
+        }
+    }
+
+    pub(super) fn seed_leaves(
+        &self,
+        tokens: &[Token],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+        beam: Option<usize>,
+    ) -> (Chart, usize) {
+        let debug = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
+        let n = tokens.len();
+        // chart[i][j] = every item spanning tokens i..=j.
+        let mut chart: Chart = vec![vec![Vec::new(); n]; n];
+
+        // 1. Seed lexical spans (multi-span MWE seeding). A multiword form at [i,j] is seeded
+        //    ALONGSIDE the items of its parts, so both readings survive into the chart.
+        let span_limit = self.lex.span_limit(n);
+        for i in 0..n {
+            let last = (i + span_limit).min(n);
+            for j in i..last {
+                let surface = join_surfaces(&tokens[i..=j]);
+                for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
+                    // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
+                    // fresh per-occurrence free var (typed `Entity` at felicity).
+                    it.set_sem(freshen_anaphor(it.sem(), &hole_base(i, j)));
+                    chart[i][j].push(it);
+                }
+                // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single `-ly`
+                // token whose adjective base is known. Single-token spans; identity sem, no holes.
+                if i == j {
+                    // Quantities and numerals (D95): items built here, not looked up — a measure
+                    // phrase for each reading, value and difference, and a numeral's cardinal
+                    // determiner. An attached quantity's surface was looked up above like any
+                    // token's, so a word it spells keeps its entries (decision 6).
+                    chart[i][j].extend(self.measure_items(&tokens[i]));
+                    for it in self.adverb_items(&surface) {
+                        chart[i][j].push(it);
+                    }
+                    // Derived adjectives (D63 compound morphology §3, Slice 1): a closed-prefix /
+                    // hyphen compound whose base is a known adjective seeds the base's transparent
+                    // items on the whole-token span (`hypermutable ≡ mutable`).
+                    for it in self.derived_adjective_items(&surface) {
+                        chart[i][j].push(it);
+                    }
+                    // Fronted participial from a single-token (intransitive) `ger` VP ("arising, …").
+                    let fronted: Vec<Item> = chart[i][j]
+                        .iter()
+                        .filter_map(|it| {
+                            front_participial(it.cat(), it.sem(), &self.grammar.layer).map(
+                                |(c, s)| {
+                                    Item::with_cost(
+                                        c,
+                                        freshen_anaphor(&s, &hole_base(i, j)),
+                                        it.cost(),
+                                    )
+                                },
+                            )
+                        })
+                        .collect();
+                    chart[i][j].extend(fronted);
+                }
+                // Degree-modified adverb (`more commonly`): a 2-token transparent sentence adverb.
+                if j == i + 1 {
+                    for it in self.degree_adverb_items(tokens[i].surface(), tokens[j].surface()) {
+                        chart[i][j].push(it);
+                    }
+                }
+            }
+        }
+
+        // RNR head distribution (D63, `docs/notes/d63-rnr-head-distribution.md`): a coordinated
+        // pre-nominal modifier list sharing a head noun ("colon, gastric and ovarian cancers") seeds the
+        // group-of-lexicalized-kinds reading its shared-head coordination cannot reach (the head sits
+        // once at the end — no adjacency to the multiword). NOT bounded by `span_limit` (a coordination
+        // is longer than any lexeme); `distribute_head` bails cheaply on a non-coordination. The seeded
+        // `cat_group` protects its span (`multiword_spans`), so the composition it supersedes is pruned
+        // with the multiword widen fallback — coverage-safe (grammar-gap 0).
+        let mut dists: Vec<(usize, usize, Vec<Item>)> = Vec::new();
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let d = self.distribute_head(&tokens[a..=b], lemmatizer, scope, cap, ranks);
+                if !d.is_empty() {
+                    dists.push((a, b, d));
+                }
+            }
+        }
+        for (a, b, d) in dists {
+            chart[a][b].extend(d);
+        }
+
+        // Argument/adjunct suppression (D63 §8.13): a governed-ADJECTIVE head immediately followed by
+        // its subcategorized preposition takes that PP as its ARGUMENT, so the preposition's competing
+        // VP-adjunct entry (the `And`-introducing `((S\NP)\(S\NP))/NP`, closed-class.esl `prep_*_sem`)
+        // is spurious there and is dropped, leaving only the transparent `cat_pp_arg` marker. Scoped to
+        // ADJECTIVE heads (`cat_measure` / `S[adj]\NP` over `cat_pp_arg(prep)`): a governed adjective has
+        // no competing adjunct use of its preposition ("dependent on X" is always the complement),
+        // unlike a verb ("operate on Monday" — the temporal adjunct is real). Coverage-safe: lifted at
+        // the FINAL widen rung (mirroring multiword-preference, line below), so the adjunct entry is
+        // re-admitted if suppressing it would gap the sentence — `grammar-gap 0` holds by construction.
+        if !matches!(cap, Some(c) if c >= SENSE_CAP_WIDEN_MAX) {
+            self.suppress_governed_adjunct(&mut chart, n);
+        }
+
+        // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
+        // to `S/(S\NP)` so it can forward-compose into a relative clause's object-extraction body.
+        // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
+        // raised in the CKY loop.
+        let mut beam_drops = 0usize;
+        for (i, row) in chart.iter_mut().enumerate() {
+            let raised = self.grammar.raise_nps(&row[i]);
+            row[i].extend(raised);
+            // Pre-nominal modifier lift at the LEAF cells (D63 coordinated-modifier category): every
+            // modifier-eligible leaf item (lexical adjective, derived/`-based` adjective) → `cat_mod`,
+            // so it can coordinate before meeting the head noun. This is the universal leaf point —
+            // after ALL seeding paths — mirroring the leaf `raise_nps` above; composed cells lift via
+            // the `ModLift` unary shift.
+            let mut mods: Vec<Item> = row[i]
+                .iter()
+                .flat_map(super::super::rules::combinators::mod_lifts)
+                .collect();
+            // The determiner lift (D95 slice 7d): a determiner that meets a noun modifier before the
+            // head it shares with a coordinated one (`five MSS and five MSI cell lines`).
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::det_premod_lifts)
+                    .collect::<Vec<_>>(),
+            );
+            // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
+            // (else the WordNet adjective already covers the attributive use, and the rule's
+            // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is
+            // no adjective ("predicted"), the rule is the only source of the attributive reading.
+            if !row[i].iter().any(|it| is_adjective_cat(it.cat())) {
+                let parts: Vec<Item> = row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::participial_lifts)
+                    .collect();
+                mods.extend(parts);
+            }
+            // POST-nominal oblique participial lift — UNGATED, unlike the pre-nominal one above. Its
+            // gate exists because a lexical adjective already covers the ATTRIBUTIVE use; there is no
+            // adjective entry that covers "compared to MSS cell lines", so there is nothing to
+            // double-seed against. Must run at the LEAF: the lift is on the still-unsaturated functor
+            // (that is where oblique and transitive are still distinguishable), and `compared` is one
+            // token — the `UnaryShift` table only runs over spans of length >= 2.
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::oblique_participial_lifts)
+                    .collect::<Vec<_>>(),
+            );
+            row[i].extend(mods);
+            // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
+            // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
+            if n > 1 {
+                if let Some(b) = beam {
+                    beam_drops += beam_cell(&mut row[i], b);
+                }
+            }
+            if debug {
+                eprintln!(
+                    "  [parse-debug leaf] cell[{i}..{i}] tok={:?} | {}",
+                    tokens[i].surface(),
+                    cell_histogram(&row[i])
+                );
+            }
+            // Targeted LEAF dump — the twin of the composed-cell dump in `chart::unpacked`, which
+            // only fires inside `for len in 2..=n` and so can never show a single-token cell. Leaf
+            // categories are what decide whether a seed-time lift has anything to fire on, so they
+            // need their own view. Set `EIGENIUS_DUMP_CELL=i..i`.
+            if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                if want == format!("{i}..{i}") {
+                    eprintln!(
+                        "  ===== DUMP leaf[{i}..{i}] tok={:?} ({} items, sample 20) =====",
+                        tokens[i].surface(),
+                        row[i].len()
+                    );
+                    for it in row[i].iter().take(20) {
+                        eprintln!(
+                            "    [{:?} cost={:?}] {}",
+                            it.prov(),
+                            it.cost(),
+                            crate::dcg::pretty::pretty_term(it.cat())
+                        );
+                    }
+                }
+            }
+        }
+        // Every item in a seeded cell is a leaf of the derivations built over it: a lexical entry, or
+        // one lifted from it here.
+        for (i, row) in chart.iter_mut().enumerate() {
+            for (j, cell) in row.iter_mut().enumerate().skip(i) {
+                for it in cell.iter_mut() {
+                    let atoms = super::super::verbalize::sense_atoms(it.sem());
+                    it.derivation = Some(Derivation::leaf((i, j), atoms));
+                }
+            }
+        }
+        (chart, beam_drops)
+    }
+
+    /// The items a quantity or numeral token seeds (D95, decisions 1 and 5): a measure phrase for each
+    /// unit reading, once as a value (`cat_mp(u, value)`, sem `Quantity(u)`) and once as a difference
+    /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A quantity's value also
+    /// seeds a predicative adjective `S[adj]\NP`, sem `λx. has_quantity(x, u, q)`: the leaf modifier
+    /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
+    /// 37 °C`). A numeral is a bare number, `cat_num`, and a whole number is also a cardinal
+    /// determiner stating its count ([`Self::count_determiner`]). A range with a unit seeds a constraint
+    /// and a predicate ([`Self::range_items`]); a range of bare numbers, count-range determiners. A
+    /// factor seeds `cat_factor` (slice 9). Any other token seeds nothing here.
+    fn measure_items(&self, token: &Token) -> Vec<Item> {
+        use super::super::preprocess::TokenKind;
+        use crate::units::convert::{Converted, Kinds, Reading};
+        let layer = &self.grammar.layer;
+        let mp = |c: &Converted| {
+            super::super::category::measure_phrase_cat(layer, &c.unit, c.reading)
+                .map(|cat| Item::new(cat, c.term()))
+        };
+        let measured = |c: &Converted| {
+            let cat = predicative_adjective_cat(layer)?;
+            let rel = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&rel)?;
+            let x = "MP#x";
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let body = app(
+                app(
+                    app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                    Exp::LitUnit(c.unit.clone()),
+                ),
+                c.term(),
+            );
+            Some(Item::new(
+                cat,
+                Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+            ))
+        };
+        match token.kind() {
+            TokenKind::Quantity(q) => q
+                .readings
+                .iter()
+                .flat_map(|r| [mp(&r.value), mp(&r.difference), measured(&r.value)])
+                .flatten()
+                .collect(),
+            TokenKind::Numeral(value) => {
+                let dimensionless = |reading| Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading,
+                };
+                // A bare number, not a measure phrase (D95, "Bare numerals and quantities share a
+                // carrier, not a category"; slice 7): `5 cells` counts cells, and a measure consumer
+                // or a measure bound does not take it.
+                let mut items: Vec<Item> = super::super::category::number_cat(&self.grammar.layer)
+                    .map(|cat| Item::new(cat, dimensionless(Reading::Value).term()))
+                    .into_iter()
+                    .collect();
+                // A whole number is also a cardinal determiner stating its exact count (D95 slice 7):
+                // `1` in `a`'s singular categories, any other in `these`'s plural ones, `0`
+                // included — `has_count(…, 0)` reads `0 genes`, where an existential could not.
+                if value.is_integer() && value.numer() >= &num_bigint::BigInt::from(0) {
+                    let one = num_bigint::BigInt::from(1);
+                    let templates = if value.numer() == &one {
+                        &self.cardinal_one
+                    } else {
+                        &self.cardinal_many
+                    };
+                    let count = dimensionless(Reading::Value).term();
+                    items.extend(
+                        templates
+                            .iter()
+                            .filter_map(|cat| self.count_determiner(cat, &count)),
+                    );
+                }
+                items
+            }
+            // A range (D95 slice 6c): the constraint `lo ≤ q ≤ hi` a consumer takes through
+            // `unit_constraint`, and the predicate the copula takes and `mod_lifts` makes prenominal.
+            // A range with a unit or `%` is a measure constraint (slice 6); a range of bare numbers
+            // counts (D95 slice 7, decision 5): whole endpoints make a cardinal determiner,
+            // `∃q. lo ≤ q ≤ hi ∧ has_count(T, …, q)`, and nothing else, as a numeral is not a measure.
+            TokenKind::Range(r) if r.unitless => {
+                let whole = |v: &crate::numeric::Rational| {
+                    v.is_integer() && v.numer() >= &num_bigint::BigInt::from(0)
+                };
+                match (r.low.readings.as_slice(), r.high.readings.as_slice()) {
+                    ([lo], [hi]) if whole(&r.low.value) && whole(&r.high.value) => {
+                        self.count_range_determiners(&lo.value, &hi.value)
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            // A list with its unit written once (D95 slice 8e): a quantifier over the slot a measure
+            // phrase fills, one per reading — `λk. And(k(4 d), k(7 d))` — which a consumer takes as
+            // it takes a constraint. Value readings only, and no predicate: `5 and 10 μM etoposide`
+            // is not one entity with two concentrations.
+            TokenKind::QuantityList(l) => (0..l.members[0].readings.len())
+                .filter_map(|j| self.list_item(l, j))
+                .collect(),
+            TokenKind::Range(r) => r
+                .low
+                .readings
+                .iter()
+                .zip(&r.high.readings)
+                .flat_map(|(lo, hi)| self.range_items(&lo.value, &hi.value))
+                .collect(),
+            // A factor (D95 slice 9, decision 1): its value at the dimensionless unit, in the category
+            // only the factor comparatives take.
+            TokenKind::Factor(value) => {
+                let ratio = Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading: Reading::Value,
+                };
+                super::super::category::factor_cat(layer)
+                    .map(|cat| Item::new(cat, ratio.term()))
+                    .into_iter()
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// A cardinal determiner over `cat` stating the count `q` (D95 slice 7, decision 2): a subject
+    /// determiner `cat_forall(n, λT. S/(S\\NP_T))` gets `λT.λV. has_count(T, λx. V(x), q)`, an object one
+    /// `cat_forall(n, λT. (S\\NP)\\((S\\NP)/NP_T))` gets `λT.λTV.λs. has_count(T, λx. TV(x, s), q)`.
+    /// `None` for any other shape, or when the chain lacks `has_count`.
+    fn count_determiner(&self, cat: &Exp, q: &Exp) -> Option<Item> {
+        let has_count = Iri::parse(HAS_COUNT).ok()?;
+        self.grammar.layer.resolve(&has_count)?;
+        let [_num, Exp::Lam(_, body)] = super::super::category::is_ctor(cat, "cat_forall")? else {
+            return None;
+        };
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+        let var = |x: &str| Exp::Var(x.into());
+        let count = |scope: Exp| {
+            app(
+                app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                q.clone(),
+            )
+        };
+        // The scope is a λ over `T` in both shapes: a verb phrase's own sem is typed over `Entity`,
+        // and the kernel checks a λ at `T → Prop` but does not subtype `Entity → Prop` to it.
+        let sem = if super::super::category::is_ctor(body, "fwd").is_some() {
+            let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+            lam("CNT#T", lam("CNT#V", count(scope)))
+        } else if super::super::category::is_ctor(body, "bwd").is_some() {
+            let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+            lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))
+        } else {
+            return None;
+        };
+        Some(Item::new(cat.clone(), sem))
+    }
+
+    /// A count range's cardinal determiners (D95 slice 7, decision 5), in the plural categories of
+    /// `these`: `λT.λV. ∃q. lo ≤ q ≤ hi ∧ has_count(T, λx. V(x), q)`, and its object counterpart.
+    fn count_range_determiners(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_count = Iri::parse(HAS_COUNT).ok()?;
+            layer.resolve(&has_count)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+            let var = |x: &str| Exp::Var(x.into());
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let q = "CNT#q";
+            let constraint = lam(
+                q,
+                Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![le_app(lo.term(), var(q)), le_app(var(q), hi.term())],
+                ),
+            );
+            let count = |scope: Exp| {
+                app(
+                    app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                    var(q),
+                )
+            };
+            let mut out = Vec::new();
+            for template in &self.cardinal_many {
+                let [_num, Exp::Lam(_, body)] =
+                    super::super::category::is_ctor(template, "cat_forall")?
+                else {
+                    continue;
+                };
+                // `f q a₁…aₙ` for `constrained_sem`, which quantifies `q` and closes over the args.
+                let (consumer, arity) = if super::super::category::is_ctor(body, "fwd").is_some() {
+                    let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+                    (lam(q, lam("CNT#T", lam("CNT#V", count(scope)))), 2)
+                } else {
+                    let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+                    (
+                        lam(q, lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))),
+                        3,
+                    )
+                };
+                let sem = super::super::rules::combinators::constrained_sem(
+                    &consumer,
+                    None,
+                    &constraint,
+                    &value_ty,
+                    arity,
+                    &and,
+                );
+                out.push(Item::new(template.clone(), sem));
+            }
+            Some(out)
+        };
+        build().unwrap_or_default()
+    }
+
+    /// The quantifier a quantity list seeds for its `j`th reading (D95 slice 8e): `cat_mpq(u, value)`
+    /// with sem `λk. And(k(q₁), And(k(q₂), …))`, `Or` for a list joined by `or`. `None` when the
+    /// members' units differ or the chain lacks the category or the connective.
+    fn list_item(&self, list: &super::super::preprocess::QuantityList, j: usize) -> Option<Item> {
+        let layer = &self.grammar.layer;
+        let values: Vec<&crate::units::convert::Converted> = list
+            .members
+            .iter()
+            .map(|m| m.readings.get(j).map(|r| &r.value))
+            .collect::<Option<_>>()?;
+        let unit = &values.first()?.unit;
+        if values.iter().any(|v| &v.unit != unit) {
+            return None;
+        }
+        let cat = super::super::category::measure_quantifier_cat(
+            layer,
+            unit,
+            crate::units::convert::Reading::Value,
+        )?;
+        let connective = if list.disjunctive {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        let connective = super::super::category::inductive_iri(layer, connective)?;
+        let k = "MPQ#k";
+        let at = |v: &crate::units::convert::Converted| {
+            Exp::App(Box::new(Exp::Var(k.into())), Box::new(v.term()))
+        };
+        let (last, rest) = values.split_last()?;
+        let body = rest.iter().rev().fold(at(last), |acc, v| {
+            Exp::const_applied(connective.clone(), Vec::new(), vec![at(v), acc])
+        });
+        Some(Item::new(
+            cat,
+            Exp::Lam(Patt::Var(k.into()), Box::new(body)),
+        ))
+    }
+
+    /// A range's two items (D95 slice 6, decision 8): `cat_mpc(u, value)` with sem
+    /// `λq. And(le(u, lo, q), le(u, q, hi))`, and `S[adj]\NP` with sem
+    /// `λx. ∃q. And(le(u, lo, q), le(u, q, hi)) ∧ has_quantity(x, u, q)`. Empty when the endpoints'
+    /// units differ or the chain lacks the vocabulary.
+    fn range_items(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            if lo.unit != hi.unit {
+                return None;
+            }
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let constraint_cat =
+                super::super::category::measure_constraint_cat(layer, &lo.unit, Reading::Value)?;
+            let predicate_cat = predicative_adjective_cat(layer)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_quantity = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&has_quantity)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let (q, u, x) = ("MP#q", "MP#u", "MP#x");
+            let constraint = Exp::Lam(
+                Patt::Var(q.into()),
+                Box::new(Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![
+                        le_app(lo.term(), Exp::Var(q.into())),
+                        le_app(Exp::Var(q.into()), hi.term()),
+                    ],
+                )),
+            );
+            // `λu.λq.λx. has_quantity(x, u, q)` — the consumer the predicate quantifies, as a marker's
+            // predicate entry does.
+            let has = Exp::Lam(
+                Patt::Var(u.into()),
+                Box::new(Exp::Lam(
+                    Patt::Var(q.into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var(x.into()),
+                        Box::new(app(
+                            app(
+                                app(Exp::EigonAxiom(has_quantity), Exp::Var(x.into())),
+                                Exp::Var(u.into()),
+                            ),
+                            Exp::Var(q.into()),
+                        )),
+                    )),
+                )),
+            );
+            let predicate = super::super::rules::combinators::constrained_sem(
+                &has,
+                Some(&unit),
+                &constraint,
+                &value_ty,
+                1,
+                &and,
+            );
+            Some(vec![
+                Item::new(constraint_cat, constraint),
+                Item::new(predicate_cat, predicate),
+            ])
+        };
+        build().unwrap_or_default()
+    }
+
+    /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it
+    /// needs the lexicon, which the grammar and chart deliberately cannot reach). For a span `[i, j]`
+    /// whose prefix `tokens[i..j]` is a pre-nominal modifier COORDINATION and `tokens[j]` is the shared
+    /// head, re-look-up each "conjunct + head" compound IN ISOLATION — the isolated surface resolves the
+    /// lexicalized concept cleanly, where the shared-head coordination cannot (a multiword lexeme needs
+    /// adjacency, and the head sits once at the end) — bare-NP-shift each to its kind, and fold them into
+    /// a `cat_group` the distributive rules predicate over. So "colon, gastric and ovarian cancers"
+    /// reaches `[kind_of(colon-cancer), …]` rather than a generic cancer with a disjunctive modifier.
+    ///
+    /// First cut (D63 §8 M-RNR-2): fires only when EVERY conjunct lexicalizes; a mixed list (a conjunct
+    /// that only composes, e.g. "ovarian cancer") yields nothing here, and the `cat_mod`/`Or` reading
+    /// stands — coverage is never reduced.
+    fn distribute_head(
+        &self,
+        span: &[Token],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> Vec<Item> {
+        // `span` is `tokens[i..=j]`: the modifier coordination followed by its shared head (last token).
+        let Some((head, mods)) = span.split_last() else {
+            return Vec::new();
+        };
+        let head = head.surface();
+        let Some(conjuncts) = split_coord_conjuncts(mods, |t| {
+            self.grammar.reserved.coord_connective(t).is_some()
+        }) else {
+            return Vec::new();
+        };
+        // The shared head's class `H` types the group — each distributed compound `Kᵢ ⊆ H`, so
+        // `group_member_fits` sees the type a predicate accepts. NOT `common_super(Kᵢ)`, which for
+        // UMLS-CUI compounds is the `Entity` top and fits no concrete slot (Wall 1a).
+        let Some(h) = self
+            .lookup_span(head, lemmatizer, scope, cap, ranks)
+            .iter()
+            .find_map(|it| match it.cat() {
+                Exp::InductiveCtor(_, name, args) if name == "cat_n" && args.len() == 2 => {
+                    Some(args[0].clone())
+                }
+                _ => None,
+            })
+        else {
+            return Vec::new();
+        };
+        // Per conjunct: the kind NPs of "conjunct + head", looked up IN ISOLATION and bare-NP-shifted.
+        // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
+        let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
+        for c in &conjuncts {
+            let surface = format!("{c} {head}");
+            let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
+            // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
+            // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
+            // plain `cat_np` that `coordinate_np` folds into a group.
+            let kinds: Vec<Item> = raw
+                .iter()
+                .filter_map(|it| match it.cat() {
+                    Exp::InductiveCtor(decl, name, args) if name == "cat_n" && args.len() == 2 => {
+                        Some(Item::with_cost(
+                            // Typed by the head class `H`, sem is the SPECIFIC kind `kind_of(Kᵢ)`.
+                            Exp::InductiveCtor(
+                                decl.clone(),
+                                "cat_np".into(),
+                                vec![h.clone(), args[1].clone()],
+                            ),
+                            kind_of(args[0].clone()),
+                            it.cost(),
+                        ))
+                    }
+                    _ => None,
+                })
+                // Top-ranked sense only (raw is already sense-ranked by cap/reranker): the union is ONE
+                // structural reading, so cross-producing N conjuncts × their senses is an Nᵗʰ-power seed
+                // explosion (4⁴ on the 4-way cancer list → 192 groups → forest blow-up, Wall 2). Sense
+                // choice is the cap/reranker's job downstream, not distribute_head's.
+                .take(1)
+                .collect();
+            if kinds.is_empty() {
+                return Vec::new();
+            }
+            per_conjunct.push(kinds);
+        }
+        // Connective: `or` anywhere → union; else `and` (a comma list finalizes to conjunction).
+        let op = if mods.iter().any(|t| {
+            self.grammar.reserved.coord_connective(t.surface()) == Some("urn:eigenius:logic:Or")
+        }) {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        // One representative cost per conjunct, summed — the distributed compound's seed cost.
+        let mut cost = per_conjunct[0][0].cost();
+        for c in &per_conjunct[1..] {
+            cost = cost.saturating_add(c[0].cost());
+        }
+        // Fold `coordinate_np` left over the one kind per conjunct into the `cat_group` union.
+        let mut groups: Vec<(Exp, Exp)> = per_conjunct[0]
+            .iter()
+            .map(|it| (it.cat().clone(), it.sem().clone()))
+            .collect();
+        for conj in &per_conjunct[1..] {
+            let mut next = Vec::new();
+            for (gc, gs) in &groups {
+                for it in conj {
+                    if let Some(pair) =
+                        coordinate_np(op, gc, gs, it.cat(), it.sem(), &self.grammar.layer)
+                    {
+                        next.push(pair);
+                    }
+                }
+            }
+            groups = next;
+        }
+        groups
+            .into_iter()
+            .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+            .collect()
+    }
+}
+
+/// Candidate adjective bases for a productive `-ly` adverb (D62 Phase 3 derivational rule).
+/// Orthographic reverse-derivation; each candidate is probed against the lexicon (data-driven — no
+/// hardcoded adverb list), so over-generated noise (a non-word base) simply fails the probe.
+fn adverb_bases(surface: &str) -> Vec<String> {
+    // Non-adverb `-ly` tokens: chemistry/maths fragments mis-split by S0 (`poly(ADP-ribose)` →
+    // `poly`) that happen to end in `-ly` but are never adverbs. An explicit exception so they are
+    // not derived even if a base accidentally resolves.
+    const NON_ADVERB_LY: &[&str] = &["poly"];
+    if surface.len() < 4 || !surface.ends_with("ly") || NON_ADVERB_LY.contains(&surface) {
+        return Vec::new();
+    }
+    let stem = &surface[..surface.len() - 2]; // strip "ly": commonly→common, selectively→selective
+    let mut bases = vec![stem.to_string(), format!("{stem}le")]; // stem+le: simply→simple
+    if let Some(p) = surface.strip_suffix("ily") {
+        bases.push(format!("{p}y")); // -ily→-y: easily→easy
+    }
+    if let Some(p) = surface.strip_suffix("bly") {
+        bases.push(format!("{p}ble")); // -bly→-ble: favourably→favourable
+    }
+    match surface {
+        "truly" => bases.push("true".to_string()),
+        "fully" => bases.push("full".to_string()),
+        "wholly" => bases.push("whole".to_string()),
+        _ => {}
+    }
+    bases.sort();
+    bases.dedup();
+    bases
+}
+
+/// Candidate adjective bases for a **closed-prefix** derived adjective (D63 compound morphology,
+/// `docs/notes/d63-compound-morphology.md` §3, Slice 1): a prefix `{hyper,hypo,poly,multi,mono}`
+/// concatenated onto a known adjective (`hypermutable` → `mutable`) — orthographic reverse-derivation,
+/// each candidate probed against the lexicon in [`Parser::is_derived_adjective`] (data-driven, no
+/// hardcoded adjective list; a non-adjective base simply fails the probe). The prefix is transparent in
+/// v1 (identity sem — the derived word reuses the base's items), so only the stem is returned. A
+/// hyphenated surface has no prefix base; its halves are [`hyphen_compound_parts`].
+fn prefix_adjective_bases(surface: &str) -> Vec<String> {
+    let s = surface.trim().to_lowercase();
+    if s.contains('-') {
+        return Vec::new();
+    }
+    let mut bases: Vec<String> = ADJ_PREFIXES
+        .iter()
+        .filter_map(|p| s.strip_prefix(p))
+        .filter(|stem| stem.len() >= 3)
+        .map(str::to_string)
+        .collect();
+    bases.sort();
+    bases.dedup();
+    bases
+}
+
+/// Productive biomedical adjective prefixes, concatenated (`hypermutable`) — a declarative closed
+/// set, not a corpus-frequency splitter (§2 "closed affix inventory, not frequency splitting").
+const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
+
+/// Whether `left` is a bound prefix read as TRANSPARENT in a hyphen compound (identity, v1 — degree
+/// and scope deferred, as for [`ADJ_PREFIXES`]): the concatenated set written with a hyphen, and
+/// `pan-` («pan-essential», «pan-nuclear»), which is written only with one.
+fn is_transparent_hyphen_prefix(left: &str) -> bool {
+    left == "pan" || ADJ_PREFIXES.contains(&left)
+}
+
+/// Bound prefixes whose meaning a hyphen compound does not get yet. They have NO reading rather than
+/// identity — `non-homologous` read as `homologous`, `anti-proliferative` as `proliferative` inverts
+/// the claim — and are never looked up as words (`anti` is a WordNet adjective, `self` a noun).
+const OPAQUE_HYPHEN_PREFIXES: &[&str] = &[
+    "anti", "co", "de", "inter", "intra", "meta", "mid", "non", "post", "pre", "pro", "re", "self",
+    "semi", "sub", "trans", "un",
+];
+
+/// The vague modifier relations of `ontology.esl`, as the N-N compound rules use them: a named
+/// modifier (`compound`) and a common-noun kind (`compound_kind`).
+const COMPOUND: &str = "urn:eigenius:ontology:compound";
+const COMPOUND_KIND: &str = "urn:eigenius:ontology:compound_kind";
+
+/// The halves `(left, head)` of a **right-headed hyphen compound** `L-H` (D63 compound morphology §3,
+/// Slice 1): the head (last segment) carries the category, and [`Parser::hyphen_compound_items`]
+/// decides what the left half contributes. `None` for a head shorter than three letters, and for a
+/// denominal suffix (`-based`/`-like`/…), which [`Parser::denominal_suffix_item`] handles — excluding
+/// those fixes the `-like` over-generation (§3b).
+fn hyphen_compound_parts(surface: &str) -> Option<(&str, &str)> {
+    let (left, head) = surface.rsplit_once('-')?;
+    let is_denominal = DENOMINAL_SUFFIXES.iter().any(|(suf, _, _)| *suf == head);
+    (!left.is_empty() && head.len() >= 3 && !is_denominal).then_some((left, head))
+}
+
+/// Lexicalized (non-`-ly`) transparent **discourse adverbs** (D62 connectives batch): closed-class
+/// adverbs that don't derive from an adjective but are inert for a scientific claim, so they get the
+/// same transparent treatment as `-ly` adverbs (plus clause-level `S/S`/`S\S` attachment).
+pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
+    // Discourse / TRANSITIONAL connective adverbs (core-en `adv.xsl` `Transitional-Adverb`): inert
+    // for a scientific claim (transparent sem) but attaching at the clause level (`S/S`/`S\S`), so a
+    // sentence-initial `Thus, …` / `Hence, …` wraps the matrix. The comma after a sentence-initial one
+    // is absorbed in the CKY (fronted-modifier comma absorption).
+    const LEXICALIZED_ADVERBS: &[&str] = &[
+        "also",
+        // Shares WordNet synset `r00047534` ("in addition") with `also`, and is the same additive
+        // discourse connective. Listed so `closed_class` can withhold the imported MANNER entries
+        // on it without leaving the surface unknown.
+        "too",
+        "however",
+        "yet",
+        "thus",
+        "therefore",
+        "hence",
+        "consequently",
+        "moreover",
+        "furthermore",
+        "additionally",
+        "subsequently",
+        "similarly",
+        "conversely",
+        "notably",
+        "importantly",
+        "thereby",
+        "nonetheless",
+        "nevertheless",
+    ];
+    LEXICALIZED_ADVERBS.contains(&surface)
+}
+
+/// The relation a measured value predicates of an entity (`ontology.esl`), which a quantity's
+/// predicative-adjective item applies ([`Parser::measure_items`]).
+const HAS_QUANTITY: &str = "urn:eigenius:ontology:has_quantity";
+/// `units:le` — a range's endpoints bound its value (D95 slice 6c).
+const UNITS_LE: &str = "urn:eigenius:units:le";
+/// `ontology:has_count` — a cardinal's exact count (D95 slice 7).
+const HAS_COUNT: &str = "urn:eigenius:ontology:has_count";
+
+/// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
+/// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:
+///   * `relation_lemma` — the verb lemma whose **2-place** axiom is the relation ([`is_binary_relation_cat`]).
+///     Adjective-voice suffixes (`-like`, `-dependent`, `-related`) route to the corresponding *verb*
+///     (`resemble`/`depend`/`relate`), since the 1-place adjective (`like`) is not a relation.
+///   * `theta_is_object` — the modified noun's role, which fixes the argument order. **Passive-participle**
+///     suffixes (`θ is based/mediated/… BY/ON X`) make θ the object → `rel(θ, X)`; **adjective/active**
+///     suffixes (`θ resembles / depends on X`) make θ the subject → `rel(X, θ)`. Under the object-first
+///     verb convention both render `rel(a, b)` = "b ⟨rel⟩ a".
+///
+/// Every tail here is also excluded from the Slice-1 hyphen-compound rule ([`hyphen_compound_parts`]),
+/// which fixes the `-like` over-generation (`like` is a WordNet adjective, so Slice-1 would otherwise
+/// seed identity `like(x)` and drop `X`). A tail whose `relation_lemma` is absent from the lexicon just
+/// fails the probe → the token stays OOV (fail-safe), never a wrong reading. `-specific` is omitted
+/// (no verb relation; needs a minted `specific_to` — deferred).
+const DENOMINAL_SUFFIXES: &[(&str, &str, bool)] = &[
+    ("based", "base", true),
+    ("mediated", "mediate", true),
+    ("derived", "derive", true),
+    ("induced", "induce", true),
+    ("like", "resemble", false),
+    ("dependent", "depend", false),
+    ("related", "relate", false),
+];
+
+/// **Collapse entries that denote the SAME concept** — structural `Exp` equality on `(cat, sem)`,
+/// full IRIs (never `super::super::pretty_term`, which shortens an IRI to its local segment and could
+/// false-merge two distinct senses). Being an equality it **cannot drop a distinct reading**: a
+/// different category, or a different denotation, survives.
+///
+/// The same predicate `Parser::subsume_duplicates` applies to the parsed forest. What this
+/// earns is the **ORDER**: `subsume_duplicates` runs *after* parsing, by which point the sense cap
+/// has already spent a slot on the duplicate and the chart has already built it. Run at seed time —
+/// **before the cap** — a duplicate never consumes a cap slot at all, which is the point, because
+/// with `SENSE_CAP = 2` a word gets only two of them.
+///
+/// **Why it matters** (D63, `docs/notes/d63-wordnet-umls-concept-unification.md`): WordNet and UMLS
+/// each mint their own class for the same concept — `state` is `wn:n00024720` *and*
+/// `umlscui:C1442792`, with verbatim-identical glosses. Measured over the WRN page (2026-07-11),
+/// **47% of ranked words spent BOTH cap slots on such a cross-lexicon pair**, so no genuine
+/// alternative could seed at all.
+///
+/// **INERT until the lexica are unified**: two entries from different lexica carry different class
+/// IRIs, so `(cat, sem)` differs and nothing collapses. It fires only once the alignment layer makes
+/// both entries denote one class. O(n²) over one lemma's senses, which is small.
+pub(super) fn dedup_same_concept(entries: &mut FormEntries) {
+    if entries.len() < 2 {
+        return;
+    }
+    let mut kept: Vec<usize> = Vec::with_capacity(entries.len());
+    for i in 0..entries.len() {
+        let dup = kept.iter().any(|&j| {
+            entries[j].item.cat() == entries[i].item.cat()
+                && entries[j].item.sem() == entries[i].item.sem()
+        });
+        if !dup {
+            kept.push(i);
+        }
+    }
+    if kept.len() == entries.len() {
+        return;
+    }
+    let mut i = 0usize;
+    entries.retain(|_| {
+        let keep = kept.contains(&i);
+        i += 1;
+        keep
+    });
+}
+
+/// The sense cap as the seed applies it: how many of `entries` survive, and which.
+///
+/// Exposed so the widen ladder can ask what a word is left with WITHOUT re-deriving the rule
+/// (D69 §7g). `eff = min(cap, ranked)` — the ranker's elimination cut — then a sort by
+/// [`sense_cap_key`] and a truncate.
+pub(super) fn apply_sense_cap(
+    entries: &mut Vec<LexEntry>,
+    ranks: Option<&BTreeMap<String, u32>>,
+    cap: usize,
+) {
+    // **THE CAP COUNTS SENSES, AND KEEPS EVERY CATEGORY OF A KEPT SENSE** (D69 §7i).
+    //
+    // It used to count ENTRIES. One sense legitimately owns several entries — the same meaning in
+    // different grammatical categories (`C0388246` as count and as mass; a verb sense in bse /
+    // fin-sg / fin-pl frames) — so a cap of 2 was routinely spent on two categorial variants of ONE
+    // sense, and the next sense never reached the chart. Two measured consequences, both of them
+    // wrong READINGS rather than merely lost ambiguity:
+    //
+    //   * «screens»: the top-ranked verb sense owns 4 entries, so no NOUN survived, the phrase
+    //     could not be built, and the recovery path substituted "a white or silvered surface where
+    //     pictures can be projected" for C0220908 «Screening procedure».
+    //   * «WRN»: `C0388246` owns 2 entries (count + mass) and took both slots, so `C1337007`'s
+    //     PROPER-NOUN entry — WRN the gene, the individual the pin wants — never seeded. That is
+    //     the standing "Axis B" miss.
+    //
+    // The two axes are different and the system already separates them elsewhere: sense ambiguity
+    // is Lever A (this cap — «breaks» offers 75 senses and that is what the cap is for), while one
+    // sense appearing in several categories is a SYNTACTIC axis, which the cell beam (Lever B)
+    // bounds. Counting entries silently spent Lever A's budget on Lever B's axis.
+    let mut eff = cap;
+    if let Some(r) = ranks {
+        let ranked: BTreeSet<&str> = entries
+            .iter()
+            .filter_map(|e| e.sense.as_deref())
+            .filter(|s| r.contains_key(*s))
+            .collect();
+        if !ranked.is_empty() {
+            eff = eff.min(ranked.len());
+        }
+    }
+    let distinct: BTreeSet<&str> = entries.iter().filter_map(|e| e.sense.as_deref()).collect();
+    if distinct.len() <= eff {
+        return; // already within the cap, counted by sense
+    }
+    entries.sort_by_key(|e| sense_cap_key(e, ranks));
+    // Walk the sorted entries and keep every entry whose sense is among the first `eff` DISTINCT
+    // senses. An entry with no sense label (the closed class, test fixtures) is kept: it has no
+    // sense to count and the cap has never been the right instrument for it.
+    let mut kept_senses: BTreeSet<&str> = BTreeSet::new();
+    let mut keep: Vec<bool> = Vec::with_capacity(entries.len());
+    for e in entries.iter() {
+        let k = match e.sense.as_deref() {
+            None => true,
+            Some(s) if kept_senses.contains(s) => true,
+            Some(s) if kept_senses.len() < eff => {
+                kept_senses.insert(s);
+                true
+            }
+            Some(_) => false,
+        };
+        keep.push(k);
+    }
+    let mut it = keep.into_iter();
+    entries.retain(|_| it.next().unwrap_or(false));
+}
+
+/// A category's **frame**: its head constructor plus, for a slash category, the head constructor of
+/// the ARGUMENT it takes — `fwd/cat_np`, `fwd/cat_cp`, `bwd/cat_np`.
+///
+/// [`cat_shape`] is deliberately coarse and answers "what slot could this fill". That is the wrong
+/// question for [`super::Parser::recovery_ranks`], which must answer "can this word still do what it
+/// could do". A verb wanting an object NP and a verb wanting a that-clause are BOTH `fwd`, so under
+/// `cat_shape` a word can lose its clausal frame entirely and nothing looks missing.
+///
+/// Measured (D69 §7k, `2026-08-15`): «These observations suggest that WRN dependency is not simply a
+/// result of MMR deficiency.» — the draw kept `suggest` senses `00930806` (`fwd/cat_np` only) and
+/// `00930368` (`fwd/cat_np` + `bwd/cat_np`) and ELIMINATED `00927430`, the only sense carrying
+/// `fwd/cat_cp`. Under `cat_shape` the full set `{fwd, bwd}` equals the survivors, so targeted
+/// recovery promoted nothing, the sentence failed at every cap, and Pass 2 rescued it by discarding
+/// ALL TEN words' rankings — which is how Turcot syndrome and the WRN protein-kind reached the
+/// reading. Under `cat_frame` the lost `fwd/cat_cp` is visible and only `suggest` is touched.
+///
+/// **The number index is deliberately NOT part of this key** (added `2026-08-15`, REMOVED the same day
+/// after measurement — D70 §1c). Including it looked right: «Germline mutations … cause Lynch
+/// syndrome.» has `cat_n(C4552100, num_any)` kept and `cat_n(C1333990, num_any|mass)` eliminated, so a
+/// lost `cat_n/mass` frame would let the rescue restore the bare-noun reading. It does — by restoring a
+/// DIFFERENT CONCEPT. Elimination is hard (the cap does not backfill an omitted sense), so the only way
+/// to obtain a mass variant is to resurrect the sense that carries one, and that sense denotes
+/// something else. Measured consequences on one page: «lynch syndrome» C4552100 → C1333990, which is
+/// the same disease under its former name (Hereditary Nonpolyposis Colorectal Cancer) and therefore
+/// looked like a success; «mmr deficiency» C4522088 → C0265325, «Mismatch Repair Deficiency» replaced
+/// by **Turcot syndrome**, which is simply wrong. One mechanism, and it is unsound in both: a parse must
+/// not swap in a different concept to obtain a countability variant. That a swap sometimes lands on a
+/// synonym is luck.
+///
+/// A slash's argument is a different case and stays in the key: promoting another SENSE OF THE SAME
+/// WORD to restore a lost syntactic frame changes which reading is reachable, not which entity is
+/// being denoted. The bare-standing problem the number index was reaching for is real, and belongs to
+/// countability assignment (D70 O1) rather than to sense recovery.
+///
+/// Kept SEPARATE from `cat_shape` on purpose: `cat_shape` is also the [`apply_sense_cap`] key, where
+/// a finer grain would change which categories survive the cap for every word in every sentence.
+/// Two callers, two questions, two keys.
+pub(super) fn cat_frame(cat: &Exp) -> String {
+    let head = cat_shape(cat);
+    // A SLASH's argument only. NOT the number index of a `cat_n` — see the doc-comment above.
+    match slash_parts(cat, "fwd").or_else(|| slash_parts(cat, "bwd")) {
+        Some((_m, _res, arg)) => format!("{head}/{}", cat_shape(arg)),
+        None => head,
+    }
+}
+
+/// The head constructor of a category — `cat_n`, `cat_np`, `fwd`, `bwd`, … — as a coarse
+/// "what slot could this fill" key (D69 §7g).
+pub(super) fn cat_shape(cat: &Exp) -> String {
+    let mut head = cat;
+    while let Exp::App(f, _) = head {
+        head = f;
+    }
+    match head {
+        Exp::Const(iri, _) => iri.local_name().to_string(),
+        Exp::InductiveCtor(_, n, _) => n.clone(),
+        Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+            i.as_str().rsplit(':').next().unwrap_or("?").to_string()
+        }
+        other => format!("{other:?}").chars().take(16).collect(),
+    }
+}
+
+pub(super) fn sense_cap_key(
+    e: &LexEntry,
+    ranks: Option<&BTreeMap<String, u32>>,
+) -> (bool, u32, u32) {
+    let ctx = e
+        .sense
+        .as_ref()
+        .and_then(|s| ranks.and_then(|m| m.get(s).copied()));
+    (ctx.is_none(), ctx.unwrap_or(0), e.item.cost().sense_rank)
+}
+
+/// Instantiate a common noun's underspecified `num_any` with the surface number.
+/// Only a `cat_n(T, num_any)` item is refined (to `cat_n(T, <num>)`); verbs,
+/// names, and multiword leaves pass through unchanged. The `lexicon:Num` decl is
+/// reused from the existing `num_any` ctor, so no decl lookup is needed.
+/// Whether an entry's `sense` is a WordNet **noun** sense — `wn:<lemma>.n.<offset>`.
+///
+/// This is the source lexicon's own part-of-speech claim, and it is what distinguishes a word that
+/// IS a common noun from a concept whose nominal name is a terminological artifact. A `umls:<cui>`
+/// sense carries no such claim: the UMLS names a concept, and one of its English names may be
+/// adjectival (`concordant` for C4553529), which is how a nominal entry appears for a surface that
+/// has no noun reading at all.
+fn is_wordnet_noun_sense(sense: Option<&str>) -> bool {
+    is_wordnet_sense_of_pos(sense, "n")
+}
+
+/// Whether `sense` is a WordNet sense key of part of speech `pos` — `wn:<lemma>.<pos>.<offset>`,
+/// the shape the importer's `sense_key` emits.
+fn is_wordnet_sense_of_pos(sense: Option<&str>, pos: &str) -> bool {
+    let Some(rest) = sense.and_then(|s| s.strip_prefix("wn:")) else {
+        return false;
+    };
+    // `wn:variant.n.05840650` → the POS is the component before the offset.
+    let mut parts = rest.rsplit('.');
+    let _offset = parts.next();
+    parts.next() == Some(pos)
+}
+
+/// Whether a category takes a **plural subject on a FINITE clause** — it contains the subject slot
+/// `bwd(cat_s(_, fin), cat_np(_, pl))` at any depth, so it matches an intransitive VP as well as a
+/// transitive verb's `fwd(VP, obj)` and any further-curried frame. A BASE-form VP is
+/// `bwd(cat_s(_, bse), cat_np(_, num_any))` and never matches, which is what keeps the check off
+/// infinitives and participles.
+fn has_plural_finite_subject(cat: &Exp) -> bool {
+    if let Some((_m, res, arg)) = slash_parts(cat, "bwd") {
+        let finite = matches!(is_ctor(res, "cat_s"),
+            Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
+        let plural_subj = matches!(is_ctor(arg, "cat_np"),
+            Some([_, Exp::InductiveCtor(_, n, _)]) if n == "pl");
+        if finite && plural_subj {
+            return true;
+        }
+    }
+    match cat {
+        Exp::InductiveCtor(_, _, args) => args.iter().any(has_plural_finite_subject),
+        _ => false,
+    }
+}
+
+pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
+    if let Exp::InductiveCtor(decl, name, args) = it.cat() {
+        if name == "cat_n" && args.len() == 2 {
+            if let Exp::InductiveCtor(num_decl, n, _) = &args[1] {
+                if n == "num_any" {
+                    let num =
+                        Exp::InductiveCtor(num_decl.clone(), num_name.to_string(), Vec::new());
+                    return Item::from_parts(
+                        Exp::InductiveCtor(decl.clone(), name.clone(), vec![args[0].clone(), num]),
+                        it.sem().clone(),
+                        it.prov(),
+                        it.cost(),
+                    );
+                }
+            }
+        }
+    }
+    it.clone()
+}
+
+/// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate
+/// pre-nominal modifier-coordination slice on its connectives into the conjunct token-runs, so the
+/// caller can re-look-up each "conjunct + head" compound in isolation. `is_conn(t)` holds for a
+/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces, each joined by single
+/// spaces ("colon", "double stranded"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
+/// connectives — a leading / trailing / doubled connective, or a single conjunct, is not a coordination.
+fn split_coord_conjuncts(tokens: &[Token], is_conn: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    let mut conjuncts: Vec<&[Token]> = Vec::new();
+    let mut start = 0;
+    for (k, t) in tokens.iter().enumerate() {
+        if is_conn(t.surface()) {
+            if k == start {
+                return None; // a leading or doubled connective — malformed
+            }
+            conjuncts.push(&tokens[start..k]);
+            start = k + 1;
+        }
+    }
+    if conjuncts.is_empty() || start == tokens.len() {
+        return None; // a single conjunct, or a trailing connective
+    }
+    conjuncts.push(&tokens[start..]);
+    Some(conjuncts.into_iter().map(join_surfaces).collect())
+}
+
+#[cfg(test)]
+mod governed_relational_tests {
+    use super::is_wordnet_noun_sense;
+
+    /// The prune for a governed-relational surface must be keyed on the ENTRY, and the entry's
+    /// `sense` is where the source lexicon states its part of speech.
+    ///
+    /// Both cases below are the measured ones. `concordant` is why the prune exists: its only
+    /// nominal is `umls:C4553529`, a terminological name for a concept whose English realisation is
+    /// adjectival, and nominalising it strands the `with`-complement and yields
+    /// `is_a(classification, Concordance)` — a pinned `invalid` row. `variant` is why the prune was
+    /// too broad: it governs «in» AND has four independent WordNet noun senses, so dropping every
+    /// nominal on the surface made «the variant» unparseable — in a system whose subject is variants.
+    /// `patient` («with») and `dependent` («on»/«upon») were affected the same way.
+    #[test]
+    fn only_a_wordnet_noun_sense_survives_the_governed_relational_prune() {
+        // Kept: WordNet asserts the lemma is a common noun.
+        assert!(is_wordnet_noun_sense(Some("wn:variant.n.05840650")));
+        assert!(is_wordnet_noun_sense(Some("wn:patient.n.10405694")));
+        assert!(is_wordnet_noun_sense(Some("wn:dependent.n.10004804")));
+        // Dropped: a UMLS concept name carries no part-of-speech claim, and `concordant` has no
+        // WordNet noun sense on the surface at all.
+        assert!(!is_wordnet_noun_sense(Some("umls:C4553529")));
+        assert!(!is_wordnet_noun_sense(Some("umls:C0030705")));
+        // Dropped: the adjectival sense of the very same lemma.
+        assert!(!is_wordnet_noun_sense(Some("wn:variant.a.02505415")));
+        assert!(!is_wordnet_noun_sense(Some("wn:concordant.a.00577122")));
+        // Absent or malformed senses claim nothing.
+        assert!(!is_wordnet_noun_sense(None));
+        assert!(!is_wordnet_noun_sense(Some("wn:variant")));
+        assert!(!is_wordnet_noun_sense(Some("")));
+    }
+}
+
+#[cfg(test)]
+mod rnr_tests {
+    use super::split_coord_conjuncts;
+    use crate::dcg::preprocess::tokenize;
+    use crate::dcg::quantity::ProseUnits;
+
+    // The preprocessor makes the comma a token of its own; connectives are `,` / `and` / `or`.
+    fn is_conn(t: &str) -> bool {
+        matches!(t, "," | "and" | "or")
+    }
+
+    fn split(s: &str) -> Option<Vec<String>> {
+        split_coord_conjuncts(&tokenize(s, &ProseUnits::none()), is_conn)
+    }
+
+    #[test]
+    fn splits_a_four_way_comma_list() {
+        assert_eq!(
+            split("colon, gastric, endometrial and ovarian"),
+            Some(vec![
+                "colon".into(),
+                "gastric".into(),
+                "endometrial".into(),
+                "ovarian".into()
+            ])
+        );
+    }
+
+    #[test]
+    fn or_list_keeps_multitoken_conjuncts() {
+        assert_eq!(
+            split("insertion or deletion"),
+            Some(vec!["insertion".into(), "deletion".into()])
+        );
+        assert_eq!(
+            split("double stranded or single stranded"),
+            Some(vec!["double stranded".into(), "single stranded".into()])
+        );
+    }
+
+    #[test]
+    fn rejects_non_coordinations() {
+        assert_eq!(split("colon"), None);
+        assert_eq!(split("colon and"), None);
+        assert_eq!(split("and colon"), None);
+        assert_eq!(split("colon and and gastric"), None);
+    }
+}

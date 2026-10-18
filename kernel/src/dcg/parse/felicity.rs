@@ -1,0 +1,322 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//! **The felicity gate** — the kernel as the oracle (D62 §2 stage 5).
+//!
+//! A full-span parse is only a *candidate*: the composition rules built a term from the categories, but
+//! nothing yet says the assembled sem is well-typed. This stage decides. It evaluates the sem (NbE),
+//! reads back the normal form, and `check`s it against the type the category denotes (`⟦cat⟧`) — so a
+//! parse is admitted iff the KERNEL types it. Nothing else in the pipeline is trusted to judge that.
+//!
+//! Two outcomes survive: a CLOSED parse (a hole-free proposition), and an [`OpenParse`] — felicitous,
+//! but still carrying referent holes (a pronoun / possessor), which `super::resolve` then binds. An
+//! infelicitous candidate is simply dropped: an empty forest is a first-class answer, not an error.
+
+use super::*;
+
+impl Parser {
+    /// Normalize `it.sem()` (NbE β-reduction → a normal form) and keep the item —
+    /// carrying the reduced sem — only if the kernel confirms it **inhabits `⟦cat⟧`**:
+    /// `Prop` for a declarative `S`, `T → Prop` for a wh-question `Q(T)`. Uses
+    /// check-mode (not `check_infer`) so a wh-question's answer-property *lambda* —
+    /// which `check_infer` cannot synthesize — is checked against its expected Π/→.
+    pub(super) fn reduced_felicitous(&self, it: &Item) -> Option<Item> {
+        let env = self.grammar.env();
+        let expected = denote_cat(it.cat()).ok()?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &env).ok()?;
+        let nf = felicity_readback(&eval_env(it.sem(), &Rho::Nil, &env).ok()?)?;
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+        check(&mut ctx, &nf, &expected_val).ok()?;
+        Some(it.with_sem(nf))
+    }
+
+    /// Build-then-subsume (D3, `docs/notes/d63-nominal-modification-normal-form.md` §8; Eisner 1996's
+    /// exact restricted-grammar fallback): drop a closed reading whose sem is **definitionally equal**
+    /// to one already kept. [`Self::reduced_felicitous`] / [`Self::classify_felicitous`] have already
+    /// normalized every sem to its NbE normal form, so equal *meaning* is now equal *structure* — this
+    /// collapses spurious ambiguity (different derivations, one reading) and, being an equality, **never
+    /// drops a distinct reading** (the rare luxury the typed kernel affords). Uses structural `Exp`
+    /// equality on the FULL IRIs — not the lossy [`super::super::pretty_term`], which shortens an IRI to its
+    /// local segment and could false-merge two distinct senses. O(n²) over the pre-cap forest, which the
+    /// felicity gate has already bounded to the classify-candidate count.
+    pub(super) fn subsume_duplicates(forest: &mut Vec<Item>) {
+        let mut out: Vec<Item> = Vec::with_capacity(forest.len());
+        for it in forest.drain(..) {
+            if !out
+                .iter()
+                .any(|k| k.cat() == it.cat() && k.sem() == it.sem())
+            {
+                out.push(it);
+            }
+        }
+        *forest = out;
+    }
+
+    /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one (D64), or reject it.
+    /// Generalizes [`Self::reduced_felicitous`] to hole-bearing sems: at seed time each hole is a fresh
+    /// free variable, so eval binds it to a generic neutral (else Pure `eval` errors `UnboundVariable`)
+    /// to reach the normal form. For an OPEN parse the normal form's holes are then ABSTRACTED into a
+    /// closed function `λ(hᵢ:Tᵢ). nf`, checked against `Π(hᵢ:Tᵢ). ⟦cat⟧` (see [`OpenParse`]) — the same
+    /// verification as a Γ-bound `nf`, but now the sem is a self-contained term and resolution is
+    /// application. `hole_specs` carries every candidate hole `(base name, type, kind)`; a candidate
+    /// mentions only the subset it actually carries — currently `EntityRef` holes (`Entity`, in argument
+    /// position: a pronoun/possessor referent → D64). `Neut::Gen(0, base)` reads back as `Var("{base}0")`,
+    /// so the binder + reported hole name use that readback form. With no holes present this is exactly
+    /// `reduced_felicitous` — the closed path is unchanged.
+    pub(super) fn classify_felicitous(
+        &self,
+        it: &Item,
+        hole_specs: &[(String, Exp, HoleKind)],
+    ) -> Option<FelicitousOutcome> {
+        // Holes carried by this parse (tested on the raw, pre-reduction sem).
+        let present: Vec<&(String, Exp, HoleKind)> = hole_specs
+            .iter()
+            .filter(|(base, _, _)| exp_mentions_var(it.sem(), base))
+            .collect();
+        let env = self.grammar.env();
+        let expected = denote_cat(it.cat()).ok()?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &env).ok()?;
+        // Evaluate the assembled sem with each freshened hole base bound to a generic neutral
+        // (else Pure eval errors on the free var). `Neut::Gen(0, base)` reads back as
+        // `Var("{base}0")`, so the holes in the normal form carry that suffixed name.
+        let mut eval_rho = Rho::Nil;
+        for (base, _, _) in &present {
+            eval_rho =
+                eval_rho.extend(Patt::Var(base.clone()), Val::Nt(Neut::Gen(0, base.clone())));
+        }
+        // STEP-TIMING instrumentation (set `EIGENIUS_PARSE_DEBUG=1`): each step is flushed BEFORE
+        // it runs, so the last line printed before an OOM/SIGKILL names the exploding step
+        // (eval / readback / check) — the felicity gate is the witnessed full-lexicon blow-up site.
+        let dbg = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
+        if dbg {
+            eprintln!("    [felicity] eval start");
+        }
+        let evaled = eval_env(it.sem(), &eval_rho, &env).ok()?;
+        if dbg {
+            eprintln!("    [felicity] readback start");
+        }
+        let nf = felicity_readback(&evaled)?;
+        // Demonstrative holes (D64, `d64-demonstratives-as-holes.md` §2): freshen every
+        // `lexicon:anaphor_of(A)` application in the NORMAL FORM — β-reduction has made the
+        // restrictor `A` concrete here, which is why these holes cannot be seeded like the
+        // Entity-typed pronoun holes (the determiner hasn't met its noun at seed time). Each
+        // occurrence becomes a fresh variable carried at the RESTRICTOR type, so the resolution
+        // re-gate vetoes a type-wrong antecedent.
+        let (nf, dem_holes) = super::super::holes::freshen_anaphor_of(&nf);
+        // The holes carried by this parse — each a typed parameter (seed holes readback-named
+        // `{base}0`; demonstrative holes named by the gate's traversal).
+        let mut infos: Vec<HoleInfo> = present
+            .iter()
+            .map(|(base, ty_exp, kind)| HoleInfo {
+                var: format!("{base}0"),
+                ty: (*ty_exp).clone(),
+                kind: (*kind).clone(),
+                count: None,
+            })
+            .collect();
+        infos.extend(dem_holes.into_iter().map(|h| HoleInfo {
+            var: h.var,
+            ty: h.ty,
+            kind: HoleKind::EntityRef,
+            count: h.count,
+        }));
+        if dbg {
+            eprintln!("    [felicity] check start");
+        }
+        if infos.is_empty() {
+            // CLOSED: `nf` is a hole-free `Prop`; check it directly against ⟦cat⟧.
+            let mut ctx =
+                CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+            if let Err(e) = check(&mut ctx, &nf, &expected_val) {
+                // `EIGENIUS_TRACE_GATE=1` — WHY a full-span candidate was refused. The gate is the
+                // last stage, so a silent `.ok()?` here turns any type error into an unexplained
+                // grammar-gap; recovering the reason otherwise means bisecting the derivation by hand.
+                if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
+                    eprintln!("  !! GATE REFUSED prov={:?} err={e:?}", it.prov());
+                    if let Some(w) = conn_over_function(&nf) {
+                        eprintln!("     {w}");
+                    }
+                }
+                return None;
+            }
+            return Some(FelicitousOutcome::Closed(it.with_sem(nf)));
+        }
+        // OPEN (D64): ABSTRACT each hole as a typed parameter, so the sem is a CLOSED function
+        // `λ(h₀:T₀)…(hₙ:Tₙ). nf : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧` — a *parametric* proposition, not a term
+        // with free variables. Resolution is then plain APPLICATION ([`Parser::resolve_open`]). Fold
+        // innermost-first so `holes[0]` is the OUTERMOST binder (the application order). The gate checks
+        // the abstraction against the Π-type (empty Γ — the binders type the holes), which is the same
+        // verification as the old Γ-bound `nf`, now inside the type theory.
+        let mut abstracted = nf;
+        let mut pi_ty = expected;
+        for info in infos.iter().rev() {
+            abstracted = Exp::Lam(Patt::Var(info.var.clone()), Box::new(abstracted));
+            pi_ty = Exp::Pi(
+                Patt::Var(info.var.clone()),
+                Box::new(info.ty.clone()),
+                Box::new(pi_ty),
+            );
+        }
+        let pi_val = eval_env(&pi_ty, &Rho::Nil, &env).ok()?;
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+        check(&mut ctx, &abstracted, &pi_val).ok()?;
+        let item = it.with_sem(abstracted);
+        Some(FelicitousOutcome::Open(OpenParse { item, holes: infos }))
+    }
+}
+
+/// What a hole dispatches to once resolved (the carrier's resolver tag — D64). Currently the single
+/// `EntityRef` (pronoun/possessive referents → the D64 anaphora resolver), an *internal-resolution*
+/// hole. (The `Quantification` variant — a bare plural's deferred determiner — was removed with the
+/// kind-predication reshape Phase B, since bare plural/mass now commit to `kind_of(t)`; `ProofObligation`
+/// for factive presuppositions is a planned future arm.) The carrier types each hole per its kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HoleKind {
+    /// An unresolved entity referent, resolved by APPLYING a chain antecedent to its parameter
+    /// and re-gating. First-order, in argument position. Typed by its SOURCE: `Entity` for a
+    /// pronoun / possessor (seed-time freshening), the RESTRICTOR class for a demonstrative
+    /// (`anaphor_of(A)`, felicity-time freshening — "these findings" resolves only to findings).
+    EntityRef,
+}
+
+/// One typed parameter of an [`OpenParse`]'s abstraction: the binder name (`var`) standing for an
+/// unresolved referent, the EigenTT type it must inhabit (Slice 1: `Entity`), its resolver
+/// [`HoleKind`], and the count a numeral after a demonstrative states (`these two genetic events`,
+/// D95 slice 7d) — resolution vetoes an antecedent of another size. A `Proposer` consumes it (to
+/// filter/rank antecedents); [`Parser::resolve_open`] applies the chosen antecedent to it.
+#[derive(Clone, Debug)]
+pub struct HoleInfo {
+    pub var: String,
+    pub ty: Exp,
+    pub kind: HoleKind,
+    /// The referent's size, a `Quantity(u"1")` term; `None` when no numeral states it.
+    pub count: Option<Exp>,
+}
+
+/// An **open** parse (D64): a felicitous full-span `S` whose sem is a PARAMETRIC proposition —
+/// `item.sem()` is the closed function `λ(h₀:T₀)…(hₙ:Tₙ). body : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧`, abstracting
+/// each unresolved referent as a typed parameter (`holes[0]` = the outermost binder). Each [`HoleInfo`]
+/// names one such parameter (type + resolver [`HoleKind`]); [`Parser::resolve_open`] closes the parse
+/// by APPLYING a chain antecedent to each parameter and re-gating. The sem is a well-typed EigenTT term
+/// — just a function, not yet a `Prop`; it becomes a `Prop` once the parameters are applied.
+#[derive(Clone)]
+pub struct OpenParse {
+    pub item: Item,
+    pub holes: Vec<HoleInfo>,
+}
+
+impl OpenParse {
+    /// The open parse's **typed skeleton**: `λ(h₀ : ⌈T₀⌉)…. ⌈body⌉`, each piece sense-erased by
+    /// the ONE erasure (`crate::dcg::skeleton`). The plain `skeleton_of(item.sem())` prints the
+    /// untyped λ-chain — but a demonstrative NP's internal restrictor structure lives in the
+    /// hole's TYPE (`Exp::Lam` binders are untyped; the type is carried by [`HoleInfo`] and the
+    /// Π the gate checks), so the untyped form cannot discriminate readings that differ only
+    /// inside the NP ("data sets **for genes that…**" nested vs not —
+    /// `d64-demonstratives-as-holes.md` §5a). Pins and the adjudication ledger key OPEN readings
+    /// on THIS form.
+    pub fn skeleton(&self) -> String {
+        use crate::dcg::pretty::pretty_term;
+        use crate::dcg::skeleton::erase_senses;
+        // Peel exactly the holes' λ-binders off the sem; the binder names are the hole vars.
+        let mut body = self.item.sem();
+        for _ in &self.holes {
+            match body {
+                Exp::Lam(_, b) => body = b.as_ref(),
+                _ => break, // malformed carrier — fall through with what remains
+            }
+        }
+        // ONE raw string, ONE erasure pass: `erase_senses` fuses sense-erasure with hole-name
+        // α-normalization, so binder names (first appearance, in type position) and their body
+        // occurrences must go through the same pass to co-normalize.
+        let mut raw = String::new();
+        for h in &self.holes {
+            // A counted hole shows its count, which `pretty_term` prints as `<term>`.
+            match h.count.as_ref().map(|q| {
+                super::super::holes::count_value(q)
+                    .map_or_else(|| pretty_term(q), |n| n.to_string())
+            }) {
+                Some(n) => raw.push_str(&format!("λ({} : {} ×{n}). ", h.var, pretty_term(&h.ty))),
+                None => raw.push_str(&format!("λ({} : {}). ", h.var, pretty_term(&h.ty))),
+            }
+        }
+        raw.push_str(&pretty_term(body));
+        erase_senses(&raw)
+    }
+}
+
+/// The outcome of classifying a full-span candidate (see [`Parser::classify_felicitous`]).
+pub(super) enum FelicitousOutcome {
+    Closed(Item),
+    Open(OpenParse),
+}
+
+/// Readback for the **felicity oracle**. The gate evaluates UNTRUSTED candidate sems off the chart,
+/// and a spurious derivation can produce a stuck application (e.g. a resource applied as a function —
+/// witnessed for a named-individual subject under do-support/modal + a PP). `try_readback_val`
+/// returns that as `Err` rather than panicking (`readback_val` asserts well-typedness and would
+/// panic), so such a candidate is simply **not felicitous** — reject it (`None`). This is the
+/// readback half of the fallibility `eval` already has; it replaced an earlier `catch_unwind` guard
+/// that turned the panic into a rejection but still printed to stderr.
+fn felicity_readback(val: &Val) -> Option<Exp> {
+    try_readback_val(0, val).ok()
+}
+
+/// A complete clause root must be **finite**: `cat_s(_, fin | fin_any)`. A base /
+/// infinitival clause (`cat_s(_, bse)` — the VP an auxiliary selects) is never a
+/// standalone sentence (D63 §8.5, Slice 5a). Non-`cat_s` categories are not clauses.
+pub(super) fn is_finite_clause(cat: &Exp) -> bool {
+    match is_ctor(cat, "cat_s") {
+        Some([_mood, fin]) => {
+            matches!(fin, Exp::InductiveCtor(_, n, _) if n == "fin" || n == "fin_any")
+        }
+        _ => false,
+    }
+}
+
+/// Find a **connective applied to a function** in a NORMALIZED sem — the (B) defect.
+///
+/// `logic:And`/`logic:Or` are declared `(P : Prop, Q : Prop) : Prop`, so an argument that is an
+/// abstraction is ill-typed and can never reduce to a `Prop`.
+///
+/// This runs on `nf`, at the gate, because a CONSTRUCTION-TIME test cannot find it: every DCG site
+/// builds the connective over `Exp::App(…)` terms and the λ only surfaces after β-normalization.
+/// Instrumenting `generalized_coord`, `fold_conn` and `conjoin_canonical` for a syntactic
+/// `Exp::Lam` argument gave 0 hits across the whole page — cap-only and under replay — for exactly
+/// that reason. Reports the connective, the argument index and the binder, which with `it.prov()`
+/// beside it names the construction.
+fn conn_over_function(e: &Exp) -> Option<String> {
+    if let Some((iri, _, args)) = e.as_const_spine() {
+        if matches!(
+            iri.as_str(),
+            "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"
+        ) {
+            for (i, a) in args.iter().enumerate() {
+                if let Exp::Lam(p, body) = a {
+                    return Some(format!(
+                        "CONN-OVER-FUNCTION: {}(arg#{i}) is λ{p:?}. {}",
+                        iri.local_name(),
+                        match body.as_ref() {
+                            Exp::App(..) => "App(…)",
+                            Exp::Lam(..) => "λ…",
+                            Exp::Const(head, _) => head.local_name(),
+                            _ => "…",
+                        }
+                    ));
+                }
+            }
+        }
+    }
+    Parser::sem_subterms(e)
+        .into_iter()
+        .find_map(conn_over_function)
+}

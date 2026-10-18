@@ -1,0 +1,92 @@
+{
+  "_comment": "Invented registry records, one per conversion rule: the converter's own fixture, independent of the UAB package. Genes, transcripts and cases are fictitious.",
+  "cases": [
+    {
+      "Case ID": "FIX-01",
+      "Year of Birth": 2020,
+      "Gender": ["Male"],
+      "Consented to Consultations in Precision Medicine Study": true,
+      "Consented to genomic data sharing": true,
+      "Case Created Timestamp": "2026-03-01",
+      "Diagnosis": "A fixture diagnosis.",
+      "Case History": "A fixture history.\nSecond line, with \"quotes\".",
+      "Participant/Family Goal": "A fixture goal.",
+      "Medical Records": "<link>",
+      "Case Notes": "<link>",
+      "linked_records": {
+        "HP Terms": [
+          { "Phenotype": "Polyuria", "HP ID": "HP:0000103" },
+          { "Phenotype": "Abnormal EEG", "HP ID": "HP:0002353" },
+          { "Phenotype": "Hypernatremic dehydration", "HP ID": "HP:0004918" }
+        ],
+        "Gene Info": [
+          {
+            "Gene Name": "FIXA", "HGNC ID": "HGNC:900001", "RefSeq": "NM_900001.1",
+            "Genotype": "c.131T>C", "Protein Sequence Change": "p.Leu44Pro",
+            "HGVS Notation": "NM_900001.1:c.131T>C", "Zygosity": "Hemizygous",
+            "ACMG Classification": "Likely Pathogenic",
+            "Variant Impact": "Amorphic (Complete Loss of Function)",
+            "Confirmed de novo": true, "Notes": "Fixture notes."
+          },
+          {
+            "Gene Name": "FIXB", "HGNC ID": "HGNC:900002", "RefSeq": "NM_900002.2",
+            "Genotype": null, "Protein Sequence Change": "p.Gly88Ser", "HGVS Notation": null,
+            "Zygosity": "Heterozygous", "ACMG Classification": "VUS", "Variant Impact": "Unknown",
+            "Confirmed de novo": false
+          },
+          {
+            "Gene Name": "FIXC", "HGNC ID": "HGNC:900003", "RefSeq": "NM_900003.5",
+            "Genotype": "c.622G>A", "Protein Sequence Change": "p.Gly208Ser",
+            "HGVS Notation": "NM_900003.5:c.622G>A", "Zygosity": "Compound Heterozygous",
+            "ACMG Classification": "Pathogenic",
+            "Variant Impact": "Hypomorphic (Partial Loss of Function)", "Confirmed de novo": false
+          },
+          {
+            "Gene Name": "FIXC", "HGNC ID": "HGNC:900003", "RefSeq": "NM_900003.5",
+            "Genotype": "c.1105del", "Protein Sequence Change": "p.Ser369Leufs*12",
+            "HGVS Notation": "NM_900003.5:c.1105del", "Zygosity": "Compound Heterozygous",
+            "ACMG Classification": "Pathogenic",
+            "Variant Impact": "Amorphic (Complete Loss of Function)", "Confirmed de novo": false
+          },
+          {
+            "Gene Name": "FIXD", "HGNC ID": "HGNC:900004", "RefSeq": "NM_900004.1",
+            "Genotype": "c.10A>G", "Protein Sequence Change": null,
+            "HGVS Notation": "NM_900004.1:c.11A>G", "Zygosity": "Heterozygous"
+          }
+        ]
+      }
+    },
+    {
+      "Case ID": "FIX-02",
+      "Year of Birth": 1990,
+      "Gender": ["Female"],
+      "Consented to Consultations in Precision Medicine Study": true,
+      "Consented to genomic data sharing": false,
+      "Case Created Timestamp": "2026-03-02",
+      "Medical Records": "<link>",
+      "linked_records": {
+        "HP Terms": [ { "Phenotype": "Polyuria", "HP ID": "HP:0000103" } ],
+        "Gene Info": [
+          {
+            "Gene Name": "FIXE", "HGNC ID": "HGNC:900005", "RefSeq": "NM_900005.1",
+            "Genotype": "c.5C>T", "HGVS Notation": "NM_900005.1:c.5C>T", "Zygosity": "Homozygous"
+          }
+        ]
+      }
+    },
+    {
+      "Case ID": "FIX-03",
+      "Gender": ["Male"],
+      "Consented to Consultations in Precision Medicine Study": false,
+      "Case Created Timestamp": "2026-03-03",
+      "linked_records": { "HP Terms": [ { "Phenotype": "Polyuria", "HP ID": "HP:0000103" } ] }
+    },
+    {
+      "Case ID": "FIX-04",
+      "Gender": ["Family"],
+      "Consented to Consultations in Precision Medicine Study": true,
+      "Case Created Timestamp": "2026-03-04",
+      "linked_records": { "HP Terms": [ { "Phenotype": "Polyuria", "HP ID": "HP:0000103" } ] }
+    }
+  ]
+}

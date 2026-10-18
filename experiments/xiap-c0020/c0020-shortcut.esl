@@ -1,0 +1,27 @@
+// The encoding rung 1 started with, kept so the refusal is checked rather than asserted.
+//
+// `kind: observed` taken at face value: put the certificate's VALUE on the export and cite the
+// export for it. The export holds `exome.ac_hemi = 2` and `genome.ac_hemi = 2`; the 4 is computed
+// by `cert-gnomad.py`. The kernel refuses, because the witness it synthesizes from
+// `xiap:gene_sweep_trace` carries the proposition the export actually states, and that is not this
+// one. The script's arithmetic has to be declared and applied — which is what `observation.esl`
+// §4–§5 do.
+
+namespace core    = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace units   = "urn:eigenius:units";
+namespace justification = "urn:eigenius:justification";
+namespace xiap    = "urn:eigenius:uab:xiap";
+
+resource xiap:concl_c0020_shortcut : justification:Conclusion {
+    core:description = "HemizygousMaleCount(c.1138A>G, 4) cited straight off the export. Refused: the export does not state it.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(observed(
+                   "urn:eigenius:uab:xiap:gene_sweep_response",
+                   xiap:HemizygousMaleCount(xiap:c_1138A_G, units:mk_quantity(r"4", 0)),
+                   ())),
+               type_expr(justification:Grounds(
+                   xiap:HemizygousMaleCount(xiap:c_1138A_G, units:mk_quantity(r"4", 0)) )) );
+}

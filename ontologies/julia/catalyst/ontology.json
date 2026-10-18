@@ -1,0 +1,236 @@
+[
+  {
+    "@id": "urn:eigenius:julia:catalyst:ReactionNetwork",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ReactionNetwork",
+    "urn:eigenius:core:description": "A Catalyst.jl `ReactionSystem` as a typed resource. v1 carries the network as Julia source for the `@reaction_network begin ... end` macro. The institution canonicalises species ordering via `species(rn)` for stable indexing of conservation-law coefficients and steady-state concentration arrays. v2 will lift to a typed reaction-list payload mirroring `Reaction` shape.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network_source",
+      "urn:eigenius:julia:catalyst:species_declared",
+      "urn:eigenius:julia:catalyst:parameters_declared"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:network_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "network_source",
+    "urn:eigenius:core:description": "Julia source for the `@reaction_network begin ... end` macro body, e.g. `\"@reaction_network begin\\n  k_on, C + K --> CK\\n  k_off, CK --> C + K\\nend\"`. The institution evaluates this in a scope where `Catalyst` is imported.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:ReactionNetwork"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:species_declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "species_declared",
+    "urn:eigenius:core:description": "Names of the network's species, in the canonical order Catalyst's `species(rn)` returns. Used to align conservation-law coefficient vectors and steady-state concentration maps.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:ReactionNetwork"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:parameters_declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameters_declared",
+    "urn:eigenius:core:description": "Names of the network's parameters, in the canonical order `parameters(rn)` returns.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:ReactionNetwork"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ConservationLaw",
+    "urn:eigenius:core:description": "A linear invariant `coefficients · species_concentrations = constant` that is conserved by the network's dynamics. Coefficients align with `network.species_declared` ordering. AutoOnLoad re-runs `Catalyst.conservationlaws(rn)` (returns `Matrix{Int64}`) and checks the claimed coefficient vector lies in the row span of the conservation matrix.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:coefficients"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:network",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "network",
+    "urn:eigenius:core:description": "The ReactionNetwork this resource is about.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:catalyst:ReactionNetwork"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:catalyst:ConservationLaw",
+      "urn:eigenius:julia:catalyst:SteadyState",
+      "urn:eigenius:julia:catalyst:DeficiencyZero",
+      "urn:eigenius:julia:catalyst:DeficiencyOne",
+      "urn:eigenius:julia:catalyst:WeaklyReversible",
+      "urn:eigenius:julia:catalyst:ComplexBalanced",
+      "urn:eigenius:julia:catalyst:CatalystSteadyStateInput",
+      "urn:eigenius:julia:catalyst:CatalystDeficiencyClaim"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:coefficients",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "coefficients",
+    "urn:eigenius:core:description": "Integer coefficient vector indexed by `network.species_declared`. A row in the network's left-nullspace conservation matrix.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:ConservationLaw"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:SteadyState",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SteadyState",
+    "urn:eigenius:core:description": "Claims that under `parameters_kv` and total-conservation constants, the species reach the concentrations in `concentrations_kv` at steady state. AutoOnLoad re-solves the steady-state system at the given parameters and confirms the claimed concentrations within numerical tolerance. Verdict::Undecidable on solver non-convergence.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:parameters_kv",
+      "urn:eigenius:julia:catalyst:concentrations_kv"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:parameters_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameters_kv",
+    "urn:eigenius:core:description": "JSON map from parameter name to numeric value. Keys must be a subset of `network.parameters_declared`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:catalyst:SteadyState",
+      "urn:eigenius:julia:catalyst:CatalystSteadyStateInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:concentrations_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "concentrations_kv",
+    "urn:eigenius:core:description": "JSON map from species name to concentration. Keys must be a subset of `network.species_declared`. For SteadyState used to express both the total-conservation constants needed to pick a fibre (e.g. Ctot, Ktot) and the resulting per-species concentrations at the fixed point.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:catalyst:SteadyState",
+      "urn:eigenius:julia:catalyst:CatalystSteadyStateInput"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:DeficiencyZero",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DeficiencyZero",
+    "urn:eigenius:core:description": "Claims `Catalyst.deficiency(network) == 0`. The institution implements the Feinberg deficiency formula via Catalyst's `deficiency`. Holds on equality. Convenience wrapper over the more general `qc_check_deficiency` (Decidable).",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:network"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:DeficiencyOne",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DeficiencyOne",
+    "urn:eigenius:core:description": "Claims `Catalyst.deficiency(network) == 1`. AutoOnLoad-validated.",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:network"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:WeaklyReversible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "WeaklyReversible",
+    "urn:eigenius:core:description": "Claims `Catalyst.isweaklyreversible(network)`. AutoOnLoad-validated.",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:network"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:ComplexBalanced",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ComplexBalanced",
+    "urn:eigenius:core:description": "Claims `Catalyst.iscomplexbalanced(network)`. AutoOnLoad-validated.",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:network"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "CatalystToOdeInput",
+    "urn:eigenius:core:description": "Source-payload class for the Catalyst→DiffEq Comorphism. Bundles a ReactionNetwork with the initial-condition map (`concentrations_kv`), parameter assignment (`parameters_kv`), and time span. The transformation Component runs `complete(flatten(rn))` then `ODEProblem(rn, [species_sym => v, …], (tspan_start, tspan_end), [param_sym => v, …])` — the canonical Catalyst-16 map-form path verified in `julia/research/catalyst-ode-probe.md`. v1 does NOT call `structural_simplify`; species ordering follows `network.species_declared`.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:parameters_kv",
+      "urn:eigenius:julia:catalyst:concentrations_kv",
+      "urn:eigenius:julia:catalyst:tspan_start",
+      "urn:eigenius:julia:catalyst:tspan_end"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:tspan_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_start",
+    "urn:eigenius:core:description": "Start of integration interval for the produced OdeProblem.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:CatalystToOdeInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:tspan_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_end",
+    "urn:eigenius:core:description": "End of integration interval for the produced OdeProblem.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:CatalystToOdeInput"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:CatalystSteadyStateInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "CatalystSteadyStateInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_compute_steady_states: a network and a parameter assignment plus total-conservation constants in `concentrations_kv` (`Ctot`, `Ktot`, …).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:parameters_kv",
+      "urn:eigenius:julia:catalyst:concentrations_kv"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:SteadyStateSet",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SteadyStateSet",
+    "urn:eigenius:core:description": "OnDemand result class for qc_compute_steady_states: a list of SteadyState resources (multiple steady states are possible for non-convex networks; HomotopyContinuation enumerates them).",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:steady_states"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:steady_states",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "steady_states",
+    "urn:eigenius:core:description": "Embedded SteadyState resources.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:catalyst:SteadyState"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:SteadyStateSet"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:CatalystDeficiencyClaim",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "CatalystDeficiencyClaim",
+    "urn:eigenius:core:description": "OnDemand + Decidable input class for qc_check_deficiency: claims `deficiency(network) == expected_deficiency`. Verdict::Holds on equality, Fails on inequality.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:expected_deficiency"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:expected_deficiency",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expected_deficiency",
+    "urn:eigenius:core:description": "Claimed deficiency value to compare against `Catalyst.deficiency(network)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:CatalystDeficiencyClaim"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:ConservationLawSet",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ConservationLawSet",
+    "urn:eigenius:core:description": "OnDemand result class for qc_extract_invariants: the full conservation-law matrix as a list of ConservationLaw rows.",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:catalyst:laws"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:laws",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "laws",
+    "urn:eigenius:core:description": "Embedded ConservationLaw resources, one per row of the conservation matrix.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:catalyst:ConservationLaw"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:ConservationLawSet"]
+  }
+]

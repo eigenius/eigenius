@@ -1,0 +1,783 @@
+/* =====================================================================
+ * Eigenius — site palette derived from the logo
+ *
+ * The logo is a metallic steel-blue logomark on a dark navy charcoal
+ * background. The site picks up the same colour vocabulary:
+ *   - Steel-blue as the brand accent (links, focus, primary actions)
+ *   - Dark navy as the dark-mode surface
+ *   - A muted cool-grey ramp for borders, dividers, and body text
+ *
+ * The four warrant categories stay distinct (they are the conceptual
+ * spine of the framework, used in figures and in the papers), but
+ * the Observed blue is tuned slightly toward the brand steel-blue so
+ * the figures feel of-a-piece with the rest of the site.
+ * ===================================================================== */
+
+:root {
+  /* ---------- Brand ----------
+   * Eigenius steel-blue: an analytical, slightly industrial blue
+   * that picks up the metallic logomark. Used for accents, links,
+   * focus rings. */
+  --eigenius-brand:       #5C7A9E;    /* core brand */
+  --eigenius-brand-bright:#7B9DC0;    /* hover / hi-contrast */
+  --eigenius-brand-deep:  #3A4F6B;    /* pressed / shadow */
+  --eigenius-brand-bg:    #5C7A9E18;  /* subtle wash */
+
+  /* ---------- Navy ramp ----------
+   * Pulled from the logo's gradient background, used as the dark-mode
+   * surface system. */
+  --eigenius-navy-1: #14181F;  /* deepest */
+  --eigenius-navy-2: #1A1F2A;  /* page bg */
+  --eigenius-navy-3: #232938;  /* surface 1 */
+  --eigenius-navy-4: #2D3447;  /* surface 2 — sidebars, cards */
+  --eigenius-navy-5: #3A4257;  /* border / divider */
+
+  /* ---------- Cool grey ramp ----------
+   * Used for body text, muted captions, and borders in light mode. */
+  --eigenius-grey-1: #FBFCFD;
+  --eigenius-grey-2: #F1F3F6;
+  --eigenius-grey-3: #E1E5EA;
+  --eigenius-grey-4: #B8BFCA;
+  --eigenius-grey-5: #8A95A5;
+  --eigenius-grey-6: #5A6478;
+  --eigenius-grey-7: #2D3447;
+
+  /* ---------- Warrant categories ----------
+   * These appear in figures, code snippets, and conceptual diagrams.
+   * Tuned to read well on both dark and light surfaces. */
+  --warrant-observed: #3A7CA5;      /* tuned toward the brand */
+  --warrant-derived:  #D98C5F;      /* slightly desaturated amber */
+  --warrant-verified: #2E9D5D;      /* slightly muted green */
+  --warrant-declared: #8B5CB0;      /* tuned slightly cooler purple */
+
+  /* Soft fills for backgrounds inside warrant components. */
+  --warrant-observed-bg: #3A7CA51A;
+  --warrant-derived-bg:  #D98C5F1A;
+  --warrant-verified-bg: #2E9D5D1A;
+  --warrant-declared-bg: #8B5CB01A;
+}
+
+/* =====================================================================
+ * Starlight theme mapping
+ * Starlight reads --sl-color-accent-* for the primary accent. Map
+ * Eigenius brand colours onto the Starlight tokens for both dark and
+ * light modes.
+ * ===================================================================== */
+
+/* Dark mode (Starlight default) */
+:root {
+  --sl-color-accent-low:  var(--eigenius-brand-deep);
+  --sl-color-accent:      var(--eigenius-brand);
+  --sl-color-accent-high: var(--eigenius-brand-bright);
+
+  --sl-color-bg:          var(--eigenius-navy-2);
+  --sl-color-bg-nav:      var(--eigenius-navy-1);
+  --sl-color-bg-sidebar:  var(--eigenius-navy-1);
+  --sl-color-bg-inline-code: var(--eigenius-navy-4);
+
+  --sl-color-text:        var(--eigenius-grey-2);
+  --sl-color-text-accent: var(--eigenius-brand-bright);
+  --sl-color-white:       #FFFFFF;
+  --sl-color-gray-1:      #F8F9FB;
+  --sl-color-gray-2:      var(--eigenius-grey-3);
+  --sl-color-gray-3:      var(--eigenius-grey-4);
+  --sl-color-gray-4:      var(--eigenius-grey-5);
+  --sl-color-gray-5:      var(--eigenius-grey-6);
+  --sl-color-gray-6:      var(--eigenius-navy-4);
+  --sl-color-gray-7:      var(--eigenius-navy-3);
+  --sl-color-black:       var(--eigenius-navy-1);
+
+  --sl-color-hairline:    var(--eigenius-navy-5);
+}
+
+/* Light mode */
+:root[data-theme="light"] {
+  --sl-color-accent-low:  #BCCBDC;
+  --sl-color-accent:      var(--eigenius-brand);
+  --sl-color-accent-high: var(--eigenius-brand-deep);
+
+  --sl-color-bg:          var(--eigenius-grey-1);
+  --sl-color-bg-nav:      #FFFFFF;
+  --sl-color-bg-sidebar:  #FFFFFF;
+  --sl-color-bg-inline-code: var(--eigenius-grey-2);
+
+  --sl-color-text:        var(--eigenius-grey-7);
+  --sl-color-text-accent: var(--eigenius-brand-deep);
+  --sl-color-white:       var(--eigenius-grey-7);
+  --sl-color-gray-1:      var(--eigenius-navy-2);
+  --sl-color-gray-2:      var(--eigenius-grey-7);
+  --sl-color-gray-3:      var(--eigenius-grey-6);
+  --sl-color-gray-4:      var(--eigenius-grey-5);
+  --sl-color-gray-5:      var(--eigenius-grey-4);
+  --sl-color-gray-6:      var(--eigenius-grey-3);
+  --sl-color-gray-7:      var(--eigenius-grey-2);
+  --sl-color-black:       #FFFFFF;
+
+  --sl-color-hairline:    var(--eigenius-grey-3);
+}
+
+/* =====================================================================
+ * Landing-page typography polish
+ * ===================================================================== */
+
+.hero-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.75rem;
+  color: var(--eigenius-grey-5);
+  font-weight: 600;
+}
+
+.hero-copy {
+  max-width: 36ch;
+  line-height: 1.2;
+}
+
+.hero-headline {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.hero-pitch {
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  color: var(--sl-color-gray-3);
+  max-width: 56ch;
+  line-height: 1.5;
+}
+
+/* Shared two-column card grid used by Research's paper-grid block
+   inside an MDX page. Defined here (rather than inline in the MDX)
+   so the MDX parser doesn't try to interpret media-query braces
+   as JSX expressions. */
+.paper-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+@media (max-width: 50rem) {
+  .paper-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =====================================================================
+ * Shared landing-style chrome
+ *
+ * The hand-authored top-level pages — landing, /start/, /concepts/,
+ * /examples/ — share the same body baseline, section frame, CTA
+ * buttons, and audience-grid layout. Centralised here so each page
+ * only carries the styles unique to its own hero and content.
+ * Starlight-rendered docs pages are unaffected (they don't use these
+ * classes).
+ * ===================================================================== */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.5;
+}
+
+.section {
+  padding: 4rem 1.5rem;
+  border-top: 1px solid var(--sl-color-hairline);
+}
+
+.section-tinted {
+  background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
+}
+
+.section-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.section-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--sl-color-text-accent);
+}
+
+.section-title {
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin: 0.4rem 0 1.4rem 0;
+  max-width: 36ch;
+}
+
+.section-prose {
+  font-size: 1.02rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-3);
+  max-width: 56ch;
+}
+
+.section-prose + .section-prose {
+  margin-top: 1rem;
+}
+
+.section-prose a {
+  color: var(--sl-color-text-accent);
+}
+
+.section-footnote {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--sl-color-gray-3);
+  max-width: 56ch;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px dashed var(--sl-color-hairline);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.6rem;
+  flex-wrap: wrap;
+}
+
+.cta {
+  display: inline-block;
+  padding: 0.65rem 1.2rem;
+  border-radius: 0.4rem;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.92rem;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.cta-primary {
+  background: var(--sl-color-accent);
+  color: white;
+  border: 1px solid var(--sl-color-accent);
+}
+.cta-primary:hover {
+  background: var(--sl-color-accent-high);
+  transform: translateY(-1px);
+}
+
+.cta-secondary {
+  color: var(--sl-color-text);
+  border: 1px solid var(--sl-color-hairline);
+  background: transparent;
+}
+.cta-secondary:hover {
+  border-color: var(--sl-color-accent);
+  color: var(--sl-color-text-accent);
+}
+
+.audience-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 60rem) {
+  .audience-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =====================================================================
+ * "Under construction" corner ribbon
+ *
+ * Diagonal banner pinned to the top-right corner of every page,
+ * signalling that the site is still being built. Hooks onto
+ * body::after so it applies to both the hand-authored polished pages
+ * AND the Starlight-rendered docs (both load this stylesheet). Uses
+ * the warrant-derived amber, which is already in the palette, so it
+ * doesn't introduce a new colour. pointer-events: none so it never
+ * blocks clicks on the topnav links underneath.
+ *
+ * The text is split across two lines ("Under" / "construction") via
+ * the CSS `\A` newline escape + `white-space: pre`. Two short lines
+ * keep the ribbon narrow enough that the rotated bounding box stays
+ * inside the viewport corner — the earlier single-line version was
+ * too wide and clipped on both ends.
+ * ===================================================================== */
+body::after {
+  content: "Under construction";
+  white-space: pre;
+  position: fixed;
+  top: 2.2rem;
+  right: -2.6rem;
+  width: 11rem;
+  transform: rotate(45deg);
+  transform-origin: center center;
+  background: var(--warrant-derived);
+  color: #ffffff;
+  padding: 0.4rem 0;
+  text-align: center;
+  font-size: 0.52rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 40rem) {
+  body::after {
+    top: 1rem;
+    right: -2.9rem;
+    width: 10rem;
+    font-size: 0.58rem;
+    padding: 0.32rem 0;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* =====================================================================
+ * Blog — index list and post body
+ *
+ * Uses the shared .section / .section-prose chrome for the page frame;
+ * everything below is specific to post listings and post bodies.
+ * ===================================================================== */
+
+.post-list {
+  list-style: none;
+  margin: 2.5rem 0 0 0;
+  padding: 0;
+}
+
+.post-item {
+  padding: 1.75rem 0;
+  border-top: 1px solid var(--sl-color-hairline);
+}
+
+.post-item:first-child {
+  border-top: none;
+  padding-top: 0.5rem;
+}
+
+.post-entries > * + * {
+  margin-top: 2.5rem;
+}
+
+.post-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.post-date {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eigenius-grey-5);
+}
+
+.post-part,
+.post-draft-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 0.25rem;
+  padding: 0.12rem 0.42rem;
+}
+
+.post-part {
+  color: var(--sl-color-text-accent);
+  background: var(--eigenius-brand-bg);
+}
+
+.post-draft-chip {
+  color: var(--warrant-derived);
+  background: var(--warrant-derived-bg);
+}
+
+/* ---------- Series group on the index ---------- */
+
+.post-series {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.5rem;
+  padding: 1.6rem 1.5rem 0.6rem 1.5rem;
+  background: color-mix(in srgb, var(--sl-color-bg-nav) 40%, transparent);
+}
+
+.post-series-header {
+  margin-bottom: 0.5rem;
+}
+
+.post-series-label {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--sl-color-text-accent);
+}
+
+.post-series-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0.3rem 0 0 0;
+}
+
+.post-series-count {
+  font-size: 0.85rem;
+  color: var(--eigenius-grey-5);
+  margin: 0.25rem 0 0 0;
+}
+
+.post-list-series {
+  counter-reset: none;
+  margin-top: 0.5rem;
+}
+
+.post-title {
+  font-size: clamp(1.25rem, 2.2vw, 1.6rem);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0.45rem 0 0 0;
+}
+
+.post-title a {
+  color: var(--sl-color-text);
+  text-decoration: none;
+}
+
+.post-title a:hover {
+  color: var(--sl-color-text-accent);
+}
+
+.post-excerpt {
+  font-size: 1.02rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-3);
+  max-width: 56ch;
+  margin: 0.6rem 0 0 0;
+}
+
+.post-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0.9rem 0 0 0;
+  padding: 0;
+}
+
+.post-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+  background: var(--eigenius-brand-bg);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.25rem;
+  padding: 0.18rem 0.5rem;
+}
+
+.post-empty {
+  margin-top: 2rem;
+  font-style: italic;
+}
+
+/* ---------- Post body ---------- */
+
+.post-body {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+.post-back {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--sl-color-text-accent);
+  text-decoration: none;
+  margin-bottom: 1.2rem;
+}
+
+.post-back:hover {
+  text-decoration: underline;
+}
+
+.post-headline {
+  font-size: clamp(1.9rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.post-subtitle {
+  font-size: clamp(1.05rem, 1.7vw, 1.25rem);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--sl-color-gray-3);
+  margin: 0.7rem 0 0 0;
+  max-width: 46ch;
+}
+
+.post-meta {
+  font-size: 0.88rem;
+  color: var(--eigenius-grey-5);
+  margin: 0.8rem 0 0 0;
+}
+
+.post-meta-sep {
+  margin: 0 0.45rem;
+  opacity: 0.6;
+}
+
+.post-draft-banner {
+  margin: 1.2rem 0 0 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--warrant-derived);
+  background: var(--warrant-derived-bg);
+  border: 1px solid var(--warrant-derived);
+}
+
+.post-prose {
+  margin-top: 2.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--sl-color-hairline);
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: var(--sl-color-text);
+}
+
+.post-prose h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 2.4rem 0 0.8rem 0;
+}
+
+.post-prose h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 1.9rem 0 0.6rem 0;
+}
+
+.post-prose p,
+.post-prose ul,
+.post-prose ol {
+  margin: 0 0 1.15rem 0;
+}
+
+.post-prose a {
+  color: var(--sl-color-text-accent);
+}
+
+.post-prose code {
+  background: var(--sl-color-bg-inline-code);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.32rem;
+  font-size: 0.92em;
+}
+
+.post-prose pre {
+  background: var(--sl-color-bg-inline-code);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.4rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.post-prose pre code {
+  background: none;
+  padding: 0;
+}
+
+.post-prose blockquote {
+  margin: 1.4rem 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--sl-color-accent);
+  color: var(--sl-color-gray-3);
+}
+
+.post-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.4rem;
+}
+
+.post-prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.post-prose th,
+.post-prose td {
+  border: 1px solid var(--sl-color-hairline);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+}
+
+/* =====================================================================
+ * Featured writing module on the landing page
+ * ===================================================================== */
+
+.featured-parts {
+  list-style: none;
+  counter-reset: none;
+  margin: 1.6rem 0 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+  max-width: 46rem;
+}
+
+.featured-part-link {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.4rem;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.featured-part-link:hover {
+  border-color: var(--sl-color-accent);
+  transform: translateY(-1px);
+}
+
+.featured-part-number {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+  background: var(--eigenius-brand-bg);
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.45rem;
+}
+
+.featured-part-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--sl-color-text);
+  line-height: 1.35;
+}
+
+.featured-post {
+  margin-top: 1.4rem;
+  max-width: 46rem;
+}
+
+.featured-updated {
+  font-size: 0.85rem;
+  color: var(--eigenius-grey-5);
+  margin-top: 1.6rem;
+}
+
+.featured-updated a {
+  color: var(--sl-color-text-accent);
+}
+
+@media (max-width: 40rem) {
+  .featured-part-link {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .featured-part-number {
+    align-self: flex-start;
+  }
+}
+
+/* ---------- Previous / next within a series ---------- */
+
+.post-series-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--sl-color-hairline);
+}
+
+.post-series-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.4rem;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.post-series-link:hover {
+  border-color: var(--sl-color-accent);
+  transform: translateY(-1px);
+}
+
+.post-series-link-next {
+  grid-column: 2;
+  text-align: right;
+}
+
+.post-series-dir {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+}
+
+.post-series-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--sl-color-text);
+  line-height: 1.35;
+}
+
+@media (max-width: 40rem) {
+  .post-series-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .post-series-link-next {
+    grid-column: 1;
+    text-align: left;
+  }
+}

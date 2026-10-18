@@ -1,0 +1,325 @@
+% =============================================================================
+% eigenius_precursors.bib
+%
+% Philosophical, methodological, and historical precursors of the Eigenius
+% approach to applying formal reasoning to science and engineering.
+%
+% These references are not used internally by the system (see eigenius.bib for
+% those, and eigenius_additional.bib for things the system relies on but does
+% not currently cite). Instead, they situate Eigenius within a longer arc of
+% work on:
+%
+%   1. Mathematical Knowledge Management (MKM)
+%   2. Existence proofs that verified knowledge can scale
+%   3. Suppes-style structuralism in the philosophy of science
+%   4. Formal ontologies as a proof-of-concept for adoption in science
+%   5. The reproducibility / open-workflow movement
+%   6. The closest contemporary parallel project (the Underlay)
+%   7. The direct ancestor (Pharos, Microsoft Health Solutions Group)
+%
+% Citation keys are lowercase and topic-suffixed for stability.
+% =============================================================================
+
+
+% -----------------------------------------------------------------------------
+% 1. Mathematical Knowledge Management (MKM)
+%    The closest established research community to Eigenius's stated goal of
+%    representing, processing, and verifying typed scientific knowledge.
+% -----------------------------------------------------------------------------
+
+@inproceedings{farmer2004mkm,
+  author    = {Farmer, William M.},
+  title     = {{MKM}: A New Interdisciplinary Field of Research},
+  booktitle = {Mathematical Knowledge Management, Third International Conference, MKM 2004},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3119},
+  publisher = {Springer},
+  year      = {2004},
+  note      = {Position paper introducing MKM as a coherent research field
+               concerned with the representation, exchange, and reuse of
+               machine-processable mathematical knowledge.},
+}
+
+@inproceedings{carette-farmer2009,
+  author    = {Carette, Jacques and Farmer, William M.},
+  title     = {A Review of Mathematical Knowledge Management},
+  booktitle = {Intelligent Computer Mathematics, MKM 2009},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {5625},
+  publisher = {Springer},
+  year      = {2009},
+  pages     = {233--246},
+  note      = {Survey of the first decade of MKM, framing the open problems
+               (large-scale formalization, library interoperability, knowledge
+               retrieval) that Eigenius addresses for science more broadly.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 2. Existence proofs that verified knowledge can scale
+%    Each of these projects demonstrated that formal verification of large
+%    real-world artifacts is feasible in practice — collectively, the
+%    pre-history that makes Eigenius's program plausible.
+% -----------------------------------------------------------------------------
+
+@inproceedings{mathlib2020,
+  author    = {{The mathlib Community}},
+  title     = {The {Lean} Mathematical Library},
+  booktitle = {Proceedings of the 9th ACM SIGPLAN International Conference on
+               Certified Programs and Proofs (CPP 2020)},
+  publisher = {ACM},
+  year      = {2020},
+  pages     = {367--381},
+  doi       = {10.1145/3372885.3373824},
+  note      = {Description of mathlib, the largest collaboratively-built
+               formalized library of mathematics. Demonstrates that a
+               community-curated, machine-checked library at the scale of
+               undergraduate and research mathematics is achievable.},
+}
+
+@article{hales2017flyspeck,
+  author    = {Hales, Thomas and Adams, Mark and Bauer, Gertrud and
+               Dang, Tat Dat and Harrison, John and Hoang, Le Truong and
+               Kaliszyk, Cezary and Magron, Victor and McLaughlin, Sean and
+               Nguyen, Tat Thang and Nguyen, Quang Truong and Nipkow, Tobias
+               and Obua, Steven and Pleso, Joseph and Rute, Jason and
+               Solovyev, Alexey and Ta, Thi Hoai An and Tran, Nam Trung and
+               Trieu, Thi Diep and Urban, Josef and Vu, Ky and Zumkeller, Roland},
+  title     = {A Formal Proof of the {K}epler Conjecture},
+  journal   = {Forum of Mathematics, Pi},
+  volume    = {5},
+  publisher = {Cambridge University Press},
+  year      = {2017},
+  doi       = {10.1017/fmp.2017.1},
+  note      = {Project Flyspeck: a fully machine-checked formal proof of the
+               Kepler conjecture in HOL Light and Isabelle. A landmark example
+               of formal verification of a non-trivial scientific result.},
+}
+
+@article{leroy2009compcert,
+  author    = {Leroy, Xavier},
+  title     = {Formal Verification of a Realistic Compiler},
+  journal   = {Communications of the ACM},
+  volume    = {52},
+  number    = {7},
+  year      = {2009},
+  pages     = {107--115},
+  doi       = {10.1145/1538788.1538814},
+  note      = {The CompCert C compiler: a production-quality optimizing C
+               compiler proven correct in Coq. Demonstrates that
+               machine-checked correctness is feasible for software systems of
+               industrial complexity.},
+}
+
+@inproceedings{klein2009sel4,
+  author    = {Klein, Gerwin and Elphinstone, Kevin and Heiser, Gernot and
+               Andronick, June and Cock, David and Derrin, Philip and
+               Elkaduwe, Dhammika and Engelhardt, Kai and Kolanski, Rafal and
+               Norrish, Michael and Sewell, Thomas and Tuch, Harvey and
+               Winwood, Simon},
+  title     = {{seL4}: Formal Verification of an {OS} Kernel},
+  booktitle = {Proceedings of the ACM SIGOPS 22nd Symposium on Operating
+               Systems Principles (SOSP '09)},
+  publisher = {ACM},
+  year      = {2009},
+  pages     = {207--220},
+  doi       = {10.1145/1629575.1629596},
+  note      = {End-to-end formal verification of the seL4 microkernel —
+               functional correctness of an OS kernel against a high-level
+               specification. Pre-history for verified systems infrastructure.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 3. Suppes-style structuralism — philosophical precursors of institutions
+%    The view that scientific theories are families of structures (models)
+%    closed under appropriate morphisms, which is essentially the institutional
+%    framing Eigenius adopts for layers and theories.
+% -----------------------------------------------------------------------------
+
+@book{suppes2002,
+  author    = {Suppes, Patrick},
+  title     = {Representation and Invariance of Scientific Structures},
+  publisher = {{CSLI} Publications, Stanford University},
+  year      = {2002},
+  isbn      = {978-1575864648},
+  note      = {Mature statement of Suppes's set-theoretic / structuralist view
+               of scientific theories. Direct philosophical precursor of the
+               institution-theoretic treatment of theories Eigenius adopts.},
+}
+
+@book{sneed1971,
+  author    = {Sneed, Joseph D.},
+  title     = {The Logical Structure of Mathematical Physics},
+  publisher = {Reidel},
+  address   = {Dordrecht},
+  year      = {1971},
+  isbn      = {978-9027701701},
+  note      = {Foundational text of the structuralist (Sneed-Stegm{\"u}ller)
+               program in the philosophy of science. Establishes the
+               distinction between theory-cores and theory-nets that
+               foreshadows the layer / parent-pointer architecture.},
+}
+
+@book{hottbook2013,
+  author    = {{The Univalent Foundations Program}},
+  title     = {Homotopy Type Theory: {U}nivalent Foundations of Mathematics},
+  publisher = {Institute for Advanced Study},
+  address   = {Princeton},
+  year      = {2013},
+  url       = {https://homotopytypetheory.org/book/},
+  note      = {Collective program articulating type theory as a foundation for
+               mathematics in which equivalence and structure are first-class.
+               Conceptual reference for treating scientific structure
+               typetheoretically rather than set-theoretically.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 4. Formal ontologies for science — adoption proof-of-concept
+%    These projects demonstrated that working scientists will adopt and curate
+%    formal vocabularies at scale, given the right social and tooling
+%    infrastructure. Eigenius generalizes from controlled vocabularies to typed
+%    theories, but the adoption argument is identical.
+% -----------------------------------------------------------------------------
+
+@article{gene-ontology2000,
+  author    = {Ashburner, Michael and Ball, Catherine A. and Blake, Judith A.
+               and Botstein, David and Butler, Heather and Cherry, J. Michael
+               and Davis, Allan P. and Dolinski, Kara and Dwight, Selina S.
+               and Eppig, Janan T. and Harris, Midori A. and Hill, David P.
+               and Issel-Tarver, Laurie and Kasarskis, Andrew and Lewis, Suzanna
+               and Matese, John C. and Richardson, Joel E. and Ringwald, Martin
+               and Rubin, Gerald M. and Sherlock, Gavin},
+  title     = {Gene Ontology: tool for the unification of biology},
+  journal   = {Nature Genetics},
+  volume    = {25},
+  number    = {1},
+  year      = {2000},
+  pages     = {25--29},
+  doi       = {10.1038/75556},
+  note      = {Founding paper of the Gene Ontology. The most successful
+               example of a formal vocabulary adopted across an entire
+               scientific community.},
+}
+
+@article{obofoundry2007,
+  author    = {Smith, Barry and Ashburner, Michael and Rosse, Cornelius and
+               Bard, Jonathan and Bug, William and Ceusters, Werner and
+               Goldberg, Louis J. and Eilbeck, Karen and Ireland, Amelia and
+               Mungall, Christopher J. and {The OBI Consortium} and
+               Leontis, Neocles and Rocca-Serra, Philippe and Ruttenberg, Alan
+               and Sansone, Susanna-Assunta and Scheuermann, Richard H. and
+               Shah, Nigam and Whetzel, Patricia L. and Lewis, Suzanna},
+  title     = {The {OBO} Foundry: coordinated evolution of ontologies to
+               support biomedical data integration},
+  journal   = {Nature Biotechnology},
+  volume    = {25},
+  number    = {11},
+  year      = {2007},
+  pages     = {1251--1255},
+  doi       = {10.1038/nbt1346},
+  note      = {Establishes the OBO Foundry's coordination principles for
+               interoperable biomedical ontologies. Demonstrates the social
+               and governance infrastructure needed for shared formal
+               vocabularies to scale across a discipline.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 5. Reproducibility and open-workflow movement
+%    The recognition that scientific results need to be re-executable, not
+%    merely documented, is the immediate motivation for executable typed
+%    knowledge artifacts.
+% -----------------------------------------------------------------------------
+
+@article{stodden2010,
+  author    = {Stodden, Victoria},
+  title     = {The Scientific Method in Practice: Reproducibility in the
+               Computational Sciences},
+  journal   = {MIT Sloan Research Paper},
+  number    = {4773-10},
+  year      = {2010},
+  doi       = {10.2139/ssrn.1550193},
+  note      = {Early influential statement of the reproducibility crisis in
+               computational science, and of the standards (code + data +
+               environment) needed to make computational results verifiable.},
+}
+
+@article{myexperiment,
+  author    = {Goble, Carole A. and Bhagat, Jiten and Aleksejevs, Sergejs and
+               Cruickshank, Don and Michaelides, Danius and Newman, David and
+               Borkum, Mark and Bechhofer, Sean and Roos, Marco and Li, Peter
+               and De Roure, David},
+  title     = {{myExperiment}: a repository and social network for the sharing
+               of bioinformatics workflows},
+  journal   = {Nucleic Acids Research},
+  volume    = {38},
+  number    = {Suppl 2},
+  year      = {2010},
+  pages     = {W677--W682},
+  doi       = {10.1093/nar/gkq429},
+  note      = {Pioneering platform for sharing executable scientific workflows
+               as first-class artifacts. Direct precedent for the notion of a
+               typed, shared, executable scientific knowledge artifact.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 6. Closest contemporary parallel
+%    The Underlay (MIT Knowledge Futures / Media Lab, c. 2017--2022) was an
+%    explicit attempt to build a public protocol for distributed graph-based
+%    public knowledge. Eigenius shares the ambition; the typed-theory and
+%    executable-resource layers are the principal differentiation.
+% -----------------------------------------------------------------------------
+
+@misc{underlay,
+  author       = {{Knowledge Futures Group}},
+  title        = {The {Underlay}: A Public Protocol for Knowledge},
+  howpublished = {MIT Knowledge Futures Group / MIT Media Lab project},
+  year         = {2017--2022},
+  url          = {https://docs.underlay.org/},
+  note         = {Project to build a distributed, content-addressed graph
+                  protocol for public knowledge, with provenance as a
+                  first-class concern. Closest contemporary parallel in
+                  ambition; differs in not committing to a typed theory layer
+                  or executable resources.},
+}
+
+
+% -----------------------------------------------------------------------------
+% 7. Direct ancestor — Pharos (Microsoft Health Solutions Group)
+%    Eigenius is essentially a modernised 2.0 of Pharos. Same animating
+%    motivation (rigorous enforcement of the scientific method via a
+%    machine-readable audit trail over the conduct and results of inquiry);
+%    different and substantially extended substrate.
+% -----------------------------------------------------------------------------
+
+@inproceedings{brown2008pharos,
+  author    = {Brown, Jr., Allen L.},
+  editor    = {Freire, Juliana and Koop, David and Moreau, Luc},
+  title     = {Enforcing the Scientific Method},
+  booktitle = {Provenance and Annotation of Data and Processes},
+  publisher = {Springer Berlin Heidelberg},
+  address   = {Berlin, Heidelberg},
+  year      = {2008},
+  pages     = {2--2},
+  isbn      = {978-3-540-89965-5},
+  note      = {Presentation of Pharos, the Microsoft Health Solutions Group
+               platform for life-sciences researchers, framed around audited
+               inference + audited workflow as the substrate for enforcing the
+               scientific method. Direct ancestor of Eigenius: same animating
+               goal (machine-readable audit trail over both the conduct and
+               results of scientific investigation), distinct stakeholder set
+               (researchers, regulators, funders, tenure committees, research
+               managements). Pharos shipped a port of Isabelle/HOL called MetaL
+               and a typed graph store on SQL Server with a SPARQL processor
+               called DataNet. Eigenius generalises and substantially extends
+               that substrate: Lean 4 instead of Isabelle/HOL for the proof
+               assistant; a kernel rooted in a Martin-L{\"o}f type theory
+               (Pharos had none); explicit institutions as a structural
+               concept (Pharos had none); a layer-graph model with lattice
+               structure and merge operations (Pharos had a flat graph); a
+               notebook interface; and epistemic tracing as core infrastructure
+               substrate, not metadata.},
+}

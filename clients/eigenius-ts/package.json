@@ -1,0 +1,35 @@
+{
+  "name": "@eigenius/client",
+  "version": "0.0.1",
+  "description": "TypeScript SDK for the Eigenius platform — typed wrappers around the kernel's gRPC surface (Load / Query / RunProgram / Reflect / branches / tags / commit pipeline) with notebook helpers.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/eigenius/eigenius",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eigenius/eigenius.git",
+    "directory": "clients/eigenius-ts"
+  },
+  "bugs": {
+    "url": "https://github.com/eigenius/eigenius/issues"
+  },
+  "author": "The Eigenius Authors",
+  "keywords": [
+    "eigenius",
+    "knowledge-graph",
+    "grpc",
+    "sdk",
+    "type-theory",
+    "ontology"
+  ],
+  "type": "module",
+  "main": "./mod.ts",
+  "types": "./mod.ts",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2",
+    "@connectrpc/connect": "^2",
+    "@connectrpc/connect-web": "^2"
+  }
+}

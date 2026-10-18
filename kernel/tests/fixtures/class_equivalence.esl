@@ -1,0 +1,31 @@
+// D99 §11 — one concept in three vocabularies, linked by a core:EquivalentClasses.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace fx            = "urn:eigenius:test:equiv";
+
+class fx:HP_0000103 : lexicon:Entity { description = "Polyuria (HPO)."; }
+class fx:wn_polyuria : lexicon:Entity { description = "Polyuria (WordNet synset)."; }
+class fx:C0032617 : lexicon:Entity { description = "Polyuria (UMLS concept)."; }
+class fx:HP_0001959 : lexicon:Entity { description = "Polydipsia (HPO) — linked to nothing."; }
+class fx:Demanding : lexicon:Entity {
+    description = "A class with an obligation.";
+    requires fx:grade;
+}
+property fx:grade : core:integer { description = "A required field."; domain fx:Demanding; }
+
+resource fx:author : prov:Organization {
+    core:description = "The author of this fixture's claims.";
+    core:short_name = "author";
+}
+
+resource fx:episode : fx:wn_polyuria {
+    core:description = "An instance of the WordNet class.";
+}
+
+data fx:Observed : fx:HP_0000103 -> Prop {
+    description = "A predicate typed over the HPO class.";
+}

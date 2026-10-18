@@ -1,0 +1,301 @@
+---
+// Landing page — hand-authored, NOT a Starlight docs page.
+//
+// This is what visitors see at the root. It introduces the platform,
+// shows the four-warrant taxonomy, and routes readers to the docs,
+// concepts, examples, or research sections via the audience cards
+// and CTAs.
+//
+// Starlight's <Page> wrapper is intentionally NOT used here — we
+// want full control over the hero and section structure.
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import FeaturedWriting from "../components/FeaturedWriting.astro";
+import WarrantMap from "../components/WarrantMap.astro";
+import AudienceCard from "../components/AudienceCard.astro";
+import PaperCard from "../components/PaperCard.astro";
+import YouTubeEmbed from "../components/YouTubeEmbed.astro";
+import heroBgSrc from "../assets/hero_background.png";
+import { getImage } from "astro:assets";
+
+// Optimise the hero background through Astro's image pipeline.
+// The source PNG is ~5.8 MB; the WebP at display width is a small
+// fraction of that. We pick 2400px so HiDPI laptops at common
+// viewport widths get a sharp render without serving 4K assets.
+const heroBg = await getImage({
+  src: heroBgSrc,
+  format: "webp",
+  width: 2400,
+});
+
+// The landing-page Watch section highlights the platform pitch video.
+// Subsequent videos in the playlist are embedded on the concept
+// pages they correspond to ("Bridging Languages" on /concepts/institutions/,
+// "Feedback Loop" on /concepts/).
+//
+// Source playlist:
+// https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA
+const PLAYLIST_URL =
+  "https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA";
+---
+
+<BaseLayout
+  title="Eigenius — a compiler for AI thought"
+  description="Open-source platform — a typed knowledge graph for AI-assisted scientific reasoning. Make the AI show its work: every claim records how it was justified, so a brilliant analysis and a confident hallucination can no longer look the same in prose."
+>
+    <!-- ───────── Hero ───────── -->
+    <section
+      class="hero"
+      style={`--hero-bg-image: url(${heroBg.src})`}
+    >
+      <div class="hero-inner">
+        <div class="hero-content">
+          <span class="hero-eyebrow">A compiler for AI thought</span>
+          <h1 class="hero-headline">
+            Make the AI<br />show its work.
+          </h1>
+          <p class="hero-pitch">
+            Eigenius is an open-source platform &mdash; a typed knowledge
+            graph for AI-assisted scientific reasoning. Every claim
+            records <em>how</em> it was justified, so a brilliant analysis
+            and a confident hallucination can no longer look the same
+            in prose.
+          </p>
+          <div class="hero-actions">
+            <a class="cta cta-primary" href="/examples/drug-screening/">
+              See a worked example
+            </a>
+            <a
+              class="cta cta-secondary"
+              href="https://github.com/eigenius/eigenius"
+            >
+              View on GitHub <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── The trust gap ───────── -->
+    <section class="section section-trust-gap">
+      <div class="section-inner">
+        <span class="section-eyebrow">The trust gap</span>
+        <h2 class="section-title">
+          AI is increasingly the author.<br />
+          The reasoning chain is still invisible.
+        </h2>
+        <p class="section-prose">
+          Drug-discovery pipelines, autonomy stacks, climate models,
+          materials screens &mdash; AI agents are drafting more and more
+          of the scientific and engineering record. The accountability
+          surface science was built on is binary: either you trust the
+          author, or you don&rsquo;t use the result. At human authoring
+          speed that trade-off was tractable. At LLM authoring speed
+          it is not.
+        </p>
+        <p class="section-prose">
+          Consider the sentence <em>&ldquo;EIG_0291 was identified as
+          a strong CDK2 inhibitor (IC₅₀ = 85 ± 5 nM, n = 6).&rdquo;</em>
+          Whether drafted by a human author or by an AI agent, that
+          sentence carries five distinct implicit assertions about
+          measurement, statistics, vocabulary translation, decision
+          rule, and sample attribution. None are visible in the
+          published sentence. Each is load-bearing. Each is where a
+          hallucination or unjustified assumption can hide while
+          looking exactly like the correct article.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Four warrants ───────── -->
+    <section class="section section-warrants">
+      <div class="section-inner">
+        <span class="section-eyebrow">The structural answer</span>
+        <h2 class="section-title">
+          Every claim &mdash; human or AI &mdash; lands in one of
+          four warrant categories.
+        </h2>
+        <p class="section-prose">
+          The chain records <em>how</em> a claim is justified. Three
+          warrant kinds are mechanically warranted &mdash; an instrument
+          run, a deterministic computation, or a formal proof &mdash;
+          and can be independently re-executed by anyone with read
+          access. The fourth carries an authoritative warrant: a named
+          declarer is on record, and the citation chain is examinable.
+        </p>
+        <WarrantMap />
+        <p class="section-footnote">
+          The four categories are <em>peers</em>, not a hierarchy.
+          None is more &ldquo;true&rdquo; than the others; they differ
+          in <em>what kind of warrant they carry</em>. The chain
+          doesn&rsquo;t prevent an AI from declaring something false,
+          but it does prevent the AI from passing a declaration off as
+          a mechanical warrant.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Audience cards ───────── -->
+    <section class="section section-audiences">
+      <div class="section-inner">
+        <span class="section-eyebrow">Where to start</span>
+        <h2 class="section-title">
+          Three ways into the platform.
+        </h2>
+        <div class="audience-grid">
+          <AudienceCard
+            audience="For scientists working with AI"
+            tagline="Walk any claim — yours or an AI agent's — back to the raw data."
+            bullets={[
+              "Every step from instrument to designation is a typed artifact",
+              "Counterfactual analyses become localised chain edits",
+              "FAIR and ALCOA+ alignment falls out structurally",
+            ]}
+            href="/examples/drug-screening/"
+            linkLabel="Read the worked example →"
+          />
+          <AudienceCard
+            audience="For AI developers"
+            tagline="A type system your agent must justify against."
+            bullets={[
+              "The kernel refuses to commit ill-typed reasoning",
+              "Hallucinations land as Declared evidence, not derivations",
+              "Audit closure becomes a tree-walk, not a re-derivation",
+            ]}
+            href="/concepts/"
+            linkLabel="Read the concepts →"
+          />
+          <AudienceCard
+            audience="For platform engineers"
+            tagline="Wire new AI reasoners into the chain through a modular institution architecture."
+            bullets={[
+              "Add a new dispatch surface without touching the kernel",
+              "Content-addressed layers, deterministic by construction",
+              "Open source kernel + ESL surface + EigenQL queries",
+            ]}
+            href="/docs/"
+            linkLabel="Read the docs →"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Watch: the platform pitch ───────── -->
+    <section class="section section-watch">
+      <div class="section-inner">
+        <span class="section-eyebrow">Watch</span>
+        <h2 class="section-title">
+          Three minutes on what Eigenius is.
+        </h2>
+        <p class="section-prose">
+          The infrastructure-for-truth pitch in video form.
+          Additional explainers covering specific concepts
+          (cross-vocabulary bridges, AI reasoning verification, kernel
+          design) are embedded on the relevant
+          <a href="/concepts/">Concepts</a> pages, and the
+          <a href={PLAYLIST_URL}>full playlist on YouTube ↗</a> walks
+          through everything.
+        </p>
+        <div class="watch-single">
+          <YouTubeEmbed
+            videoId="33jgEGcPBhs"
+            title="Eigenius — The Infrastructure for Truth"
+            description="The platform pitch: how Eigenius makes scientific reasoning machine-checkable, so AI agents have to show their work instead of letting it hide in author prose."
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Writing (latest series or post) ───────── -->
+    <FeaturedWriting />
+
+    <!-- ───────── Research ───────── -->
+    <section class="section section-research">
+      <div class="section-inner">
+        <span class="section-eyebrow">Research</span>
+        <h2 class="section-title">
+          The case in long form.
+        </h2>
+        <div class="paper-grid">
+          <PaperCard
+            venue="arXiv"
+            title="Eigenius: A Typed Knowledge-Graph DBMS with Epistemic Stratification and Institution-Mediated Reasoning"
+            abstract="A typed knowledge-graph DBMS that makes provenance a structural invariant rather than something reconstructed across subsystems: epistemic status is a commit-time check, institutions are strongly typed integration boundaries, and cross-system translations materialize into the graph as first-class resources. Recomputing a published Nature study end to end, all 52 derived conclusions hold from pinned data — surfacing four machine-checked discrepancies in the original."
+            href="/research/papers/typed-knowledge-graph-dbms/"
+            downloadHref="https://arxiv.org/pdf/2608.04457"
+            status="Preprint · cs.DB"
+          />
+          <PaperCard
+            venue="BIO"
+            title="Auditing the Conclusion: Making the Reasoning Behind a Scientific Claim Chain-Resident, Machine-Checkable, and Reproducible"
+            href="/research/papers/science-audit-closure/"
+            comingSoon
+          />
+        </div>
+      </div>
+    </section>
+
+</BaseLayout>
+
+<style>
+  /* Page-unique styles. The shared chrome (sections, CTAs, audience
+     grid, body baseline) lives in src/styles/custom.css; the topnav
+     and footer are in their own components. */
+
+  /* ───────── Hero with background image ───────── */
+  .hero {
+    position: relative;
+    border-bottom: 1px solid var(--sl-color-hairline);
+    /* Left-weighted dark gradient on top of the background image:
+       the headline sits on the left and needs near-opaque navy
+       behind it; the right edge can show more of the image so the
+       chain-graph imagery comes through. */
+    background-image:
+      linear-gradient(
+        to right,
+        rgba(20, 24, 31, 0.95) 0%,
+        rgba(20, 24, 31, 0.85) 35%,
+        rgba(20, 24, 31, 0.55) 75%,
+        rgba(20, 24, 31, 0.40) 100%
+      ),
+      var(--hero-bg-image);
+    background-size: cover;
+    background-position: center right;
+    background-repeat: no-repeat;
+  }
+
+  .hero-inner {
+    padding: 5rem 1.5rem 6rem 1.5rem;
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .hero-content {
+    max-width: 40rem;
+  }
+
+  /* On narrow viewports the headline collides with the right edge
+     of the image — strengthen the overlay so text remains legible. */
+  @media (max-width: 50rem) {
+    .hero {
+      background-image:
+        linear-gradient(
+          to right,
+          rgba(20, 24, 31, 0.92) 0%,
+          rgba(20, 24, 31, 0.78) 100%
+        ),
+        var(--hero-bg-image);
+    }
+  }
+
+  /* ───────── Trust-gap section variant ───────── */
+  .section-trust-gap {
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
+  }
+
+  /* ───────── Watch section (single centered video) ───────── */
+  .watch-single {
+    max-width: 48rem;
+    margin: 1.4rem auto 0 auto;
+  }
+</style>

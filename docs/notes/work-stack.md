@@ -1,0 +1,1528 @@
+# Work stack — unfinished work (top = active)
+
+The single "where are we" pointer. A **LIFO stack** of the active working notes: work the **top** entry;
+when its exit-gate is met, **pop** it and the entry below becomes active. When a sub-task splits off from
+an entry, **push** its note on top. Keep this file current — it is the map back to the base plan after
+any detour.
+
+---
+
+## Stack (top → bottom)
+
+> **entry 6 (`2026-10-09`, closed `2026-10-10`). UAB survey step 4 — parse coverage, and the
+> adverb import behind it. DONE, merged `2026-10-10`. The gate PASSES every
+> criterion against `baseline.json`.
+> [uab-xiap-parse-coverage.md](uab-xiap-parse-coverage.md) has the measurements.**
+>
+> Store: `wordnet-umls-hpo-aligned-2026-10-10-degskip`. The chain is FIVE steps, not three — the
+> recipe at entry 3 is right and I skipped two of them first time: reseed → build-alignment →
+> `obograph-import hp.json` → `add-layer-to-snapshot` → build-hpo-alignment. Provenance reproduced
+> on every run: 38391 merges, 20533 HPO resources, 864 equivalences.
+>
+> **Gate (live reranked, the arm `baseline.json` records):** grammar-gap 0, expected-hits 62/62,
+> total-readings 828 (ceiling 895), skeletons 282, `encoded` 1 — the first unit ever to reach a
+> unique reading. COVERAGE, SELECTION-VALIDITY and LEDGER all PASS.
+>
+> **Adverbs import at Luo & Shi's `ADV`.** D62 §8.7.5's deferral was implemented in THREE places —
+> the converter arm, the CLI's default `--pos`, and `select_synsets` — and lifting only the first
+> gave `0 adv axioms` over 114038 synsets while every converter test passed. 3621 axioms, 11034
+> entries. The payoff is CONTENT, not coverage: the derivational fallback seeded IDENTITY sem, so
+> «partially exposed» asserted nothing about *partially* — 90 occurrences over 79 of 427 XIAP spans.
+>
+> **Seven re-pins, all of the same shape** (the adverb conjoins where it reduced to identity):
+> typically, favourably, simply, preferentially, highly, selectively ×2. Each checked against its
+> note's recorded ruling — two of the forests offered a reading a maintainer had rejected
+> (`adv_in` applied to `speaker`; `in`/`with` as siblings rather than nested), and pinning either
+> would have laundered it.
+>
+> **Grammar-owned adverbs withheld**: `not`, `also`, `too` (surface, not synset — `r00047534`
+> bundles `likewise`, which the import closed). `non` deliberately excluded: nothing supplies it.
+> Degree words `less/more/most/very/least/much/far` skipped in `push_adv` only, NOT in
+> `closed_class` — withholding there is all-POS and the reference grammars
+> (`references/openccg/test/lexicon.xml`) assign `more` JJR/RBR over `n`, `n/n` and predicative
+> `s[adj]\np`, never the manner VP modifier.
+>
+> **Step 4 re-measured on the fixed store:** missing-lexeme 335 → 334, covered 5 → 6, OOV types
+> 501 → 495, and the page augmentation's grounding 147 → 131 — 16 tokens no longer rescued
+> per-document, `hemizygous` among them. **The conclusion is unchanged: the corpus's gap is not a
+> vocabulary gap.** ~400 of 495 OOV types are identifiers, accessions, coordinates, citation
+> fragments and author names. Importing vocabulary moves this by single digits.
+>
+> **Two method rules now in `experiments/parsing/README.md` §3, both of which cost real work here:**
+> author a pin from the GATED arm's `EIGENIUS_DUMP_SKELETONS` set — not `selections.json`, not the
+> `sk=` lines of `DUMP_READINGS` — and never score cap-only against the reranked baseline. Cap-only
+> loses 8 pins the ranker keeps (54/62 vs 62/62), and those 8 read exactly like regressions:
+> `prep_of` becoming `compound_kind`, a transitive verb going 1-place, a modal vanishing. I reported
+> four such "regressions" that all pass on the gated arm.
+>
+> **Left open, none blocking:** `reading-wrong 4` and `reading-unadjudicated 15` (selection quality,
+> untouched by pinning); `any`/`nor`/`been` pinned as known closed-class gaps, each needing a
+> semantic decision (`any` is free-choice, so `exists_sem` is wrong under negation; `nor` denies both
+> conjuncts and the reserved table offers only and/or; `been` is a participle); `then` on probation —
+> lifting it from the withholding list admitted four senses, not one; the hyphen noun-head work (14
+> types, needs the Σ-refinement decision) and the genitive construction for `'s` (4 types, no
+> genitive exists — `poss_of` is wired for anaphoric determiners only).
+
+> **entry 7 (`2026-10-10`). UAB survey step 5 — the document model. NEXT, not started.**
+>
+> `experiments/uab/eigenius-survey-2026-09-30.md` §4 step 5, which depends on step 4's evidence
+> (entry 6). [d96-jats-document-model.md](../design/d96-jats-document-model.md) is **decided**
+> (2026-09-25) as the model; what is unbuilt is its realisation in the encoding vocabulary, plus one
+> route it does not have.
+>
+> **Step 4's evidence populates two of D96's own complaints with counts.** It says "the encoding
+> vocabulary has kinds nothing assigns" — `enc:unit_kind` routes a `DiscourseUnit` while the encoder
+> hard-codes every unit to `kind_prose` — and that `kind_table` "conflates two things". Measured:
+> 34% of the XIAP corpus is not prose, and the two things are 88 TABLE CELLS against 14 SECTION
+> HEADINGS (every heading `kind: compressed`), plus 44 other fragments. §References is 19% of the
+> corpus and 41% of the lexical gap, so it routes to `reference:Reference` rather than parsing.
+>
+> **The gap: none of D96's four routes covers this source.** They are JATS, BioC, PDF→GROBID→TEI and
+> plain text, and D96 scopes itself to literature. The XIAP material is a CLAIM REGISTER
+> (`claims/*.md` with `id`/`location`/`text`/`kind` front matter) over a markdown clinical report —
+> a fifth route, and the one the collaboration needs, since those logs are exports from databases,
+> clinical systems and LIMS. It is also the cheapest: the register STATES each unit's location and
+> kind, so nothing is inferred. `segment_given_lines` (entry 6) is its first piece and is built;
+> D96's routes do not mention given-units because JATS and TEI supply them implicitly.
+>
+> JATS has the elements for all of it — `<sec>`, `<title>`, `<table-wrap>`, `<ref-list>`, `<xref>` —
+> so the model needs no amendment. D71 is the other half.
+>
+> **Where the output goes, decided before writing any of it.** An encoding of the logs is the logs in
+> another notation, and the logs are gitignored (`experiments/uab`), so every emitted artifact —
+> ESL, JSON, chunk — goes in `experiments/*/encoded/` or `experiments/*/derived/`, both ignored
+> (`.gitignore:117`). Not beside the hand-written vocabulary: `experiments/xiap-c0020/*.esl` is
+> authored and stays tracked, and the test is who WROTE it, not where it sits. Committed output is
+> the aggregate numbers, as in entry 6.
+>
+> **Settled by the owner, 2026-10-10: no further UAB data enters git, in any notation; what is
+> already committed stays and is NOT to be untracked.** That includes
+> `experiments/pmi-registry/04-registry.esl`, which is tracked and whose header says it was
+> "Generated by `pmi-registry-convert` from
+> `experiments/uab/UAB Round 1/02-synthetic-pmi-registry/synthetic-cases.json`" — derived, from
+> inside the ignored tree, and synthetic. Do not re-open it by reasoning about whether a given file
+> looks harmless: the gitignore is a distribution decision (survey §5 manuscript licensing), not a
+> confidentiality judgement, and the Round 1 README says the folder can be shared as-is.
+>
+> The vector to watch is a derived file placed OUTSIDE the ignored tree that identifies its own
+> provenance in a header — that is how the pmi-registry ESL came to be tracked. Before committing
+> anything touching this material, check whether its provenance line names `experiments/uab`.
+
+> **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — three certified XIAP claims end to end.
+> DONE, merged `2026-10-09`. Plan + results:
+> [d100-certifying-the-xiap-report.md](../design/d100-certifying-the-xiap-report.md). What it left is
+> under "Not done" below; none of it is active.**
+>
+> `experiments/xiap-c0020/` over `bootstrap` → `variant` → the experiment's vocabulary;
+> `kernel/tests/d100_xiap_c0020.rs`, 7 tests, in-memory, no database. Each refusal checked to bite by
+> inverting its input. The lexicon bug that blocked the parse route is merged;
+> the two dependencies landed as UAB experiments 01 and 02.
+>
+> | rung | the ledger | the kernel | divergence |
+> |---|---|---|---|
+> | C-0020 `observed` | certified | commits | the sentence as written does not type; the `kind` is wrong |
+> | C-0011 `marked` | rejected via a `premise_failure:` field | refused, naming the absent leaf | none — the verdict becomes a type |
+> | C-0078 `compressed` | rejected under the compression rule | **commits** | the rule is not entailment |
+>
+> **C-0020.** Three findings. (1) «p.Ile380Val is carried by 4 hemizygous males» does not type: a
+> `ProteinAllele` subject under a count indexed by `NucleotideAllele`, and `TranslatesTo` is
+> non-injective. (2) The certificate's `reading` field is TWO declarations — translation (biology) and
+> resolution (editorial) — and the second does not follow from the first. (3) `kind: observed` does
+> not mean read off: the export holds `exome.ac_hemi = 2` and `genome.ac_hemi = 2`, and
+> `cert-gnomad.py` sums them. Faithfully it is `app(declared(sum rule), observed(export))`, which
+> commits; citing 4 straight off the export is refused — *no admitted `IsObservedAs` witness*.
+>
+> **C-0011.** `Grounds` has no conjunction introduction, so the two limbs are a declared bridge
+> eliminated with `app`. Limb A commits; the conjunction is refused naming `tolerated_holds`, limb B's
+> absent leaf. "Sound inference, failed premise" is the shape of the term, not a field.
+>
+> **C-0078.** The heading grounds from the certified body through a declared weakening (conjunction
+> elimination — `Grounds` has no conjunction vocabulary in either direction) and COMMITS, so a
+> compression check built on entailment certifies the claim the procedure caught. The gap is not a
+> missing `Compresses` relation: the rule polices what a heading LICENSES read alone, a constraint on
+> a reader's inference. `Grounds(P)` is indifferent — the heading's `P` is grounded.
+>
+> **Measured on the log** — 427 LIVE claims (475 files, 48 retired by a `## E<n> · retired` entry):
+> 220 `observed`, 70 `declared`, 69 `derived`, 43 `marked`, 15 `compressed`, 10 `exempt`. All 220
+> `observed` and all 69 `derived` carry a `reproduce:` line. `depends_on:` is present on all 427 and
+> non-empty on none; `supersedes:` on 47, `compresses:` on 13, `premise_failure:` on 2 — and **128 of
+> 427 name another claim id in free prose outside all three**.
+>
+> **Survey §4 step 2 also closes** (it was "depends on nothing, cheap" and never run). Its "426 vs
+> 427" is a pass-2-era figure read against a pass-3 artefact: 475 files − 48 retired = 427 live, and
+> `passes/pass-03-ledger.json` holds 474 because C-0475 was created inline and added to no
+> certifier's list — which pass 3 records as its own finding 5 and rule R29. Its "13 vs 14
+> certifiers": 18 `cert-*.py` on disk, 4 marked `SUPERSEDED_BY`, 14 live, and pass 3's table reports
+> "14 of 14, 450 AGREE, 0 DISAGREE on live claims". The "twelve certifiers" in its narrative is the
+> pre-repair count. The artefact is self-consistent and self-documenting.
+>
+> **Not done.** The CNL/parse route — these three are hand-written ESL, not parsed. The survey's §3
+> still describes D81's `ObservedResource`/`DeclaredResource` as shipped code; they were removed in
+> the numeric-core merge of `2026-09-09`, and `judgements-and-warrants.tex` deprecates the pattern.
+> The survey lives in the gitignored tree, so that correction is D100 Decision 3's to carry.
+>
+> **Gotcha for anyone measuring here:** `measure-parse-rate.sh` DECLARES its own config and strips
+> the ambient `EIGENIUS_WRN_PAGE` and `EIGENIUS_DUMP_CELL` — use `--page`, and for a cell dump run
+> the underlying `cargo test --release -p eigenius-wordnet --test db_backed_encoding` directly. And
+> `Parser::unknown_words` reports only STORED forms, so it calls every regular plural missing; the
+> harness's own `missing-lexeme` count is the one to believe.
+
+> **entry 4 (`2026-10-07`). Adjunct attachment for verbs and their modifiers. DONE, merged
+> `2026-10-09`. What it left is below, and none of it is active.**
+>
+> **Result.** `grammar-gap 0`, `expected-hits 62/62`, gate exit 0 against the re-baselined
+> `baseline.json`. 22 axioms added and 0 changed; no committed term retyped or migrated; no category
+> and no `sem_type` moved. The 13 adjunct pins were restored mechanically — each new skeleton rewrites
+> back to its old pin under `adv_X(obj, V, subj) → prep_X(subj, obj)`, so the pinned *analysis* never
+> changed. Store: `wordnet-umls-hpo-aligned-2026-10-07-adv`.
+>
+> **Carried, not active:**
+> - **#61** — renaming an ontology relation perturbs restrictor canonicalisation. Readings 679 → 799
+>   and skeletons 210 → 290 are this slice's, proven by a replay at the pre-change commit (entry 3's
+>   merge) reproducing 679/210 against both the 2026-10-05 store and one reseeded from identical
+>   provenance, with identical per-unit skeleton sets. 26 of the +80 are previously-identical terms
+>   the split separates; **54 are unexplained**. `conjoin_canonical` is located as the only stage
+>   keyed on what a relation is *named*; under-normalisation is EXCLUDED by measurement — making
+>   `beta_normalize` capture-avoiding drove its declines 1079 → 0 and recovered **5 skeletons**,
+>   while breaking a pin, so that fix was reverted. `restrictor_key` is a SORT key and the sort
+>   fixes conjunct order in the rebuilt Σ, which the pins record: **any change to that key re-pins
+>   units.**
+> - **`reading-correct` is unmeasured for the slice.** The live draw lost four of 42 units to
+>   `jev-latest` 503s, so it is not a measurement; `selection-baseline.json` is untouched. That is
+>   #59's gate, not the adjunct slice's. Redraw when the provider is serving, then adjudicate.
+> - **One pin may want to move.** On «Project Achilles and project DRIVE identified WRN as the top
+>   preferential dependency in MSI cell lines compared to MSS cell lines.» (4 → 52 skeletons), 16 new
+>   readings put BOTH PPs inside the dependency's Σ — the 2026-10-06 ruling that the phrase modifies
+>   the noun «dependency», which the grammar could not produce before and the pin does not encode.
+>   The two other growers deserve the same look.
+> - **The eventivity feature (open question 9) is undecided** and nothing in the adopted design needs
+>   it; its justification ("a copular VP has no event to modify") lapsed with the event argument.
+> - **Kept for #61:** the `eigenius-pre` worktree at the pre-change commit (with `references/`
+>   symlinked in — `.gitignore` excludes it and only `.gitkeep` is tracked, so a fresh worktree
+>   parses nothing) and `wordnet-umls-hpo-aligned-2026-10-07-pre`, the only reproducible pre-change
+>   reference.
+>
+> **The owner adopted option D on `2026-10-07`: predicate modifiers, no events.** Verb adjuncts are
+> encoded as modifiers of the predicate, following Luo & Shi 2026, *Variable polyadicity without
+> events* (MSCS 36, e11). `docs/notes/event-free-modification.md` is the adopted design.
+> `docs/notes/event-semantics.md` is the research record for the event-argument design decided on
+> `2026-10-06` and carries a supersession banner; **the event slice is not to be built.**
+>
+> **Why B was dropped.** B was chosen over A because predicate modifiers were held not to deliver
+> the modifier-drop entailments. That is true of typing alone. Luo & Shi put the conjunction in the
+> defining equation, so `TV(n+1, advₙ₊₁, x, y) ⊃ TV(n, advₙ, x, y)` is a theorem, machine-checked in
+> Coq. The stated ground for B over A is answered.
+>
+> **The change.** `prep_*` already serves two roles and only one is broken, so the change is
+> **additive** — nothing committed is retyped or migrated:
+>
+> ```
+>   unchanged  prep_in : Entity -> Entity -> Prop            noun-internal, 54 uses, correct
+>      added   adv_in  : Entity -> (Entity -> Prop)
+>                     -> Entity -> Prop                      VP adjunct, 14 uses, the defect
+>
+>   ⟦in⟧ VP adjunct   was: λx.λV.λs. And(V(s), prep_in(s, x))
+>                     now: λx.λV.λs. And(V(s), adv_in(x, V, s))
+> ```
+>
+> **Both families are in scope (`2026-10-07`).** The measured-value family (`prep_*_value`,
+> `prep_*_offset`, `every_period`) carries the same defect — `ontology.esl`'s own comment says "the
+> predication **or entity** s", while the type says `lexicon:Entity`. Measured by parsing the corpus
+> over the bootstrap chain: `every_period(the(Medium), ‹s›, 259200)` for «The medium was changed every
+> 3 days» says the medium recurs. It splits 27 VP-adjunct against 3 noun-internal, the inverse of the
+> entity-object family's 14 against 54, because these are methods sentences.
+>
+> **Naming (`2026-10-07`): `adv_*`**, after Luo & Shi's `ADV` type. One prefix covers PP adjuncts and
+> manner adverbs, which are the same type; `prep_*` then means exactly "a relation between two
+> entities".
+>
+> **Cost, as built.** No kernel change, no event class, `⟦S⟧` stays `Prop`, and **none** of the 316 of
+> 465 closed-class entry types move. **22 axioms added and 0 changed** — 13 entity-object, 9
+> measured-value. No migration of encoded terms. 57 noun-internal uses untouched. A bootstrap edit,
+> so it rides a reseed.
+>
+> **The counting rule is per ENTRY, not per pin** (corrected while implementing, `2026-10-07`). An
+> `adv_X` is needed wherever a VP-adjunct entry (`lexicon:prep_X_sem`) exists, because every one of
+> them predicates the PP of the subject. Counting pins gave 5 and 8; counting entries gives 13 and 9.
+> The eight entity-object prepositions the pins do not attest — `on between within without among
+> beyond after before` — each have an entry, so counting pins would have fixed the measured
+> instances and left the grammar broken. `prep_with_value` likewise. The seven with only a
+> noun-modifier entry (`nmod_X_sem`: about, against, at, by, into, of, upon) need none, nor does
+> `prep_of_value`.
+>
+> **No category and no `sem_type` moved.** The 22 VP-adjunct sem terms were already typed
+> `lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)`, which is `ADV` with the
+> object; only which relation each body names, and in which argument order.
+>
+> **Of 2026-10-06's ten decisions, these survive**: frames, `frame_in(S(K), x)`, their realisations,
+> the embedded-clause rule and the drop test (8); governed prepositions stay positional and the
+> selection rule stands, with the free adjunct becoming well-formed rather than contradictory (4);
+> U1's «for» attaches to «exploit» and is re-pinned, purpose «for» staying opaque (5); quantified PP
+> objects scope from outside (6 ii); coordination stays distributive (6 i); negation under the
+> subject quantifier (7); the frame-or-noun tie-break (10).
+> **These lapse**: 1, 2, 3 and 9 — `lexicon:Eventuality`, its lattice position, stative verbs taking
+> the argument, and the eventivity feature on `cat_s`. None arises without an event argument.
+> Whether the eventivity feature is still wanted for Katz's stative adverb gap is undecided and
+> nothing in this design needs it.
+>
+> **Done (`2026-10-07`, uncommitted/committed on this branch):** the 22 `adv_*` axioms in
+> `ontology.esl`; the 22 VP-adjunct sem-term bodies in `closed-class.esl`; `prep_parts`,
+> `adjunct_of` and the adverbial period/offset arms in `verbalize.rs`; the 30 relation names in
+> `experiments/parsing/quantities/corpus.tsv`; `event-semantics-counts.py` reading both encodings
+> (it reproduces this note's figures unchanged — 70 clause-level PP rows, 46 on a verb, 139
+> mechanical, 18 governed free adjuncts); `EXPECTED` in `bootstrap_manifest_pinned.rs` re-pinned,
+> with exactly two layers moved (`ontology`, `closed-class`) and a changelog entry.
+> `kernel/tests/quantity_corpus.rs` parses the corpus with NO database, so all 30 rows are verified
+> before the reseed.
+>
+> **Next: the reseed and the re-pins.** The 14 pins in `expected-readings.tsv` and their ledger rows
+> still hold `prep_*` terms, and the bootstrap edit makes every persisted store unresumable
+> (`BootstrapError::ManifestDrift`), so they need a reseed to re-measure. Replay the baseline FIRST
+> on an unmodified tree (a `git worktree`, not a stash — see the baseline bullet below).
+> #59's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
+> lexicon names on a sense; other attachments stay with the ranker. #60 (the «a DNA» atom) is
+> independent.
+>
+> **Hand-off (`2026-10-06`): the implementation continues on another machine, on this branch.**
+> - **Design:** `docs/notes/event-free-modification.md`. "The proposed encoding" gives the axioms and
+>   the entry, "§The measured-value family has the same defect" the eight further axioms and the
+>   measured terms, "The cases" the eight worked constructions, "Cost" the sizes.
+>   `docs/notes/event-semantics.md` is the research record only; `docs/notes/event-frames-as-records.md`
+>   compares Cooper's TTR route, also not taken.
+> - **Branch:** `event-semantics`. `origin/main` has one commit it lacks (`.gitignore`
+>   adds `/references.bak`); merge it before the PR.
+> - **Data:** `references/` (gitignored; WordNet 3.0, SPECIALIST, UMLS, HPO, lightblue, CGEL) and
+>   the tracked store `../db-snapshot/wordnet-umls-hpo-aligned-2026-10-05-merge` (3.7 GB). The USB
+>   copy holds both (`references.tar`, `snapshots/wordnet-umls-hpo-aligned-2026-10-05-merge.tar`,
+>   `SHA256SUMS`, `README.md`). `scripts/measure-parse-rate.sh` picks the newest `wordnet-umls-*`
+>   store unless given `--snapshot`, so pass it.
+> - **The pre-change baseline DOES replay here, and it reproduces exactly** (established
+>   `2026-10-07`; an earlier bullet here claimed the opposite and was wrong). At the pre-change commit,
+>   replaying `ranks/2026-10-01-do-sense.json` against `wordnet-umls-hpo-aligned-2026-10-05-merge`
+>   gives **62 hits, 0 misses, 679 readings, 210 skeletons** — the committed figures. The claim it
+>   replaces was that a bootstrap edit after the store's build made it unresumable; that edit was
+>   UAB experiment 02's, which the branch had already merged from `origin/main` **before** the
+>   baseline ran, and none of the four commits between the baseline and the squash touched
+>   `ontologies/` or `kernel/src/`. Settled by reading the store's own manifest: opening it reports
+>   `ManifestDrift` differing in exactly the two layers the `adv_*` slice edits
+>   (`ontology`, `closed-class`) and matching the pre-change commit's `EXPECTED` on all 21.
+>   A worktree needs `references/` linked in — `.gitignore` excludes it and only `.gitkeep` is
+>   tracked, so the page is absent and a run measures nothing.
+> - **An A/B across this change IS possible, by reseeding the pre-change commit** (done
+>   `2026-10-07`). That commit with a store reseeded here from identical provenance also gives
+>   **679/210 with identical per-unit skeleton sets**, so the store is not a variable and the slice's
+>   deltas are attributable. `wordnet-umls-hpo-aligned-2026-10-07-pre` is that reference; keep it.
+> - **What CAN be matched is the store's provenance, and it was** (`2026-10-07`). The 2026-10-05
+>   store's `PROVENANCE` names every input; all of them are present here and the three recorded
+>   sha256 prefixes match exactly — SPECIALIST `LEXICON` 259d0283ebe7b027, `adjective-senses.tsv`
+>   df949282d08d07fa, `verb-senses.tsv` 4822632205e93442 — with `umls_scope: all` (hence
+>   `--umls-all`), `umls_release: 2026AA`, `chv_redundant: 1`, `drops.json`, `atom-overrides.json`,
+>   `uncountable-nouns.txt`, `merges.json` and `claim-kind-alignment.esl`. A reseed that misses one
+>   of these shifts the numbers silently.
+> - **After the change** the old store no longer opens (ManifestDrift). Rebuild the chain as on
+>   2026-10-05 (`baseline.json`, `_provenance_note_2026-10-05-hpo-chain`), in its own Docker compose
+>   project so existing volumes stay untouched; `S` is the absolute path of `../db-snapshot`, `D` a
+>   date tag (the last build used `2026-10-05-merge`), `hp.json` HPO 2026-09-01 (`references/hpo/` in
+>   the USB copy):
+>
+>   ```bash
+>   export COMPOSE_PROJECT_NAME=eigenius-adjuncts EIGENIUS_KERNEL_TAG=adjuncts \
+>          EIGENIUS_KERNEL_PORT=18061 ENDPOINT=127.0.0.1:18061
+>   scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-$D
+>   scripts/build-alignment-snapshot.sh --base $S/wordnet-umls-$D --out $S/wordnet-umls-aligned-$D \
+>     --merges experiments/lexicon-align/merges.json
+>   cargo run --release -q -p eigenius-obograph --bin obograph-import -- --input references/hpo/hp.json \
+>     --output /tmp/hpo.eigon.json --root-anchor urn:eigenius:lexicon:Entity
+>   scripts/add-layer-to-snapshot.sh --base $S/wordnet-umls-aligned-$D --out $S/wordnet-umls-hpo-$D \
+>     /tmp/hpo.eigon.json
+>   scripts/build-hpo-alignment-snapshot.sh --base $S/wordnet-umls-hpo-$D \
+>     --out $S/wordnet-umls-hpo-aligned-$D
+>   docker compose down
+>   ```
+>
+>   The 2026-10-05 build: 38,391 alignment merges (with the polydipsia verdict), 20,533 HPO resources,
+>   864 HPO ≡ WordNet ≡ UMLS equivalences. Different numbers point at the inputs.
+> - **Re-adjudication:** 14 pins (the VP-adjunct `prep_*` occurrences — `prep_in` 6, `prep_from` 4,
+>   `prep_with` 3, `prep_to` 1) and their ledger rows, far fewer than the event design's 16 and 74,
+>   since `⟦S⟧` does not move. Verdicts fixed in advance: free adjuncts of governed prepositions
+>   become `correct` with `departs` (the adjunct reading is well-formed rather than contradictory);
+>   U1's noun-attachment rows become `wrong`; the frame is best for the sentences listed under
+>   "Frames" in `event-semantics.md`, whose frames decision survives. The candidate lists change, so
+>   a new live draw is needed (`--features use-llm`, `ANTHROPIC_API_KEY`).
+> - **The note's counts** (70 + 1 rows with a PP on the subject or a relativised noun, 46 on a
+>   verb, 18 governed free adjuncts, 62 pins, 48 verb pins, 139 mechanical and 74 re-adjudicated
+>   rows, 676 `cat_s` occurrences) are re-derived by `python3
+>   experiments/parsing/event-semantics-counts.py`; run it again after slice 2's re-adjudication.
+> - **Can ride along:** #60 (the «a DNA» atom) needs a reseed as well and can share slice 2's.
+>
+> **Exit gate:** the `adv_*` slice merged, with the 14 pins, their ledger rows and the 27
+> quantity-corpus rows re-adjudicated on a reseed.
+
+> **entry 3 (`2026-09-30`). Governed prepositions, and the reading ranker (#59). DONE, merged
+> `2026-10-06`; #59 stays open for strand 3, now under entry 4.**
+>
+> **Governed prepositions:** the WordNet importer decides an adjective's governed preposition against its own list of
+> eleven, which never gained `lexicon:Prep`'s `of` and `as`; it keeps one preposition per lemma, and
+> its gloss heuristic reads equatives and infinitives as governance. The parked WIP on
+> `origin/governed-prepositions` (one list in the kernel, every preposition WordNet names) does not
+> apply to `main` as is — its `dcg/category.rs` hunk conflicts with D95. The issue's proposal: attested
+> = WordNet's convention ∪ SPECIALIST's complements ∪ the curated frames (`scripts/provision-specialist.sh`,
+> D97), with attested ∪ the heuristic's first match as the loss-free interim. It lands with a reseed and
+> re-adjudicated pins (`… predictive of MMR deficiency`).
+> **Governed prepositions built (`2026-09-30`):** D97 decisions 6 and 7 decided for adjectives (7 revised the same day:
+> the judge places every multi-sense item; below-threshold yes votes place, a no to every sense is a
+> gap); the reader (`crates/eigenius-specialist`), the governance table (`eigenius-wordnet`,
+> `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 40/40,
+> adopted by the owner), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
+> adjective entries, `of` 0 → 1,003. **Measured** (`wordnet-umls-aligned-2026-09-30-governed-preps`):
+> grammar gaps 0, 62/62 expected hits, readings 652 → 668, skeletons 212 → 215; `… predictive of MMR
+> deficiency` re-pinned to its relational reading; selection 29/41 on a new draw.
+> **The reading ledger checks itself (`2026-09-30`, the owner's rule):** a reading whose
+> structure differs from its pin cannot count as correct, and a row contradicting another row's ruling
+> on its sentence is flagged. Each `wrong` row names what it rules out (a fifth field); the
+> `reading_ledger_is_consistent` test and the sweep check rows against each other, and the sweep
+> audits every row its forest produces (`ledger-conflicts`, gated to 0). 19 rows `correct` → `wrong`,
+> 3 `wrong` → `correct`. The owner's rulings: C0600688 «Toxic effect» and `arise` v02625786 are faithful
+> twins; need-claims (essential, dispensable, dependency, dependent on) and a drug target take the WRN
+> protein, not the gene, and seven pins moved to the protein kind. Selection re-baselined at 25/41 on
+> the governed-preps draw. Not covered: «WRN is a synthetic-lethal vulnerability» keeps its
+> gene-individual pin.
+> **#59 strand 1 done (`2026-09-30`):** the two-call ranker — a structure call in the sentence's own
+> words with how the structures differ, then a sense call — is the default. The A/B, three live
+> draws per arm on one snapshot, fully adjudicated: 29, 28, 30 of 41 correct against the flat
+> listing's 23, 21, 24 (`docs/notes/d69-reading-presentation.md` §7n). The structure call surfaced
+> three attachments the owner re-ruled (two library PPs as instruments, one locative over the
+> event).
+> **#59 strand 2 done (`2026-09-30`):** the two calls go through a provider-neutral decision
+> interface with Anthropic and TypeSafe deciders. Three draws per model: sonnet-4-6 26, 25, 26;
+> sonnet-5-5 29, 24, 28; jev-latest 26, 26, 26, in ~60 s a draw against ~400 s for sonnet-4-6
+> (§7o). The owner adopted `jev-latest` as the reading ranker's default; selection re-baselined on
+> its first draw. **Next:** jev's prompt and presentation (the `state`, the per-option criteria, the
+> sense call's legend), each variant a draw, its replay, and the adjudication of its new verdicts.
+> **Presentation screened (`2026-09-30`, offline over `EIGENIUS_DUMP_DECISIONS`):** ten prompt variants
+> stayed within noise. The structural rendering had shown the verb-adjunct reading as "and we with
+> «sequencing»", which decided most PP attachments for jev; rendered faithfully, jev attaches to the
+> verb almost everywhere (structure ~31 → 28.75 of 41), while sonnet-4-6 gets 7 of 9 attachment units
+> (structure 33). The owner asked for the alternatives as a grammar book shows them — the sentence
+> bracketed, each contested phrase's grammatical function — and a question without a parser: «Which
+> grammatical analysis of `the_sentence` matches what it means in `document`?». A word-search prototype
+> raised jev's structure calls from 15.4 to 18.5 of 27.
+> **Grammatical analyses done (`2026-09-30`, owner's design):** the parser records each item's
+> derivation (`dcg::derivation`); the structure call brackets what differs between analyses and
+> names each contested phrase's function (`dcg::analysis`). Structure calls 19.9 of 27 with jev. The
+> A/B, three draws each: jev-latest 28, 28, 27 of 41 (structure 31, 32, 30); sonnet-4-6 24, 24, 24
+> (32). jev stays the default; selection re-baselined at 28 (D69 note §7p).
+> **One question per word in the sense call (`2026-10-01`, owner's design):** 28, 29, 28 of 41 with no
+> abstentions (§7q); selection re-baselined at 28 on 41 decisions. The structure call's errors are
+> analysed in §7q: no model error under a clear presentation; the multiword-concept display and the
+> pin policy for lexicalised twins come first. **Open:** those presentation and pin fixes; the
+> sense-ranker rework; strand 3 (whether attachment is derivable); the «for cancer therapeutics»
+> attachment for the maintainer; the combined governed-prepositions + #59 PR.
+> **D97 slice 2 (verbs) joins the branch (`2026-10-01`, the owner):** «Some cancers do not respond to
+> immune checkpoint blockade» needs `respond to` on v00718737, which WordNet gives no PP frame. Decided:
+> a SPECIALIST preposition placed on a sense replaces the any-preposition frame there; the judge places
+> every several-sense item. Committed: 53 `lexicon:Prep` constructors with argument entries.
+> Then the verb governance, named PP relations `v{off}_p_{slug}` (frame 13 → `on`), the
+> judge for verbs, and the reader's per-word frames (WordNet restricts 365 frame entries to one word; reading them per synset
+> emitted 590 (sense, lemma, kind) triples WordNet does not give). 1,702 open items. **The judge,
+> accepted below the 0.95 bar (the owner):** recall clause 0.883, object 0.887 (held-out 0.900),
+> preposition 0.927; ten wordings and models tried (D97 decision 1). A preposition is placed only
+> where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 33 of
+> 40 correct. The gloss heuristic's proposals go to the judge (the owner). Measured on
+> `wordnet-umls-aligned-2026-10-01-verbs`: 62/62, readings 656, skeletons 220. **Next:** the draws.
+> **The sense ranker on the decision interface (`2026-10-01`, the owner's plan):** an instrument
+> scores the sense ranks against the reading ledger (SENSE RANKS line); the ranker asks one question
+> per word, and a probability floor (0.02) eliminates. The question was chosen on an offline screen
+> (S-guide2: "a grammatical word has one reading here"). Its first live run lost «Each event alone does
+> not lead to cell death.»: the lexicon filed «does» under two sense keys with one gloss, and the
+> model kept the question entry — fixed, do-support is one sense, with a test that a form's
+> sense keys have distinct glosses. A reply missing a question's answer left a sentence unranked —
+> the forced tool is now `strict`. The reseed then died three times at 21–24 GB: the
+> commit held two whole-layer copies of a chunk — fixed (peak 13.3 GB;
+> `reseed-oom-memory-investigation.md`). Replayed on `wordnet-umls-aligned-2026-10-01-do-sense`:
+> old prompt readings 646 / skeletons 229 / 62 of 62; S-guide2 714 / 205 / 62 of 62. 18 of
+> the 24 skeletons are «… showed greater dependence on WRN than …», where S-guide2 seeds the
+> comparative marker over UMLS's "Greater" qualifier; the extra readings are runners-up on content
+> words. **Adopted by the owner; re-baselined** (`baseline.json`) from a live run: readings 738,
+> skeletons 210, 62 of 62, readings ceiling 700 → 775; record and replay agree. Strict mode's grammar
+> limit cost two sentences on the first attempt; a choice is now asked in parts of eight questions.
+> The draws on this snapshot are done: the 9 open selections adjudicated, three draws
+> scoring 31, 31, 31 of 42.
+> **The owner's rulings of `2026-10-05`** (D69 structure-call note recommendation 2): a
+> preposition the lexicon places on a verb's sense is pinned as the verb's governed object (`result
+> from`, `arise from`, as `respond to`), its free-adjunct reading `wrong`; a multi-word span the lexicon
+> has as one concept is pinned as that term (C1155661 over «DNA mismatch repair»), its decomposition
+> `correct, departs`. The 2026-10-02 «analysed» ruling from main covers data from screens.
+> **Merged `origin/main` (UAB experiment 02) and re-baselined on the HPO chain** the owner
+> chose for the gate (`wordnet-umls-hpo-aligned-2026-10-05-merge`): readings 679,
+> skeletons 210, 62 of 62; selection 32 of 42 on three identical draws.
+> **The sense ranker's arms closed (`2026-10-06`, D69 note §7s):** part-of-speech labels on the options,
+> `claude-sonnet-5-5` and `claude-opus-5-5` with thinking — none beats S-guide2 (right sense first
+> 175–193 against 191; Opus refuses 5–7 calls as "bio"). The owner wrapped the ranker work here.
+> **Open:** the verb-adjunct encoding — D63 §(B)'s `And(V(s), prep(s, x))` puts every adjunct PP on
+> the subject (8 pins), the ground of the «from» ruling, and U1 («for cancer therapeutics») waits on
+> it; the lexicon gate on «a DNA» (a reseed; U2 itself was re-pinned to C1511689 on `2026-10-06`); the
+> combined governed-prepositions + #59 PR.
+> **#59:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
+> the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
+> behind a client trait; whether attachment is derivable at all (after the measurement). Each change
+> is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot, against
+> the selection baseline (26/41, the first `jev-latest` draw).
+>
+> **Exit gate:** governed prepositions landed with their reseed and re-adjudicated pins; #59's first two strands measured
+> on a fixed snapshot and the third decided.
+
+> **entry 3 (`2026-10-02`). UAB experiment 02 — typing a PMI registry case. DONE, merged
+> `2026-10-05`.**
+>
+> **Done on this branch:** HPO 2026-09-01 imported and aligned with UMLS; the design,
+> `docs/design/d99-uab-registry-case-typing.md`, all ten decisions decided
+> `2026-10-02` (decision 3: functional predicates on the protein allele; decision 10: disequality
+> by congruence plus a literal-apartness kernel rule, and `DecEq` removed); a findings write-up
+> shared with the PMI team (five questions open; D99's defaults stand in until they answer).
+> **Built (uncommitted):** decision 10 — `Apart`, a J rule that checks its motive, the codec and
+> ESL identity forms, `proof_judgement` on any resource (D89 §2), `DecEq` removed
+> (`kernel/tests/disequality_by_field.rs`).
+> Also built: the `variant` and `clinical` layers (`kernel/tests/d99_layers.rs`; `case` is an ESL
+> keyword), with witness keys hashed in normal form on both ends.
+> Also built: D99 decision 11 — `core:EquivalentClasses` (OWL's class equivalence as a resource,
+> subsumption only, Rule 26, SSSOM-style justification; `kernel/tests/class_equivalence.rs`) and
+> the HPO ≡ WordNet ≡ UMLS layer it carries (863 equivalences); the `_name`-entry gap in both
+> alignment emitters, which left 8,107 named-condition entries on their UMLS concept (traced from
+> "failure to thrive").
+> Reseeded `2026-10-02` once the variant and clinical layers were committed (`uab-d99-2026-10-02`);
+> the chain for experiment 02 is `uab-d99-r2-hpo-aligned-2026-10-02` (polydipsia maintainer
+> override, bare-standing HPO names).
+> Gate: 62/62, readings 612, skeletons 212, selection 30/41. Docker: host ports in Windows'
+> reserved range (50060–50159 since the restart) fail; the isolated kernel uses 18051.
+> Recorded the r2 draw as the tracked selections and baseline. The phenotype form is decided:
+> `wn:v00065370_t(kind_of(<HP class>), individual)`, WordNet's illness sense of *have*.
+> **Built (uncommitted, 2026-10-02):** D99 steps 4–7 — the converter
+> (`crates/eigenius-pmi-registry`), the SYN-26-002 chain and README (`experiments/pmi-registry/`),
+> the `clinvar` release layer, and the chain tests (in-memory, and on the r2 snapshot; both pass).
+> **Next:** the owner's review of the README's "Choices made in building the chain"; then the
+> merge to main. Step 8 (parse the prose) is optional and needs singular *patient*.
+>
+> **Exit gate:** D99's steps 1–7 built and tested; the branch reseeded and merged.
+
+> **entry 2 (`2026-09-30`). D95 follow-up. The parse results remain; entry 3 detours from it.**
+>
+> **Found after the merge:** the factor comparatives stated only the opaque `fold_lower`, so nothing
+> derived their order and a query for `fewer` missed every one. **Merged:** they
+> state the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`,
+> slice 9, 9d); reseeded as `wordnet-umls-aligned-2026-09-30-fold-order`, the page unchanged.
+> **Then the parse results** (the owner, `2026-09-30`: revisit as a follow-up):
+> - ~~the selection baseline~~ DONE `2026-09-30` on `prepositions-and-ranker` (entry 3): the owner
+>   ruled the structure rule and the open senses; the ledger checks itself, and the baseline is 25/41;
+> - slice 9 decision 3's scope, the median over both counts or the subject's only;
+> - the lexical gaps the quantity corpus found over the full lexicon: `confluence` is count-only and
+>   `sgRNAs` no plural count noun (`experiments/parsing/quantities/README.md`); `incubate` and
+>   `electroporate` go with D97.
+>
+> **Exit gate:** ~~the owner's selection ruling applied~~ (done); decision 3's scope reviewed; each
+> lexical gap assigned.
+>
+> **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
+> proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
+> decided then parked: the direction moved to representing the study's argument).
+>
+> **Next, after this entry pops:** a design for the argument of a study, informed by EXPO
+> (Soldatova & King 2006): hypotheses (research, null, alternative), results that support or reject
+> them, the experimental model (factor, levels, target), assumptions and conclusions, carried in
+> the CNL and linked through the justification layer. It takes over D98's decision 4, its causal
+> vocabulary, and the reading of the exclusives as rejected hypotheses, and the statistic routing
+> to D52 that D95 left out.
+
+> **entry 1 (`2026-09-29`). D95 — quantities in the parser. DONE, merged
+> `2026-09-30`.**
+>
+> **The goal:** numerical quantities and measurements with units as part of the propositions.
+> Slices 1–5 are built and re-baselined (62/62 expected hits, 0 grammar gaps, 626
+> readings). Slices 6–9 were rewritten on `2026-09-29` around the constructions the WRN paper
+> attests (`docs/design/d95-implementation-plan.md`, "Slices 6–9"). The owner's rule: a
+> construction the paper uses once will recur in the next paper, so it is built.
+>
+> **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation), slice 7
+> (counts; proportions; number words; a determiner before a numeral; counted conjuncts and
+> proportions sharing a head), slice 8 (offsets `72 h after X`, `later`, `by` + a value, fronted
+> adjuncts, `every N unit`, pseudo-partitives, `per` after a count, lists with the unit once) and
+> slice 9 (factors on count comparatives, `a median`, `compared to`).
+> **Measured:** the reseed after slice 9 (`wordnet-umls-aligned-2026-09-29-quantities-s9`):
+> 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
+> nothing on the page. The selection draw scores 29/41 against the selection baseline's 30.
+> **Merged** with the selection ruling deferred to the follow-up (entry 2).
+>
+> **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
+> reseed measured, then the branch's PR.
+
+> **The stack was drained on `2026-09-15`.** Every entry below is DONE, entry 0 included.
+
+> **entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index lifecycle.
+> DONE, merged.** Both issues closed.
+>
+> **Deletion cancels the sweep against the layer.** `gc::DeletionHooks` bundles the
+> resource cache, the bloom cache and the sweep registry, and GC cancels before
+> `delete_layer` and evicts after. D43 names layer deletion as the cancellation point and
+> four source comments repeated it, so cancelling from the caller would have left those
+> comments false and any other delete path uncovered. A reindex is deliberately *not*
+> cancelled: it is keyed by index IRI, not layer.
+>
+> **The commit hook now fires the reindex.** `trigger_reindex_async` puts
+> `ReindexDriver::run` on `spawn_blocking` (the driver is synchronous and the commit path
+> must not block on embedder IO) and the hook calls it after the post-Load sweep.
+>
+> **Wiring it exposed that the detection it depends on was wrong.**
+> `detect_reindex_targets` consulted the *first* chain-visible segment, and both backends
+> yield layers in `LayerId` (content-hash) order — nothing to do with chain position. The
+> hook's own sweep writes a new-model segment at the head layer before detection runs, so
+> on an upgrade commit that also adds content the chain holds two models and detection
+> answered from whichever hash sorted first. It now fires on *any* stale visible segment.
+> Cost is contained by a new `VectorIndex::scan_index_models`, which decodes only the
+> model field — the full decode would have deserialized every vector in the chain per
+> commit. Filed two follow-ups: the operator surface (the reindex trigger's other half: no list, no
+> status, no cancel for either sweep or reindex), and GC not evicting segment-cache entries.
+>
+> **Carry-in delivered, but not as specified.** The planned check —
+> `scan_chain` errors when `pending.contains_key(&layer.id)` — does not work, twice over:
+> retroactive validation calls `scan_chain(new_layer, …)` on the commit path, where the
+> layer is legitimately pending; and backend-less storage never drains `pending`, so every
+> layer there is "uncommitted" forever. `pending` membership is not the predicate.
+>
+> What ships instead is `Layer::is_persisted()` — one `load_handle` against the backend,
+> `true` when there is no backend — enforced at the three vector-sweep entry points as
+> `SweepError::LayerNotStored`. Those are places with no legitimate uncommitted use, which
+> `scan_chain` is not.
+>
+> Found via item F: `go_recall.rs` built its layer on a RocksDB backend and never called
+> `store_layer`, so every index-driven read came back empty and the sweep embedded 0
+> subjects. What makes it worth catching is that the layer is HALF readable:
+> `Layer::get_resource` consults `pending` deliberately, so direct resolution works while
+> index-driven discovery silently does not, with nothing saying which half you are in.
+>
+> **Not a Drop-based check**, though that was the first instinct. The commit pipeline is
+> `build → structural_validate → persist`, so a REJECTED commit legitimately drops an
+> uncommitted layer; a Drop warning would fire on normal operation.
+
+
+> **entry −4b2 (`2026-09-15`). Workplan item F — the Candle CPU sweep. DONE, merged.**
+> 101.2s → 14.9s, 6.8×, recall@10 = 7/7 throughout, inside the
+> issue's 15-30s target.
+>
+> **Bucketing was the issue's ask and got halfway**: sorting cache-miss texts by length
+> before chunking took 101.2s → 46.0s, because `BatchLongest` padding scales a batch's
+> cost to its longest member.
+>
+> **The rest was not padding at all — the sweep used 2.5 of 24 cores.** `gemm` does not
+> parallelise much at BERT-small's shapes. A wider batch is monotonically worse
+> (32/64/128/256 → 46.4/53.4/56.0/89.7s) and Intel MKL buys 6% for 9× the CPU, saturating
+> by 8 threads then regressing. Dispatching batches concurrently — parallelism at the
+> BATCH level, not inside the gemm — gives 46.0s → 14.9s on the same eight cores MKL
+> needed for 42.3s.
+>
+> **No `mkl` feature ships.** It cost 38 transitive dependencies and 403 lines of
+> `Cargo.lock`, permanent whether the flag is on or not. The finding is in the D43 notes.
+>
+> **The measured gate had been broken and nobody knew**, because it is `#[ignore]`d. No
+> number in the sweep-speedup issue was reproducible until that was fixed — including its own premise,
+> whose 162s/326s pair does not transfer between machines.
+
+
+> **entry −4c (`2026-09-14`). D92 — the resolved query AST. DONE, merged.**
+>
+> **Eight `Name` positions, and six were not following the resolution rule.** The short-name fix's review
+> found one guarded state; auditing the rest found that a pattern class was resolved THREE
+> times per query by three call sites, a FIBER institution and param table twice, and
+> `result_classes` and `ReturnItem.name` not at all. Every duplicate is a place two
+> mechanisms can disagree about one name, which is what produced the silent empty sets the short-name fix repaired.
+>
+> **`Name` conflated two things.** A pattern class is a reference the chain must declare;
+> `ReturnItem.name` is a label the author invents, and `return_shape.rs` synthesises an IRI
+> for it. Same spelling, same type, opposite obligations — which is why the discipline for
+> one read as the discipline for the other.
+>
+> **The AST is generic over a `Stage` trait now**, `Program<Parsed>` to `Program<Resolved>`,
+> with `resolve` a total function between them. The property is not that the unresolved
+> state is checked but that a missed position does not compile — which is exactly how the
+> FIBER defect got in, through an `else { continue }` that skipped a clause variant.
+>
+> **Two design corrections came out of implementing it**, both folded back into the note.
+> One type parameter cannot work: a pattern class resolves to a `ClassRef` (chain class or
+> relation) and everything else to an `Iri`, so one parameter forces a sum, and a sum lets
+> a property key hold a relation — the invalid-but-representable state the note removes,
+> relocated. And a `RelationId` identifies a RELATION, not a rule: a base case and a
+> recursive case are two definitions of one relation, and indexing definitions split the
+> derived facts so the closure never accumulated. The reachability tests caught it.
+>
+> **Six duplicate resolvers deleted, the compiler finding every one.** Including a
+> comorphism resolution that re-derived an IRI by PARSING the short name — a third
+> mechanism that could only succeed for a short name already an IRI.
+>
+> **`Query.result_classes` is checked for the first time.** Blast radius measured before
+> the rule landed: nothing in the tree names a result class, so it rejects nothing.
+>
+> **The cost, taken deliberately:** resolution errors block type errors, where one pass
+> reported both. Recorded in D2 §5.0, which now says resolution is a stage.
+
+
+> **entry −4b (`2026-09-13`). Query processing, items A–C plus the name rule. DONE, merged
+> `2026-09-14`.** Item A merged separately, on `2026-09-13`.
+>
+> **B — `NOT EXISTS` asks whether a property has a value.** There was no way to ask for
+> the resources that LACK a property. `NOT EXISTS` tested whether a VARIABLE was bound, which a
+> conjunctive `MATCH` always satisfies, so it matched nothing. It holds an expression now and
+> reaches a dot-path.
+>
+> **C — similarity narrows candidates only where it constrains every row (the Top-K pushdown's substance).**
+> The pre-pass computes one probe per `~` node and enumeration seeded from it, asking by VARIABLE
+> NAME — a name that does not say where in the condition tree the operator sits. A `~` under `OR`,
+> under `NOT`, or in `RETURN` / `ORDER BY` constrains no row, and seeding from those returned fewer
+> rows than the query asked for. The seed descends only through `And` now. Both probes are bounded,
+> after scoring rather than before, with different bounds: an unranked text filter must not be
+> capped at a pool size, and vector search computes `k*4` so `usize::MAX` overflows it.
+>
+> **Measured, and it is the only performance number in the set.** Same machine, same GO dump, both
+> commits the same day: cold BM25 207ms → 23ms (~9×), warm 193ms → 23ms, net RSS delta 367 → 214
+> MiB. Load phases unchanged to within 0.01s. D43's June envelope diagnosed exactly this cost and
+> filed the fix as a planner-pushdown concern; it needed no planner, only for enumeration to read
+> the set the pre-pass already had. **The June numbers are not a valid baseline** — re-running that
+> commit today gives 207ms, not the recorded 398ms, because the index layout moved in between.
+>
+> **The name rule, which item A deferred and mis-scoped.** D2 §5.4 and §5.6 have always said a
+> property name resolves against declared vocabulary. The evaluator matched the short name against
+> the LOCAL NAME of whatever IRIs the resource happened to carry. Two mechanisms for one name,
+> disagreeing in both directions and silent in both: a property declared `urn:ex:title_text` with
+> `short_name "title"` could not be named `title`, and an undeclared `urn:other:title` could. And
+> nothing checked that a brace key resolved at all, so a typo was an empty result set.
+>
+> **Both halves, because half of it was already tried and reverted.** A segment is a `Name` now, so
+> a quoted full IRI reaches what no scope declares — without that there was no escape hatch and a
+> namespace rule rejects queries that evaluate correctly. Resolution happens once at type-check and
+> rewrites the program; `find_property_by_shortname` is deleted, so no second opinion remains.
+> Scope is D2 §5.6.1, new: the pattern's class, or a FIBER binding's `result_class` +
+> `result_properties`, else `USING NAMESPACE` + the core prelude.
+>
+> **The FIBER row is D90's contract, not a new list.** The vocabulary a query may NAME on `?b` and
+> the vocabulary an institution may RETURN are the same list, so they cannot drift.
+> `declared_properties` moved onto `Layer` for the same reason — two callers, one answer.
+>
+> **Blast radius measured before the tests were written.** Full suite plus every EigenQL string in
+> the notebooks, the TS clients and the notebook runtime. One test failed: the one that pinned the
+> old dot-path semantics. Nothing outside Rust needed a change.
+>
+> **A code review found five defects, four of them introduced by the rule.** A FIBER param value
+> skipped resolution entirely, so a dot-path there type-checked with zero errors and failed at
+> evaluation with a message naming the compiler pass — one missed traversal arm putting a live
+> query into the state both evaluation sites called unreachable. The implicit core prelude
+> collided with explicit imports, making five shipped ontologies unnameable by short name with an
+> error whose stated remedy ("import fewer namespaces") cannot be taken. `unreachable_path` was
+> wired into one of five absence sites. The two evaluation guards disagreed, one silent. And a
+> second namespace-only resolver survived, reporting the same bad key twice.
+>
+> **The `rank.rs` no-caller issue closed too, after the claim was checked and found false.** Item C's
+> commit message said it closed that issue and it had not: `rank.rs`'s tested RRF still had zero callers while
+> `similarity.rs` reimplemented the formula. Adopting it surfaced something nothing had
+> documented — the two probes tie-break in OPPOSITE directions, so a tied pair fused to equal
+> scores by accident of the disagreement. One key now orders both.
+>
+> **The top-K pushdown issue is not closed and should not stay as titled.** Its asks 2 and 4 are delivered, ask 1 (a
+> planner logical-plan node) is abandoned on purpose, and ask 3 — name the 4× over-fetch factor —
+> is all that survives. Recorded on the issue.
+>
+> **Lessons worth keeping.** The spec said the rule all along; the implementation applied half of
+> it, and half a rule is unsound rather than merely incomplete. A claim to close an issue is a
+> claim to check, not to carry forward from a plan. And: save a patch before `git checkout --` —
+> reverting ten files to split a commit, with copies of only two, cost an hour of replay.
+
+
+> **entry −4a (`2026-09-13`). The institution result contract. DONE, merged.**
+> Was on `d90-institution-result-contract`. D90, implemented.
+>
+> **What an institution sends back is now checked against what it declared.** The declared contract
+> was an INPUT class: `marshal.rs` checked arity and property shape inbound, and nothing checked
+> outbound. `result_class` was required on every QueryClass and read by nothing. Three checks now
+> run at the dispatch boundary before the dispatch is recorded — the output contract is closed, a
+> term-bearing slot is declared as a proposition or a judgement, and the verdict constructor is one
+> the QueryClass permits.
+>
+> **The closed contract lives on the QueryClass, not on a `Verdict` subclass per institution.**
+> Rule 25 closes an inductive — a class may name one in `subclass_of` only from that inductive's own
+> layer — and `institution:Verdict` is an inductive, so the subclass reading D90 predicted is
+> refused at commit. `institution:result_properties` says it directly, and better: two QueryClasses
+> of one institution legitimately return different property sets.
+>
+> **It cost zero declarations.** With `Verdict` declaring `ctor_name`, `verdict_subject` and three
+> audit slots, every live institution passes on that alone. Statistics needed no edit: its gate
+> verdict carries only the diagnostic, while the proposition and the numerics ride on the
+> derivations, which is not what the draft assumed. The institution the contract actually bites on
+> is the external one, which returns whatever its substrate hands back.
+>
+> **A code review found four soundness defects, one of them reopening the institution boundary D90 closed.** The exemption list
+> treated three properties as kernel-stamped at positions where the kernel does not stamp them, and
+> all three are `core:resource` with no range — the one shape that admits a term. A term rode out on
+> `institution:from_subject` with zero violations. The check also stopped at depth one, refused two
+> of the four forms Rule 21 checks strictly, and still did not perform the `result_class` check
+> whose comment step 6 had corrected. And the test fixture did not validate: it named an institution
+> and a gated class nothing declared, and passed because dispatch resolves neither.
+>
+> **Lessons worth keeping.** An exemption list is a hole, and a hand-kept one drifts wider than the
+> thing it mirrors — derive it from the code that does the stamping. And a boundary check has to
+> descend, stopping where the nesting stops being the resource's and starts being the term's.
+>
+> **Reseed `2026-09-13` done.** Snapshots `wordnet-umls-2026-09-13` (3.45 GiB) and
+> `wordnet-umls-aligned-2026-09-13` (3.6 GB). All gates pass, and **every parse number is identical
+> to the `2026-09-12` run** — 62 units, grammar-gap 0, missing-lexeme 0, 1 encoded, 41 ambiguous,
+> 20 open, 674 readings, 171 skeletons, expected-hits 62/62 with the miss-set unchanged,
+> reading-correct 30/41, 0 invalid-selected, histogram bucket for bucket. One layer moved,
+> `institution`, so the reseed was the cheapest kind.
+>
+> **The first attempt measured the wrong configuration, and it looked like a regression.** It ran
+> LIVE against the RAW snapshot; the tracked runs REPLAY `ranks/2026-08-22-productiontrace.json`
+> and `selections/2026-08-22-productiontrace-live.json` against the ALIGNED snapshot. That run
+> reported expected-hits 62 → 61 and readings 613 → 1149 over the ceiling, all of it the LLM drawing
+> differently. **The run directory name carries the configuration**: a tracked comparison ends
+> `-replay-selreplay` and a live one does not.
+>
+> **Still open, deliberately.** Derivations get the term check and no closed-property check, so the
+> channel carrying the epistemic payload stays open-world — which is why closing the gate's contract
+> cost nothing. And the structural-followup pipeline has no `structural_validate` phase, so Rule 21
+> never runs on an emitted term at commit.
+
+
+> **entry −3 (`2026-09-12`). Correctness and consistency issues. DONE, merged.** Seven of the eight
+> picked off the open-issue sweep, on `consistency-fixes`.
+>
+> Merged, and all seven issues closed. Kept for the record of what was fixed and what the two
+> review rounds caught.
+>
+> | what it was |
+> |---|
+> | the memo key omitted the component ARGUMENT, so a second call with the same input and a different argument was served the first call's output and never ran |
+> | the parser flattened a qualified name and discarded the namespace, so `Type:ctor` resolved in a `def` body and not a `program` body |
+> | a string marshalled inbound to a one-property wrapper while the other three literal kinds carried their payload |
+> | 24 of 44 ontology documents sat outside `BOOTSTRAP_CHAIN` and no test put them through a validator |
+> | witness credit survived a rebinding of a class the proposition quantifies over — unsound on WIDENING |
+> | a one-sided plan halved its p-value and never checked the sign, committing the direction it did not observe |
+> | the reported panics were already gone; two callers still used the asserting readback on un-vetted terms |
+>
+> **The shape-only institution boundary deferred, deliberately.** The issue rules out a special-case check and points at D75 §5,
+> where an institution's signature becomes a type in Γ_env so crossing the boundary IS an
+> application. Architectural, needs its own design note. The stale comment at the site is corrected
+> and what is and is not covered today is recorded there.
+>
+> **Two review rounds, and both paid.** The first found a regression in the string-marshalling fix — two `val_to_resource`
+> functions send every non-`ResourceVal` to an EMPTY resource, so a program reading a string
+> property returned `{}` in release and panicked in debug outside the `catch_unwind`. The second
+> found a regression in that fix (a bare literal then got elevated into a committed chain resource
+> whose key is a `core:DataType`, which Rule 22 rejects), two holes in the witness-credit fix (the `Verified` family
+> is keyed off the TRACE's judgement, and a tombstone is not in `defined_iris`), and a verdict
+> labelled `AlphaNotCrossed` when the p HAD crossed and the direction was what refused.
+>
+> **Lessons worth keeping.** A green suite is not evidence a test ran — clippy caught an orphaned
+> `#[test]` attribute. A new test is not evidence either until it has been run against the bug:
+> two of these passed against deliberately broken code on the first attempt. And measure the blast
+> radius in every backend, not one — a probe placed in `RocksStore` alone reported 19 affected
+> sites where the real figure was 148.
+>
+> **Reseed `2026-09-12`** (the memo-key fix moved `program-traces`). Snapshots `wordnet-umls-2026-09-12`
+> (3.45 GiB) and `wordnet-umls-aligned-2026-09-12` (3.5 GB). All gates pass, and
+> **every parse number is identical to the `2026-09-09` run** — 62 units, grammar-gap 0, 674
+> readings, 171 skeletons, 30/41 reading-correct, histogram bucket for bucket. None of the seven
+> touches the grammar, the lexicon or the ranker, and the measurement says so.
+
+
+> **entry −2 (`2026-09-09`). Storage write atomicity. DONE, merged.**
+>
+> Closed two defects: layer insertion was not atomic across the indexes, and there was no
+> consolidation record. Both needed one decision first: which store receives a layer's index
+> entries. `store_layer`'s batch belongs to the receiver, `populate_layer_indexes` wrote through
+> `layer.storage()`, and the two could differ.
+>
+> **The binding settles it.** A layer is written to the store it was built on. `Layer::persist()`
+> takes no destination, `store_layer` refuses a mismatch, `store_layer_assigned` is the named
+> exception. Shape follows CoreData: a context is bound to its coordinator at construction and
+> `save()` takes no destination, with `assign(_:to:)` for the multi-store case.
+>
+> **Measure the blast radius in every backend, not one.** A probe inside `RocksStore` reported 19
+> affected sites; in the trait it covers the memory backend too, which most kernel tests use, and
+> the real figure was 148. Zero were the split-brain case (bound to A, written to B) — that never
+> occurred. 142 were a layer built on `in_memory()` and persisted to a real backend, sending
+> content to the backend and indexes to a throwaway.
+>
+> **Three sites genuinely mean the assignment form** and say so: the stub persister that records
+> what landed, the loops copying the in-memory bootstrap chain into a test backend, and the
+> cross-backend parity harness (one layer, two stores, because `created_at` is stamped once at
+> build).
+>
+> **A green suite is not evidence a test ran.** Clippy caught that a test insertion had orphaned a
+> neighbouring `#[test]` attribute, so `consolidates_ten_layer_chain_preserving_resolves` stopped
+> running while the suite stayed green.
+>
+> Manifest unmoved, so neither fix cost a reseed. Still open in the same area: `delete_layer`'s
+> batch is atomic but not `sync`, and `consolidate_chain` is itself three or four unbatched writes
+> (`store_layer`, vector consolidation, then the redirect install or branch advance) — a separate
+> transaction boundary, tracked nowhere.
+
+> **entry −1 (`2026-09-08`). D89 — the justification vocabulary. DONE `2026-09-09`.**
+> Merged; the one item it left open — `instantiate` taking `T` and `P`
+> implicitly — closed `2026-09-09`, and both reseeds it obliged have run. Kept for the record of
+> what the rename did and did not change.
+>
+> [`docs/design/d89-the-justification-vocabulary-refactoring.md`](../design/d89-the-justification-vocabulary-refactoring.md)
+> decides what changes; [`d89-rename-execution-plan.md`](d89-rename-execution-plan.md) decides how.
+>
+> **Landed.** The renames (`Certificate`→`Grounds`, `Claim`→`Declaration`,
+> `judgement`→`grounds_judgement`, `proof`→`proof_judgement`,
+> `reflection:canonical_proposition`→`eigentt:proposition`, `spec_poly`→`instantiate`);
+> `subject_iri` and `refutes` deleted; `Declaration` requires an attribution; `EncodedClaim`
+> subclasses it; the two observed-side resources reclassified. Then three things the plan did not
+> foresee: the EigenTT fragment merged into core (the namespaces stay, the layers could not),
+> `reflection:` dissolved into `program:traces:` and `institution:`, and `universe_level` became
+> `core:meta_level`. `every_esl_declares_its_prefixes` was added because a cross-namespace rename
+> introduces prefixes a residue grep cannot see.
+>
+> **Reseed done `2026-09-08`** (D89 §5b). Snapshots `wordnet-umls-2026-09-08` (3.76 GiB) and
+> `wordnet-umls-aligned-2026-09-08` (3.6 GiB); ~8.6M resources committed clean against the rebuilt
+> bootstrap. All gates pass and **every parse number is identical to the pre-refactor run** — 62
+> units, grammar-gap 0, 674 readings, 30/41 reading-correct, histogram matching bucket for bucket.
+> The rename was a rename.
+>
+> **Closed `2026-09-09`, the one thing D89 left open.** `instantiate` now declares
+> `implicit(T, P)` and ten call sites lost two arguments each. It waited on the unifier's scope
+> check, which identified generated variables by reading names back and so admitted exactly what it
+> exists to refuse; that check now walks levels and refuses shapes it cannot see inside
+> (`UnifyError::Undecidable`). Enabling it exposed a gap the deferral had hidden: a solved implicit
+> binder was never checked against its declared type, invisible while `app` was the only implicit
+> constructor because its `A` and `B` are both `Prop`.
+>
+> **Second reseed done `2026-09-09`**, paying off the three manifest moves that postdated the
+> `2026-09-08` one:
+>
+> | layers | what moved |
+> |---|---|
+> | `core`, `justification` | the witness-admission rename, description text |
+> | `justification` | `instantiate` declares `implicit(T, P)` |
+> | `core` | three sentences the rename missed; the drift log's own entries |
+>
+> Snapshots `wordnet-umls-2026-09-09` (3.63 GiB, 81 files) and `wordnet-umls-aligned-2026-09-09`
+> (3.7 GB). All gates pass, release, replayed:
+>
+> | | |
+> |---|---|
+> | units | 62 |
+> | grammar-gap / missing-lexeme | 0 / 0 |
+> | expected-hits | 62/62, miss-set unchanged |
+> | total-readings / total-skeletons | 674 / 171 |
+> | reading-correct | 30/41, 0 unadjudicated |
+> | invalid-selected | 0 |
+> | runtime | 50.72s |
+>
+> **Every number is identical to the `2026-09-08` run, histogram bucket for bucket.** Both reseeds
+> now say the same thing: these were description edits and one constructor binder, and neither
+> touched what a chain means.
+
+> **entry 0 (`2026-08-28`, audited `2026-09-15`). *Judgements, Warrants, and Logics*
+> (`docs/design/judgements-and-warrants.tex`). DONE — P0 through P7 all landed.**
+>
+> **This entry said "P0 is the next task" until `2026-09-15`, and had been wrong since
+> `2026-08-29`** — P0 ran the day after the entry was written and left its numbers note at
+> [`2026-08-29-p0-measurements.md`](2026-08-29-p0-measurements.md). The rest of the plan
+> landed over the following fortnight while the stack's attention was on entries −1 to −4d,
+> and nobody came back to this line. It was read back as the active task on `2026-09-15`
+> and corrected the same day.
+>
+> Verified against the tree: P1 (`eigentt:Term`, `eigentt:Judgement`/`Logic` with
+> `holds(...)`, the `justification:` namespace); P2 (`eigentt:expected_type` and a uniform
+> `Ann` rule; `PROPOSITION_SLOTS` retired, its exemption list replaced by a structural
+> condition); P3 (`proof_term` gone from both named sites, `is_fully_verified` reading
+> `Ground::Verified` leaves, the gate asserted in `notebook_fixture_test.rs`); P6
+> (`kernel/tests/justification_wellfounded.rs`). P4 and P5 record "Exit criteria met" in
+> the plan itself. The successor plan states it outright:
+> `numeric-core-and-verification-judgement-build-plan.md` opens *"Follows … and
+> `judgements-warrants-build-plan.md`, whose P0–P7 all landed."*
+>
+> **P7's one deferred question is also closed.** §"Open after P7" left whether the witness
+> index is a soundness boundary or a cache over relations, to be answered once at the end.
+> D87 §7 answered it — `Verified` was the family where it is not a boundary — and
+> `numeric-core-and-verification-judgement-build-plan.md` §3.5 is the closeout.
+>
+> **How this went unnoticed is the part worth keeping.** The plan records completion as
+> prose inside each phase ("**Exit criteria, met.**") rather than a status line per phase,
+> so "how far did this get" cannot be answered from the top of the document — it takes a
+> grep per phase against the tree. Two phases carry that marker; the rest carry none,
+> including phases that are done.
+>
+> **Nothing from this line of work is open.** The last candidate was
+> [`next-steps-after-d88.md`](next-steps-after-d88.md) §B6's `OPEN (2026-09-09)` marker —
+> `parse_literal` and `resource_value_to_val` deciding a value is an IRI by matching the
+> `urn:`/`http` prefix instead of reading a declared type. That marker is stale as well:
+> *"A string is a reference because a declaration says so, not because of its prefix"*
+> (`2026-09-09`) rewrote both sites, `resource_value_to_val` now branches on
+> `StringRole::Reference` and `parse_literal` has no prefix test left.
+> The marker outlived its defect by six days.
+>
+> **Two stale markers found while auditing one entry, both pointing forward at work already
+> done.** Prose status inside a long document decays silently: nothing fails when it goes
+> wrong, and the next reader inherits it as fact. Treat a "next task" or "OPEN" line as a
+> claim to re-verify against the tree, not as state.
+
+> **entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
+> two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
+> **D76 and D78 are complete.** D77 was drafted as the third follow-on and turned out to carry three
+> separable projects; it was split on `2026-08-25` into a dependency chain, and the build order is the
+> reverse of the drafting order:
+>
+> 1. **D79 — the representation of inductive types. ✅ COMPLETE `2026-08-26`.** All seven phases
+>    landed: P1 seal, P2 declarations (23 properties), P3 `core:mentions` indexer arm, P4 vestigial
+>    ctor `@id`, P5 (already done by D76 Phase F), P6 qualified ctor syntax,
+>    P7 chain-declared `core:List` with both kernel special cases deleted. Reseed clean at
+>    **9,439,633 / 0 errors**; index growth measured **+128 MB (+4.7%)**; parse gate all-green;
+>    demo passes. See D79 §7 for what each phase actually did versus what was planned — three of
+>    seven differed.
+> 2. **D80 — witness and institution machinery.** Two facts earned under a binding that survive it
+>    changing: witness credit (D75 §3.4, standing test at `witness_admission.rs:1184`) and institution
+>    verdicts whose bound data was rebound. Both fire on a *linear* commit. W0 (what revocation
+>    means) → W1 binding-aware lookup → W2 AutoOnLoad baseline → W3 provenance closure.
+> 3. **D77 — merge as a pushout.** #54. Last because it needs recheckers to call, and for witnesses
+>    and verdicts "recheck" was unsettled until D80 — both answers turned out to differ from the
+>    resource one and from each other. §3.6's rename defect was fixed early (D79 P2 unblocked it),
+>    so F1 no longer needs to size it.
+>
+> **Detour taken `2026-08-26`, on top of the above:** D80's W-phases were not started. Instead the
+> stack was analysed first (`docs/notes/d81-epistemic-stack-analysis-plan.md` → **D81**, a
+> description of the epistemic machinery as implemented), and the user then reframed the whole area:
+> the system was anchored on *resources* but is about *propositions and how they came to be
+> warranted*. That produced **D82** (design, no code) with a seven-step sequence S0–S6. **D80 and
+> D77 are now downstream of D82's S1** — the witnessed relation in `WitnessKey` is the fix for the
+> environment-blindness D80 W1 was going to address, so W1 should not be built before S1 lands.
+>
+> **Loose ends from D79, none blocking:** the parse baseline records readings 613 / skeletons 170
+> and a live run now measures 688 / 180 — both within ceiling, gate green, cause unconfirmed (P7's
+> `core:List` decode is the hypothesis). Updating `baseline.json` needs a recorded **replay** draw
+> and an explanation, per its own protocol. Two selection decisions are unadjudicated in
+> `reading-adjudications.tsv`. The recursor's large-elimination cap and declaration-level universe
+> polymorphism are confirmed addressed.
+>
+> Entry 2 stays the tracker for what fusion does *not* cover.
+>
+> **Superseded note (entry 2, `2026-08-22`), kept for the reasoning:** The parser-pipeline spine emptied
+> on `2026-08-20` when D71 met its gate; entries (2) and (3) below are the pre-D71 spine, assessed on
+> `2026-08-19` as largely implemented-or-obsolete, so neither was promoted by position. P2 was picked
+> up instead. The two candidates that were live and stay unstarted:
+>
+> - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
+>   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
+>   decision shrank from a design problem to a measurement.
+> - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
+>   thing in the tree that still earns it.
+
+### 1. [d75-fusing-eigentt-and-the-knowledge-graph.md](../design/d75-fusing-eigentt-and-the-knowledge-graph.md) — **fusing the type theory with the graph**
+The diagnosis: two seams, built twice — Seam A (*the layer chain is `Γ_env`*) and Seam B (*a resource
+is a record*) — with nine symptoms and ten questions, all answered. Two implementation documents hang
+off it.
+
+#### STATUS `2026-08-25`
+- **[D78](../design/d78-resources-as-records.md) — Seam B: complete.** All five phases. Closes D75
+  §3.7 (the Σ-chain), §3.8 (undeclared properties projectable) and §6.0's three-implementations
+  duplication, plus two latent defects: local-name projection collisions, and `classes.first()`
+  discarding 73 % of class claims. Two deferrals remain in its §9. Its §3.1 entailment arm is parked
+  on D76 Phase D.
+- **[D76](../design/d76-the-typing-environment.md) — Seam A: Phases A, C, B complete; D, E2, F open.**
+  Order is `A ▸ C ▸ B ▸ D ▸ E2 ▸ F`.
+
+  **Phase B is done and its gate is met:** no `Exp` variant carries an `Arc<InductiveDecl>`, and the
+  self-reference stub is gone. Six defects surfaced along the way, none findable by the compiler — the
+  felicity and parse suites found them all. The pattern, worth carrying into D: **inlining hid every
+  place a name could not be resolved**, because the answer travelled inside the term, and a missing
+  answer degrades to a *neutral* rather than an error.
+
+  **B2 is deferred by design** — turning on the arity check the stub was suppressing is
+  verdict-affecting over the whole chain, so it runs the probe protocol: instrument, count, then
+  enforce. Its natural shape is nanoda's: give a type former the Π-telescope type
+  `Π(params)(indices). Sort l` and let the ordinary application rule check the arguments, deleting
+  `check_inductive_type_args`.
+
+- **Next:** the reseed (running `2026-08-25`, from the last Phase B commit) validates four commits
+  of kernel change against the real 9.4M-resource chain and is the only place §4.2's `Global`-memo
+  boundedness gets measured. Then Phase D — δ in conversion, 54 call sites — which is what D78 §3.1
+  is waiting on.
+
+### 2. [p2-type-theory-soundness-plan.md](p2-type-theory-soundness-plan.md) — **P2 · type-theory soundness**
+What EigenTT wrongly admits, and what it cannot yet express: nine issues in four tracks, plus the
+manifest-hashing fix as a prerequisite.
+
+#### STATUS
+Scoping done `2026-08-22`; no code yet. Three issues closed during scoping because they were already
+fixed — check mode admitting `SomeClass : Prop`, the D47 codec's term-level index values (done but
+the deliberately-deferred `Exp::Con`), and inductive families (delivered by D48, residue = the
+index-aware motive, the no-confusion principle and the unused Warshall solver). Branch `eigentt-improvements` from `main` of `2026-08-22`.
+
+**The gating decision is the strict-positivity fork** (plan §1) and it is not a code question. The positivity pass
+already exists (`kernel/src/nbe/positivity.rs`, called from `check/mod.rs:335`); the ESL declaration
+path never reaches it. Routing it in unchanged **rejects the bootstrap** — `cat_forall`,
+`cat_fin_forall`, `cat_num_forall` (`ontologies/lexicon/lexicon-ontology.esl:271,280,281`) are
+higher-order positive, the shape `positivity.rs:507` pins as rejected. **Working hypothesis `2026-08-22`: arm 1**, extend the criterion — scoped in
+[p2-n1-positivity-criterion.md](p2-n1-positivity-criterion.md). Kernel-only, no reseed, `lexicon:Cat`
+unchanged. N1 §5 splits it in two, **verified `2026-08-22`**: the current restriction is a *completeness* limit,
+not a soundness one — `derive_minor_type` and `iota_reduce_impl` filter on the same predicate and skip
+a higher-order argument identically (pinned by
+`higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`, `nbe/eval/iota.rs`). So
+**strict-positivity step 1 — widen the criterion, route ESL declarations through the pass — lands
+BEFORE the index-aware motive**;
+step 2 (function-typed IHs) after it.
+
+**The manifest-hashing fix is no longer this package's prerequisite.** Under arm 1 nothing here edits
+a bootstrap ontology except universe polymorphism, and the hashing fix itself moves all 21 manifest
+lines at once (the stored value is `current_manifest()`'s output at seed time), so it owes one reseed
+to adopt. Fold it into the universe-polymorphism reseed rather than paying a standalone one.
+
+#### DONE
+- **Strict positivity, step 1 (`2026-08-22`).** Criterion widened to classical strict positivity; `RecArgShape`
+  (`nbe/positivity.rs`) is now the single definition of "recursive occurrence", consumed by
+  positivity, `recursor::derive_minor_type` and `eval::iota_reduce_impl`;
+  `InductiveDecl::is_direct_recursive_ref` removed. **Rule 23** (`validation/rules/positivity.rs`)
+  routes `core:InductiveType` declarations through `check_positivity` at commit — the edge that was
+  missing, since `check_positivity` only ever ran on the TERM form and ESL `data` never produces
+  one. Measured before enforcing: 42 declarations on the bootstrap, 42 admitted, 0 decode failures,
+  exactly the three predicted higher-order ctors. Revert-checked: without the rule,
+  `Validator::validate()` returns `[]` for `(Bad -> boolean) -> Bad`, reproducing the original symptom.
+  Manifest unmoved, no reseed.
+
+- **`__case_arg` (`2026-08-22`).** Case-branch binder renamed `__case_arg` → `CB#{level}`, using the
+  checker's existing `#` discipline (`TC#`/`G#`) rather than the issue's `__case_arg_{level}`, which
+  is still a legal ESL identifier and therefore still forgeable. Two findings recorded on the tests:
+  the collision the issue describes is **not reachable today** (readback is normalizing and mints
+  only `Gen(j, name)` → `"{name}{j}"`, so no free source name reaches the spliced motive), and the
+  arm had no test coverage at all. Closed.
+
+- **Check-mode audit (`2026-08-22`).** The sweep found **six** `(Exp::X(..), Val::Sort(_))` arms, not the two the
+  issue named — `SizeSort` was a third instance, with code, comment and inference giving three
+  different answers. Five are **deleted**, not tightened: each was `check_type(ctx, exp)`, which is
+  `check_infer`'s arm minus the universe comparison, so they now fall through to
+  `check_by_inference` and check/infer agree by construction. `SizedPi` stays permissive
+  deliberately — no `check_infer` rule exists, and the probe logged it unconditionally with **zero**
+  workspace hits, so there is no evidence to pick its sort from; reasoning recorded on the arm.
+  Measured 12 probe hits, all `inferred <= expected`. Closed.
+
+- **Index-aware motive (`2026-08-22`).** Motive is index-aware: `Π (i₁:I₁) … (i_m:I_m). D(params)(i₁…i_m) → Sort`,
+  result at the major's own indices. nanoda settled the direction (`mk_motive_dep` /
+  `mk_minors1group` both read one `local_indices`), so the motive moved to meet the minors.
+  **Watch the name hygiene**: building the motive type as an `Exp` put the burden on names, and the
+  first version let an index binder capture a same-named parameter — domain `D(idx, idx)` instead of
+  `D(param, idx)`, returning `Ok` because a constant motive checks against either. Fixed by reading
+  parameters back from values and naming index binders `IDX#{k}`. Closed; **the no-confusion principle unblocked**.
+
+- **No-confusion principle closed `2026-08-22` as won't implement.** The index-aware motive
+  unblocked its eliminator; assessing it then
+  showed three unbuilt kernel features behind it and no consumer — `IdJ` carries no motive
+  (`check/mod.rs:1105` ignores `_c`; deferred to "Phase 10b" higher-order unification), no
+  heterogeneous equality exists for the indexed case its trigger names, and generated lemmas have
+  nowhere to live. Also **nanoda does not have `noConfusion`** (grep-verified): it generates
+  recursors and `Quot`, both kernel constructions, while `noConfusion` is a frontend definition —
+  the issue's pointer at nanoda as "the inductive elaboration this would extend" was wrong.
+  **Raise `IdJ`'s motive first if revisited.**
+
+- **Strict positivity, step 2 (`2026-08-22`) — CLOSED.** Both halves of the eliminator now build the hypothesis for
+  a higher-order positive argument: `Π b₁:B₁ … B_k. motive idx… (arg b₁ … b_k)` in
+  `derive_minor_type`, `λ b₁ … b_k. rec … (arg b₁ … b_k)` in `iota_reduce_impl`. Induction through a
+  reflexive argument computes, pinned by `iota_recurses_through_a_higher_order_argument`. IH binder
+  renamed `__ih_N` → `IH#N` (a ctor argument of that name captured it — third capture defect of the
+  session). Track A and Track B are done.
+
+- **N2 written `2026-08-22`** — [p2-n2-sized-types-wire-or-delete.md](p2-n2-sized-types-wire-or-delete.md).
+  Recommends **deleting** the ~390-line Warshall solver, keeping the comparison pair. Three findings:
+  wiring is not "add a caller" (there is no flexible size in the term language to solve for —
+  `FlexId` appears nowhere outside `sized.rs`); **nothing uses sized types at all** (`core:Size` is a
+  compiler built-in, declared in no ontology, and no chain term carries a size form); and
+  `references/miniagda` **does not exist**, so the port's faithfulness cannot be checked.
+  **Correction to the earlier reading of the `Decl::Drec` escape hatch**: its option 1 is not expensive because the sized path
+  is onerous — *none* of its three sanctioned recursion forms has a chain user, and neither does the
+  bare-`letrec` hazard. No recursion of any kind is exercised by any chain in this repo, which makes
+  gating the escape hatch cheap now and expensive later.
+  **Corrected `2026-08-22` after review**: sized types exist for **codata productivity** first
+  (D19:491 — "required for complete termination story when combining inductive recursion with codata
+  corecursion"), not inductive termination. The productivity site — `check/mod.rs`'s
+  `Lam`-vs-`SizedPi` arm, which registers `j < upper` in the TSO — is a wired user the first draft
+  missed, because it feeds the comparison pair rather than calling it. Recommendation unchanged:
+  productivity works from sizes that are WRITTEN; `solve` infers sizes that are unknown, and there
+  are none.
+
+- **Warshall solver CLOSED `2026-08-22`**. Solver deleted, `sized.rs` 1047 → 410 lines; comparison
+  pair and its 32 tests untouched. The deletion exposed two stale docs, both fixed: `sized_rigid.rs`
+  described MiniAgda's two constraint systems with a live intra-doc link to the removed one, and the
+  user-facing primer §7.6 advertised "the dual-solver pattern" in two places. Both also carried
+  dangling `references/miniagda/…` paths — MiniAgda is not vendored at all.
+- **`Decl::Drec` escape hatch CLOSED `2026-08-22` as won't implement.** Option 1 is vacuous: **ESL has no `letrec`** —
+  `grep letrec|Drec` over `parser.rs`, `compile.rs`, `ast.rs` returns nothing — and **nothing in
+  production constructs a `Decl::Drec`** (the only two sites are in `check/codata.rs`'s test module).
+  The divergent program is reachable only from Rust, so there is no surface to gate. The kernel's
+  acceptance of a non-terminating `Drec` is a fact about the term language for D9/D19, not an open
+  defect. **Successor question, unfiled:** does `Decl::Drec` earn its place at all? Its stated
+  justification is recursor derivation, which does not use it — same shape as the Warshall solver. Needs a look at
+  `eval/mod.rs:219` and the codata corecursion tests first.
+
+- **N3 written `2026-08-22`** — [p2-n3-universe-polymorphism.md](p2-n3-universe-polymorphism.md).
+  ~~Recommended holding universe polymorphism~~ — **SUPERSEDED `2026-08-22`: building it**, on the Cooper/TTR reasoning (§5a). §§2-4 and §7 are the design; build log in §8. Its own trigger — "a second level bump is proposed" — is measured and
+  has not fired: `Prop` 712 uses, `Set` 230, **`Type 1` exactly 2** (spec_poly's binder and
+  `data lexicon:Cat`), **`Type 2` zero** (the one textual hit is a comment describing the ladder).
+  The three design questions are settled anyway so they are not re-derived: representation mirrors
+  **`lean:LeanLevel`**, which already carries nanoda's five ctors (Zero/Succ/Max/IMax/Param) on the
+  chain — a precedent nobody had noticed, and the reason a future Lean externalization becomes a fold
+  rather than a special case; **no ESL syntax** initially, level inference via `uparams` instead;
+  migration is small (**zero encoded `Sort` terms in any repo chain**) but needs a snapshot check,
+  and the decoder should accept the legacy integer. **Watch conditions**, neither in its scope: the **TTR work** (Cooper, *From Perception to Communication* —
+  already a cited anchor in D18/D61/D62; **TTR uses universe polymorphism**, and stratified predicates
+  over record types are exactly what a fixed rung cannot express) is the likeliest trigger; the Lean
+  proof-to-claim binding (D74) may also make universe polymorphism its prerequisite. Whoever starts the TTR work should read N3 §2 first — the
+  level algebra to mirror is already on the chain as `lean:LeanLevel`, and choosing a different one
+  there would be expensive to unpick.
+
+- **N4 written `2026-08-23`** — [p2-n4-eigentt-representation-layer.md](p2-n4-eigentt-representation-layer.md),
+  *should the EigenTT term representation move to core?* **Yes**, and the bootstrap-cycle objection
+  does not hold: the D47 decoder dispatches on hard-coded ctor names, so nothing needs a `TypeExpr`
+  value to decode one. Root cause of a recurring symptom — `core` owns the inductive metamodel but
+  not the term language, so every type-valued slot there degrades to a string (`result_sort`, fixed
+  by universe polymorphism; `param_kind`, silently types a class-typed parameter `Set`; `type_name`, correct only
+  because it has the `EigonClass` arm `param_kind` lacks). `eigentt-type-fragment` bundles two
+  strata — the term language, and `Axiom`/`Definition` which consume it — so moving `TypeExpr` down
+  separates rather than breaks. **No open questions**: Rule 16's recursion is structural on the VALUE tree, so
+  reading `TypeExpr`'s `ctors` while checking a value inside them is a bounded read, not a loop.
+  §4a records what the retype closes — **Rule 16 fails open on parameter-typed arguments**,
+  returning `Ok` for any `type_name` that is not an IRI, i.e. every parameter-typed ctor arg of
+  `logic:And` / `logic:Or` / `core:Option`. Latent (no such values on a chain) but one prose
+  encoding away: closed-class gives *"but"* the semantics `logic:And(s₁, s₂)`. **Folded into P2 on this branch** (`2026-08-23`), own gate (§7), rides the universe-polymorphism reseed. **89 hand-authored values** across four JSON ontologies migrate by one-shot script, each guarded by an old-decode/new-decode equivalence check — decompile-then-recompile cannot do it because `eigenius decompile` flattens `data` to `resource` (filed, not a prerequisite). The retype cannot be scoped: `core:type_name` is one property, so the Lean mirror's 36 values are in scope and **four** layers move.
+- **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
+  ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
+
+- **N4 LANDED `2026-08-23`.** `eigentt:Term` moved into `core-ontology.json` (IRI unchanged),
+  `SizeSort` ctor added, `param_kind` and `type_name` retyped, 85 values migrated by script with the
+  equivalence guard, manifest re-pinned on **five** layers (the four predicted, plus `reasoning`),
+  full gate green (185 test binaries, clippy, fmt). **The reseed is the only thing left.**
+
+  N4 estimated **six** code sites; there were **fifteen**, and the nine extra were all silent
+  readers — code that read the property as a `Value::String`, got `None`, and carried on. Three
+  head-readers had been written by the time the suite was green; they are now one
+  `program::ground::arg_type_head`. The Julia mirror generator's two readers had **passing tests
+  throughout**, because their fixtures build the property by hand and kept writing strings.
+
+  Four defects the retype surfaced, none of them caused by it:
+  - **Every index kind on every chain decoded to `EigonClass(core:Set)`** — `decode_indices` had
+    `_ => "urn:eigenius:core:Set"` as its fallback, and that IRI is not a declared resource.
+  - **`check_type`'s fallback was `check(a, &Val::sort(1))`** — "is a type" spelled as "inhabits
+    `Set`", so `T : Type 1` was not a type. Now `ensure_sort(infer(a))` (nanoda `tc.rs:244`). Same
+    defect as the `Level` `Ord` derive: a universe comparison written as a constant.
+  - **`check_type`'s `Exp::Inductive` arm never type-checked the telescope** — nanoda gets it free
+    because a declaration is one Π-chain `Expr`. Now `check_inductive_decl_telescopes`, and Rule 23
+    routes the declaration through `check_type` rather than calling `check_positivity` directly, so
+    it is one gate and not a re-listing (renamed `rules/inductive_decl.rs`,
+    `InductiveDeclInadmissible`).
+  - **nanoda's ctor-argument universe constraint** (`inductive.rs:904`) is ported as well, after
+    the probe protocol: logged first, and the whole workspace produced **one** violating
+    declaration. `reasoning:JustifiedBy` was at `Type 0` while `spec_poly` binds `T : Type 1`
+    (`Sort 2`, so the argument sits at `Sort 3`) — and `spec_poly`'s own comment had predicted the
+    fix ("a rule quantifying over `Type 1` domains would need `Type 2`") while the declaration
+    contradicted it. One-token edit to `Type 2`; **`reasoning` becomes a fifth moved layer.** Still
+    unported: nanoda's parameter-prefix `assert_def_eq` (`:892`), which only bites on the
+    independently-authored `core:ctor_type` path.
+  - **The three telescope producers had drifted** — the codata-param site used `var_value` where the
+    other two used `bare_kind_value`. One `Compiler::lower_kind` now serves all three.
+
+  `core:Set` and `core:Size` were written in ESL fixtures as if they were resources. Neither is
+  declared on any chain; `wk::SET_KIND` / `wk::SIZE_KIND` were unreferenced residue and are deleted.
+
+#### FAST-FOLLOW (after the reseed, alongside the decompile round-trip fix)
+Filed `2026-08-23`. All four are residue of this package, and the accounting is worth stating
+plainly: **this repo has no third-party code**, so "pre-existing defect" means "written here in an
+earlier session". The hardcoded universe constants are sharper than that — the `Sort(1)` fallback
+survived the universe-polymorphism work's OWN `usize`→`Level` migration, two days before it was found.
+
+- `eigenius decompile` flattens `data`
+  to `resource`, so inductives do not round-trip. Wants a document-level ESL round-trip test first:
+  the existing suite is entirely term-level, which is why this was invisible.
+- Sized types are half-migrated:
+  `SizedPi`/`SizeInf`/`SizeSucc` absent from the D47 codec, `core:binder_kind` still a string that
+  matches the non-resource `urn:eigenius:core:Size`, `Size` an identifier where `Set`/`Prop`/`Type`
+  are keywords. `needs:decision` — N2 §3's "nothing declares a sized type" makes *deleting* the
+  half as coherent an ending as closing it, and nobody has called it.
+- Two unported declaration-admission
+  checks: nanoda's parameter-prefix `assert_def_eq` (`inductive.rs:892`, bites only on the
+  independently-authored `core:ctor_type` path) and `no_dupes_all_params` (`tc.rs:167`) — the
+  latter introduced by slice 5c, which added `universe` declarations without it. A lint, not a
+  soundness hole; the ticket says so rather than overclaiming.
+- Hardcoded universe constants
+  survived the `usize`→`Level` migration. Carries the full `is_nat(<literal>)` sweep so it is not
+  redone: `is_nat(0)` is legitimate throughout, `is_nat(1)` is test assertions plus one redundant
+  arm plus **one real defect** — `Exp::Data` is checkable only against `Set`, and unlike the `One`
+  arm it has no `check_infer` fallback to rescue it.
+
+#### RESEED — DONE `2026-08-23`
+Timings in [reseed-timings-2026-08-23.md](reseed-timings-2026-08-23.md).
+
+| step | result |
+|---|---|
+| `reseed-lexicon-db.sh --umls-all` | **34 m 40 s**, 9,439,633 resources, 35 loads, 0 errors → `wordnet-umls-2026-08-23` |
+| `build-alignment-snapshot.sh` | 40,357 entries redefined from 38,389 merges, 0 errors → `wordnet-umls-aligned-2026-08-23` |
+| `measure-parse-rate.sh` (live reranker) | coverage **PASS**, expected-hits **62/62**, invalid-selected **0**, skeletons 170→**168**, readings 613→617 |
+| `demo/wrn-helicase/run.sh` | **56 Holds, 0 Fails, 0 errors**, all 6 steps incl. every wrapped-R warrant |
+
+**The WRN demo is where the P2 gate was actually exercised outside the bootstrap.** The lexicon
+chains contain zero `data` declarations, so Rule 23 returned at its first line for all 9.4 M
+resources. The WRN corpus declares **46** inductives, and they are the shape that matters:
+`data onco:TopDifferentialDependency : core:string -> core:string -> Prop` — an INDEX telescope of
+`core:string`, which is precisely where `decode_indices`' `_ => "urn:eigenius:core:Set"` fallback
+lived. Before the fix those indices decoded to `EigonClass(core:Set)`, a class nothing can inhabit.
+All 46 admitted. All end in `Prop`, so the constructor-argument universe constraint takes its
+impredicative exemption on every one — exercised as *not firing*, which is correct behaviour.
+
+**Parse gate: one red, accepted as noise (user decision `2026-08-23`).** `reading_correct`
+29/40 vs the tracked 30. Traced to two units flipping — one wrong→correct, one correct→wrong — and
+**both had byte-identical candidate sets** (8 and 24 candidates, unchanged). The regressed unit
+differs in a single WordNet sense of *impairment* (`n00403334` the act → `n14561618` the state);
+`cancer`, `exhibit` and `DNA Repair Pathway` are identical. `structure_correct_diagnostic` is 33/40,
+exactly the baseline. Two flips in 40 is the ~5 % the baseline records for temperature-0 live draws.
+**baseline.json was NOT updated** — it says update deliberately, never to make a red run go green,
+and a single live draw cannot distinguish noise from regression either way. Settling it properly
+means 2–3 more live draws to establish the band on this snapshot.
+
+#### NEXT
+**Fast-follow: the four filed items** (above). Then P2 closes out: every code item is done, N4 has landed, and the reseed above cleared it —
+including **the manifest-hashing fix**, which rode the same reseed as planned.
+
+**Port from `references/nanoda_lib` wherever there is a counterpart** (plan §3) — positivity,
+the index-aware motive, the whole level algebra. It also settles the recursor-motive defect outright: nanoda's motive and
+minor premises both read one `local_indices`, so they cannot disagree, and the fix is to move the
+motive onto `derive_minor_types`' convention. **The pin moved to `6ae1f0c` and every citation is
+stale** — `positivity.rs` still cites `f58f2f6` at `:24`, `:129`, `:584`.
+
+#### GOTCHAS
+- **The manifest-hashing fix first, before any bootstrap edit.** Iterating on `lexicon-ontology.esl` while every
+  whitespace change costs a reseed is exactly what it removes.
+- **Measure before tightening**: instrument to log without rejecting, run the suites,
+  count. Precedent 356 / 0 and 204,703 / all `Sort(1)`; `Set : Set` in check mode is the case where a
+  one-line arm change became a design decision plus a reseed.
+- **The D73 implementation's batching plan was written and then not followed**, and the batch paid two reseeds. If
+  the check-mode audit turns out to need an ontology edit, hold it until the strict-positivity arm is
+  known.
+
+### 3. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
+Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
+**OOV ✓ → parsing gaps ✓ → ambiguity ✓ → performance (HERE).** Phase 3 closed by selection rather
+than by the multiplicity reduction this note planned for it — see STATUS. The performance work
+itself is on deck, not in this note.
+
+#### STATUS
+Phases 1 and 2 are CLOSED — `grammar-gap 0`, `missing-lexeme 0`. Phase 3 (ambiguity) was met by
+**selection**, not by multiplicity reduction: the composed configuration (discourse loop + reading
+ranker) reaches encoded 51 / ambiguous 0 / open 11 over the 62 units, against an isolated no-ranker
+floor of 2 / 40 / 20. The forest is still ambiguous; the pipeline no longer is.
+
+Live numbers live in `experiments/parsing/baseline.json` (grammar/forest) and
+`selection-baseline.json` (ranker/choice) — two files, two gates, both enforced by
+`scripts/eval-parse-rate.sh`. This entry does not restate them: a hand-copied table competes with
+the gated truth and loses.
+
+#### DONE
+- **Phase 1 — OOV: CLOSED.** `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
+- **Phase 2 — parsing gaps: CLOSED.** `grammar-gap 0`. History of the 12→…→0 descent and the
+  per-gap root causes: **§0 + §3 of [d63-parse-gap-closure.md](d63-parse-gap-closure.md)** — not repeated here.
+- **Faithfulness — exclusive-focus `alone`.** Sentence 3 ("Each event alone does not lead to cell
+  death") had **0 universals, a lost negation, and a "Department of Energy" subject**. The reranker was
+  *already right* (it ranked `DOE` #19/drop, causative `lead` #0/#1) — the faithful reading existed at **no**
+  cap, because post-nominal `alone` had no rule, so widen-on-failure kept lowering the cap until the noun-pile
+  was the only complete parse. Fix: `alone` as a bare post-nominal `cat_pp` carrying the opaque
+  exclusive-focus operator `ontology:sole` ("this event alone" ≡ "only this event"); reuses the existing
+  `RefineKind::PpMod` rule with **zero new parser code**, closed-class ⇒ cap-exempt. Now:
+  `∀x:(Σy:event. sole(y)). ¬(x causatively-leads-to cell_death)` — 50/50 readings, **0** noun-pile.
+
+#### The two levers that outlived the gate
+`pos_prune` (categorical drop of function-word-as-noun readings, `EIGENIUS_POS_PRUNE`, default-off,
+never tested since post-nominal `alone` unblocked it) and the **mass-shim precision fixes** (§6 of
+the parse-gap note — strictly-uncountable-head test + acronym↔domain-word collision filter) were
+planned as the AMBIG→ENCODED levers. That gate closed by other means. Both still bear on **parse
+time**, so they belong to phase 4 / [#28](https://github.com/eigenius/eigenius/issues/28) — see the
+performance entry under On deck. Gate either on the deterministic sweep with `GAP` staying 0.
+
+Levers already applied (hyphenation, build-then-subsume D3, sense cap/reranker) and the ones ruled
+out for this corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
+[d63-parsing-scale-and-pruning.md §4c](d63-parsing-scale-and-pruning.md).
+
+#### DO NOT RE-TRY
+- **Per-span pooled sense cap — tried, measured, REVERTED.** Pooling the cap across a span's
+  candidate lemmas *does* make the reranker's drop-verdict bite (a rank-dropped sense hiding in a sub-cap lemma
+  bucket — `DOE` in the 2-entry `doe` bucket — otherwise slips the per-lemma cap). But it **regressed
+  `grammar-gap 0 → 1`** (unit 52, *"The MSI relationship compared favourably…"*) by over-pruning a multi-lemma
+  span, and it is **unnecessary now that `alone` exists** (the faithful reading is reachable at the tight cap,
+  so widen-on-failure never fires and the junk is never admitted). Isolated by reverting *only* the seeding
+  code — now the `dcg/parse/` module (the `dcg-cleanup` refactor split the old `lookup.rs`; the pooled
+  sense-cap logic is in `parse/seed.rs`) — against the same store. Do not re-land without repeating that A/B.
+- Kept from the same session: the **UMLS grammatical-surface filter** (17 surfaces incl. `does not`/`alone`/
+  `lead`) in `crates/eigenius-umls/src/convert.rs` — that one is a keeper.
+
+#### GOTCHAS (both cost real time — read before measuring)
+- **Counting.** `summarize()`'s per-unit listing enumerates **only AMBIG units**; grammar-gaps print in a
+  different format, so grepping `[AMBIG` **silently misses every gap**. Count from the
+  `=== WRN first page over FULL lexicon: … grammar-gap N …===` summary line (or the `[unit N] … TAG` lines).
+- **Snapshot drift.** A bootstrap-ontology edit changes its content hash, so older snapshots
+  **ManifestDrift** — and the harness **SKIPs fail-closed while reporting `ok`**: every
+  `db_backed_encoding` test goes green doing nothing. `kernel/tests/bootstrap_manifest_pinned.rs`
+  now fails in `cargo test` when the bootstrap moves, so the *edit* is caught at source.
+  The harness picks the newest `wordnet-umls-*` store under `../db-snapshot` automatically
+  (same rule as `scripts/measure-parse-rate.sh`) and prints which one it chose — no
+  snapshot name is pinned in code any more. Note the rule is newest-by-mtime, so a *raw* reseed
+  finishing after an aligned one wins; the printed path is how you notice.
+
+#### Follow-up spun out of the faithfulness work (not started)
+**Pre-nominal `only` / `just`.** Same `ontology:sole` operator (already in the ontology), but they attach
+**outside the determiner** ("only [this event]") — NP-level focus, a different rule from `alone`'s N-level
+refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
+than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
+
+### 4. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+Phase 1 is done (reshape, pipeline, grader, ingestion, D47 codec). Of **Phase 2** — "refactor the
+LLM parts out into the orchestrator; the served gRPC path" — two of three parts landed via D71, and
+not in the shape this note predicts:
+
+- ✔ **Served path.** Built as a service operation (`FormalizeDocument` + task + four surfaces), not
+  as the "second `impl DocumentPipeline`" the note anticipates. D71 §1 argues the shape.
+- ✔ **Doc-layer home → committed branch.** `with_storage` doc branches.
+- ☐ **Proposer impls → orchestrator RPCs.** NOT done. `kernel/src/dcg/resolver_llm.rs` and
+  `sense_ranker.rs` still call Anthropic directly from the kernel (`use-llm`), which is why the
+  kernel image needs `use-llm` and an API key to formalize. That is now the compose default
+  (`2026-09-05`) — it was opt-in, which made every parsing run on a fresh doc branch a two-step:
+  fail closed, rebuild, rerun.
+
+Also remaining: **grading-phase gaps** (Citation grade-climb; graded-props over the full lexicon).
+
+---
+
+## On deck (pushed onto the stack when its step becomes active)
+
+- **Phase 4 — performance.** The CKY chart explosion:
+  [d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md) /
+  [#28](https://github.com/eigenius/eigenius/issues/28) — adaptive supertagging + intermediate-cell
+  felicity pruning. Cheapest first lever is the **mass-shim precision fixes**
+  (d63-parse-gap-closure.md §6): spurious `mass` readings inflate BOTH reading count (median
+  105/unit, capped at 256) AND parse time (up to 930 s/unit). `pos_prune` is the other untested
+  lever (see entry 2).
+
+- **`LayerTopology` resource fetch is uncapped.** `include_resources: true` emits one proto node per
+  resource in the layer with no bound, so drilling into a lexicon layer is unbounded. Found during
+  the kernel-OOM investigation; did not cause it. Wants a bounded page with an explicit `truncated`
+  marker — never a silent cap (D62's rule). Not filed as an issue.
+
+## Parked tracks (real, but off this stack)
+Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
+- **NbE readback panic** (`readback.rs:38`): surface `cell` resolves to UMLS **gene** concepts
+  `C1413336`/`C1413337` (TUI **T028**), which are then **applied as functions** → `NotAFunction(ResourceVal(…))`.
+  **Pre-existing** (48 panics on the pre-`alone` baseline, 32 on current HEAD — recent work reduced, did not
+  cause it) and caught per-candidate, so **no unit is lost** and the sweep still completes. But an ill-formed
+  term is reaching readback, so the defect is at the **construction site**, not readback; the `.expect()` is
+  also the wrong failure mode. Off the critical path.
+- [d61-llm-based-encoding-methodology.md](d61-llm-based-encoding-methodology.md) — grounding-discovery +
+  typed decision-making layer (the D61 plan).
+- Benchmark pilot (D50/D51) — chem+bio; kernel gaps done, infra gaps remain.
+- [d63-passive-voice-handling.md](d63-passive-voice-handling.md) — general passive-voice infrastructure:
+  object→subject promotion + agent suppression + `rel(theme, ground)` roles (importer `cat_pss` / a grammar
+  passive rule). Serves the denominal phrasal half **and** ordinary passive clauses (`were represented by`,
+  `is associated with`, … — in the current grammar-gap list). **Trigger:** closing passive clauses on the
+  page, or the denominal phrasal half.
+- [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md) — the **spec**: the
+  `DenominalElement` table + the `⟦X-E⟧ = ⟦E link X⟧` alignment invariant for the denominal-adjective suffix
+  class (`-based`/`-like`/`-mediated`/…). The **compound half is DONE** (compound-morphology §3b, shipped
+  `2026-07-05`); the **phrasal** half → d63-passive-voice-handling.md. **Trigger:** after the phrasal half
+  lands, to gate the `X-E ≡ E link X` equivalence.
+- [d63-lexicon-augmentation.md](d63-lexicon-augmentation.md) — the `DocumentPipeline` generalization for
+  **lexical gaps**: `AbbrDef → LexicalBinding{surface, long_form?, grounding}`, the pipeline as a
+  lexicon-augmentation transducer (`AugmentOptions`/`LexiconProfile`/seed-in-added-out + the feedback cache),
+  two-moment grounding with the concept-convergence invariant (`RecQ DNA helicase → C0084304`). **Trigger:**
+  generalizing Stage A / closing `recq` via retrieval-grounding; needs the gene-family source
+  ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
+
+## Completed (record, not work)
+- [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) —
+  **COMPLETED `2026-08-20`.** Prose formalization is **not** an institution: tested against D14
+  §1.2's own four criteria it satisfies one, and every `institution:Institution` in the tree
+  *decides* something while five importers doing source→resource-set→Load are none. Built instead as
+  a service operation over `DocumentPipeline` emitting a resource-set artifact, run as a D21 task,
+  behind four surfaces (CLI / gRPC / MCP / notebook). All seven slices in; verified in the container
+  end to end (three sentences ENCODED, «These findings» resolved, 11 draws recorded on the `doc-<id>`
+  branch, peak RSS 2.43 GiB) and in the browser for both landing modes. Playwright e2e descoped by
+  user decision. Getting there fixed four defects the slices had left: the orchestrator's kernel
+  passthrough is a curated list that did not route the two new methods (now pinned by a test); `cli`'s
+  `use-llm` did not forward to `eigenius-encoding`; the kernel image had no WordNet dict, so the
+  served parser silently used the no-op lemmatizer and every sentence came back `cut_grammar`; and
+  `build-alignment-snapshot.sh` copied PROVENANCE verbatim, so an aligned snapshot could not be told
+  from a raw one. **Open (§14):** source transport; draw commit granularity; pruning policy; the
+  prefix-replay measurement. **§11 human-override loop: separate effort** — the crude form works via
+  `--pins` + whole-document re-run. Remaining deferrals: D68 §5/§5a, D67 §8; kind verdicts, the
+  selections-edited draw, and the demo re-pins await human sign-off.
+- **Kernel OOM during a notebook session** — **FIXED `2026-08-20`**, full account in
+  [kernel-oom-notebook-session.md](kernel-oom-notebook-session.md). Retroactive validation's carrier
+  scan materialised the whole 7.6M-resource chain per redefined property; it now streams (27.8 GB →
+  3.9 GB), and `redefines_ancestor` compares against the shadowed definition in canonical Eigon-CBOR,
+  so an identical redeclaration enumerates no dependents. The load that killed the kernel twice takes
+  30 ms. Residue: the scan is still O(chain) for a *genuinely changed* definition — measured 3m55s
+  for one property, kernel responsive throughout — filed as
+  [#30](https://github.com/eigenius/eigenius/issues/30).
+- **Reseed OOM** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md)) —
+  **CLOSED `2026-08-20`, not reproducible.** The claim was that it "blocks any fresh full reseed";
+  full reseeds have since run to completion routinely (four snapshots dated `2026-08-20` alone),
+  starting with `2026-07-10` and most likely fixed by the `--out-dir` chained-load path. The note
+  survives as the record of what was measured out. Do not re-open without a fresh reproduction.
+- [d69-reading-presentation.md](d69-reading-presentation.md) — **COMPLETED `2026-08-17`.** The ranker's
+  question was unanswerable as posed: for «MSI cancer models did not have the exonuclease activity of
+  WRN» the prompt carried 120 candidates with 120 distinct sems as only **4 distinct strings**, so the
+  reading that landed in the demo artifact was chosen BLIND. Root cause (maintainer): strict
+  verbalization is ~a left inverse of parsing, so all readings of one sentence converge by
+  construction. Slices 2/5 (`Register::{Surface,Expanded}`, concept legend, injectivity guard, demo v2
+  regeneration) done 2026-08-13 — the guard immediately found a second lossy site, a comparative's
+  dropped standard, worth 50/1/11 → 51/0/11. Slice 3 done 2026-08-17: selection **21/31 (68%) →
+  30/40 (75%)**, structure 23/31 → 33/40, 0 unadjudicated, live run and replay agreeing exactly
+  (62/0 ranks, 40/0 selections). So blindness was PART of the earlier error, not all of it — 10
+  decisions are still wrong with the pool fully visible. Slice 4 (D69-B two-level presentation)
+  implemented, measured and **REJECTED**: 24/40 correct, structure 29/40 — six worse, on the same
+  forest and ranks. Flat listing remains default; two-level kept behind `EIGENIUS_SELECT_TWO_LEVEL=1`
+  since §5's preferred realisation was a two-CALL ranker and this was the cheap proxy. Logged
+  truncation kept ON (D62 no-silent-caps). Detail in §7m.
+- [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) —
+  **COMPLETED `2026-08-15`, demo fallout closed `2026-08-17`.** One importer flag (`Concept::symbol`)
+  decided BOTH proper-name syntax and entity-vs-kind denotation, so the lexicon offered two of four
+  combinations and the corpus kept needing the missing one — a bare-standing KIND-referring NP. Fixed
+  at source, two causes: new `lexicon:Num::name` (bare + kind-denoting, no mass claim) granted by
+  T047/T191; and T033 Finding removed from `COUNT_VETO_TUIS`, its one motivating collision (`gENE`)
+  being handled per-atom by drops.json while the veto blocked head-inheritance for 107591 concepts.
+  «MMR deficiency» and «Lynch syndrome» now reach C4522088 / C4552100 instead of Turcot / HNPCC;
+  expected-hits 62/62 with an empty miss-set; 0 units discarding their sense ranking; readings 637
+  (ceiling 700), skeletons 175. Everything the D69 chase compensated for was a concept that could not
+  compose bare. FALLOUT, all closed `2026-08-17`: the bootstrap edit invalidated every snapshot
+  (ManifestDrift on the `lexicon` layer), which broke both demos and — silently — the D67 §3.5
+  acceptance and the ESL round-trip corpus. v2 re-recorded and verified; v1 RETIRED and deleted
+  (sense-erased pins are inventory-dependent; README kept as the record); `acceptance.rs` and
+  `esl_round_trip.rs` repointed at v2 (paths AND the `demo:formulas:` → `demo:v2:` namespace);
+  `kernel/tests/bootstrap_manifest_pinned.rs` now pins the manifest so the next such edit fails in
+  `cargo test` rather than days later by hand. RESIDUE (not blocking, none gated): D2 disease
+  kind-vs-entity is unanswerable on this corpus; O4 (a concept's own PT outranking another's CE for
+  the same string) unimplemented; abbreviations still reach bare standing via the glossary's `mass`
+  inheritance rather than `name`; deep-binder round-trip coverage lost with v1's `rule-general.esl`;
+  a lexicon-content change still moves no manifest, so that staleness class has no guard.
+- **Phase-2 constructions, Step 5/5b/5c — COMPLETED `2026-07-06`.** RC-6 apposition (`appose_group`, bidirectional concept↔semantic-type felicity),
+  comma-list connective inheritance (neutral comma finalized by the trailing `and`/`or`), and the
+  **coordination refactor** to core-en's list-with-operator shape (`cat_coord` + `coordinate_prop` +
+  `complete_coord`, retiring the eager `coordinate_sem` + the Step-5b n-ary workaround). Together −8
+  grammar-gaps (20→12). Kernel lib 1611 + `closed_class` 126 green. Detail in d63-parse-gap-closure.md
+  §4 Steps 5/5b/5c.
+- [d63-compound-morphology.md](d63-compound-morphology.md) — **COMPLETED `2026-07-05`.** Derived-adjective
+  OOV closed (Slices 1–2 + §3b denominal-suffix table + `-like` fix); missing-lexeme 6 → 2 over the
+  snapshot. Deferred pieces extracted to the parked tracks above (alignment / passive-voice) and the
+  gene-family track ([[gene_family_lexicon_gap]] — `recq`).
+
+## Reference / design notes (consulted, not "work")
+Not stack items — background for the above: `d63-{document-preprocessing-scope, kind-predication-reshape,
+coren-coupled-port-design, pp-attachment-control-scoping, packed-forest-parsing-blueprint,
+cnl-*}`, `d62-*`. Pull in when a step needs them.
+
+---
+
+### Maintenance
+- Finishing the top's exit-gate → delete/collapse its entry and promote the next. Note the pop here.
+- A new sub-task splitting off the active entry → write its note, push it as the new §1, demote the rest.
+- This file is the index; the per-note detail lives in the linked notes, not here.

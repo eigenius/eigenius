@@ -1,0 +1,241 @@
+// ════════════════════════════════════════════════════════════════════
+// ontology — Prop-valued structural relations over the class lattice.
+// ════════════════════════════════════════════════════════════════════
+//
+// `is_a` / `subclass_of` as **opaque** `Prop`-predicates (eigentt axioms) — the
+// meanings a **predicate nominal** ("HeLa is a cell line") produces (D63 §8.5
+// Slice 3c). They mirror the chain's `core:is_a` / `core:subclass_of` PROPERTIES
+// but are distinct objects: a property is an RDF-style relation on a resource;
+// these are `Prop`-FORMERS the DCG engine and the reasoning layer (D39) consume.
+//
+// **Opaque, not decidable** (felicity ≠ truth): the kernel gate checks only that
+// the proposition is well-formed; whether the membership *holds against the chain*
+// is a separate GROUNDING judgment (a `ChainWitness`, D39/D49). A decidable
+// predicate would reduce the claim to ⊤/⊥ from the lattice and so could never be
+// carried as a hypothesis or conditional antecedent — incompatible with
+// justification logic. (Mirrors how verb predications like `affects(…)` are opaque.)
+//
+// A class is a type (`EigonClass : Set`), so the class argument is a `Set` value.
+
+namespace ontology = "urn:eigenius:ontology";
+namespace lexicon  = "urn:eigenius:lexicon";
+namespace core     = "urn:eigenius:core";
+namespace units    = "urn:eigenius:units";
+
+// x is_a C — instance membership: the entity x is a member of class C.
+// "HeLa is a cell line" → is_a(hela, CellLine).
+axiom ontology:is_a : lexicon:Entity -> Set -> Prop
+
+// C subclass_of D — class subsumption: the kind C is a subkind of D.
+// "Genes are cell lines" (KIND subject) → subclass_of(Gene, CellLine). The
+// predicate-nominal copula reading that produces this awaits kind subjects (bare
+// plurals / generics — deferred); declared here as the relational vocabulary so the
+// reasoning layer and a later kind-subject reading share one canonical relation.
+axiom ontology:subclass_of : Set -> Set -> Prop
+
+// kind_of(C) — the kind C realized as an individual (Chierchia's ∩ nominalization): a
+// class (a `Set` value) mapped to the `Entity` that IS that kind. This lets a bare mass/
+// kind noun be a verb argument — "MSI contributes to cancers" → contribute_to(kind_of(MSI),
+// …) — a CLOSED predication about the kind, not an open deferred quantifier (D63
+// kind-predication reshape, `docs/notes/d63-kind-predication-reshape.md`). Opaque like
+// `is_a`/`compound`: the grammar guarantees the typed tree; the kind↔instances realization
+// is grounding-supplied by the encoding institution (D62).
+axiom ontology:kind_of : Set -> lexicon:Entity
+
+// the(A) — the unique presupposed referent of a DEFINITE noun-type A (the ι /
+// definite-description operator): a class (a `Set` value) mapped to THE individual of that
+// type. REFERENTIAL, not quantificational — a definite ("the exonuclease activity of WRN",
+// "these lines") denotes a fixed referent, so unlike an existential it does NOT scope under
+// negation / modals: `¬require(the(A), s)` is a single reading, where reusing the
+// existential encoding for definites spuriously bifurcated into `¬∃x.P` vs `∃x.¬P` (the two
+// equivalent for a unique referent — the WRN-paper "did not require the … of WRN"
+// over-generation). Opaque like `kind_of`: the grammar guarantees the typed tree; the
+// uniqueness presupposition + referent resolution are grounding-supplied (D62).
+axiom ontology:the : forall (A : Set) => A
+// the_count(A, q) — `the(A)` with the number of its members stated (D95 slice 7d, decision 13):
+// "the four other RecQ DNA helicases" → the_count(A, 4). Opaque like `the`.
+axiom ontology:the_count : forall (A : Set) => units:Quantity(u"1") -> A
+
+// ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
+// OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
+// modifier↔head relation is vague (compound: "WRN depletion" = depletion *of* WRN; PP:
+// "apoptosis in MSI" = located/scoped *in* MSI), so — like is_a / the modal operators —
+// these are kernel-uninterpreted axioms; the grammar guarantees a felicitous typed tree
+// exposing the parts, and the precise relation is grounding-supplied by the encoding
+// institution (D62). `compound(x, m)`: head entity x is a compound modified by entity m
+// ("WRN depletion" → Σx:Depletion. compound(x, WRN)). `prep_*(s, y)`: the predication s
+// stands in the prepositional relation to y ("… in MSI" → … ∧ prep_in(s, MSI)).
+axiom ontology:compound : lexicon:Entity -> lexicon:Entity -> Prop
+// N-N kind compound — the modifier is a common noun (a kind/`Set`), not an entity:
+// "mutator load" → Σx:Load. compound_kind(x, Mutator). (`compound` above is for a
+// named-entity modifier; `compound_kind` for a common-noun modifier.)
+axiom ontology:compound_kind : lexicon:Entity -> Set -> Prop
+axiom ontology:prep_of   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_in   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_for  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_with : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_on   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_between : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_within  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_to      : lexicon:Entity -> lexicon:Entity -> Prop
+// Added 2026-07-26 after a 0-reading role sweep (`probe_preposition_role_coverage`) found 14
+// coverage holes the page-based `grammar-gap 0` could not see: `without`/`among`/`beyond` had NO
+// entry in any role ("Cells survive without oxygen." -> 0 readings) and at/into/upon/against/about/by
+// could not post-modify a noun ("The paper by the authors was clear." -> 0).
+axiom ontology:prep_at      : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_into    : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_upon    : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_against : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_about   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_by      : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_without : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_among   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
+// `after` joined the closed class in D95 slice 5, with its measured-value sibling below; `before` in
+// slice 8a, with the offsets (`72 h after transduction`). `post` is `after`, with its relations.
+axiom ontology:prep_after   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_before  : lexicon:Entity -> lexicon:Entity -> Prop
+
+// ── Adverbial (VP-adjunct) prepositions: `adv_*` (2026-10-07) ────
+// `adv_X(y, V, s)`: the predication `V` of `s`, modified by *X y*. Luo & Shi's `ADV`
+// type — `(e -> t) -> (e -> t)` — instantiated at the PP's object (Luo & Shi 2026,
+// "Variable polyadicity without events", MSCS 36, e11), so the modifier applies to the
+// PREDICATE and not to the subject. `prep_X` above keeps its meaning, a relation between
+// two ENTITIES, for noun-internal modification ("deficiencies in homologous
+// recombination"); the two roles were conflated under one name.
+//
+//   «These mutations occur in nucleotide repeat regions.»
+//       was  And(occur(m), prep_in(m, regions))        — the MUTATIONS are in the regions
+//       now  And(occur(m), adv_in(regions, occur, m))  — the OCCURRING is
+//
+// Opaque, as `prep_*` is: the grammar guarantees a felicitous typed tree exposing the
+// parts, and the institution supplies the relation (D62). Modifier drop is Luo & Shi's
+// theorem, not a typing consequence: the conjunction is in the entry
+// (`λy.λV.λs. And(V(s), adv_X(y, V, s))`), so dropping the adjunct leaves `V(s)`.
+//
+// One `adv_X` per preposition that has a VP-ADJUNCT entry (`lexicon:prep_X_sem`), which
+// is the 13 below. The seven with only a noun-modifier entry (`lexicon:nmod_X_sem`:
+// about, against, at, by, into, of, upon) need none, and `prep_per` is noun-internal.
+axiom ontology:adv_in      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_for     : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_with    : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_to      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_on      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_from    : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_between : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_within  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_without : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_among   : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_beyond  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_after   : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_before  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+
+// ── Prepositions over a measured value (D95 slice 5) ──────────────────────────
+// `prep_X_value(s, u, q)`: the predication or entity s stands in the prepositional relation to the
+// measured value q, in base unit u — "incubated at 37 °C" → … ∧ prep_at_value(s, K, 310.15 K). The
+// unit is an explicit argument because the relation is unit-polymorphic and implicit Π is deferred
+// (eigenius#58). The `prep_` family, as the entity-object relations are: a noun refined by one is
+// PP-refined, and verbalization renders it as "at 6203/20 K". A VP adjunct and a noun modifier share
+// the relation, as `in_prep` and `in_nmod` share `prep_in`.
+axiom ontology:prep_at_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_for_value   : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_in_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_with_value  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_after_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_of_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_by_value(x, u, q)`: x by the time the value q is reached, a deadline — `recovered by three
+// weeks` (D95 slice 8a, decision 3).
+axiom ontology:prep_by_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_after_offset(x, y, u, q)`: x after y by the interval q — `purified 72 h after transduction`;
+// `prep_before_offset` likewise before (D95 slice 8a, decision 1).
+axiom ontology:prep_after_offset  : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_before_offset : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_per(Y, x, y)`: x is counted per y, the member y of the distributing kind Y — `at least 1,000
+// cells per sample` (D95 slice 8d). Polymorphic in y's type, so a refined noun (`per time point`)
+// types; opaque, as `prep_in` is.
+axiom ontology:prep_per         : forall (Y : Set) => lexicon:Entity -> Y -> Prop
+
+// The `adv_*` siblings of the measured-value prepositions (2026-10-07). The
+// same split: `prep_X_value` relates an ENTITY to a measured value, which the noun-internal
+// use needs ("a dose of 5 mg/kg", "a volume of 2,000 mm³" — the three `prep_of_value` uses);
+// `adv_X_value` modifies a PREDICATION, which the VP-adjunct use needs. The comment on
+// `prep_X_value` above — "the predication OR entity s" — recorded a conflation the type could
+// not express, since the slot is `lexicon:Entity` and a VP adjunct puts the subject in it:
+//
+//   «The medium was changed every 3 days.»
+//       was  every_period(the(Medium), s, 259200)          — the MEDIUM recurs
+//       now  adv_every_period(s, 259200, change, the(Medium)) — the CHANGING does
+//
+// The measured value precedes the predicate, as the PP's object does in `adv_in`. 27 of the
+// 30 uses in `experiments/parsing/quantities/corpus.tsv` are VP adjuncts — these are methods
+// sentences, where almost every measured PP modifies the procedure.
+//
+// One `adv_X` per relation that has a VP-ADJUNCT entry (`lexicon:prep_X_value_sem`), which is
+// the nine below — the same rule as the entity-object family. `prep_of_value` gets no sibling:
+// it has only `nmod_of_value_sem`, and its three uses ("a dose of 5 mg/kg") are noun-internal.
+// The argument order is `prep_X`'s with the host dropped from the front and `V, s` appended:
+// `prep_at_value(x, u, q)` → `adv_at_value(u, q, V, s)`, `prep_after_offset(x, y, u, q)` →
+// `adv_after_offset(y, u, q, V, s)`.
+axiom ontology:adv_at_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_for_value   : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_in_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_after_value : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_by_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_with_value  : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+// `adv_after_offset(y, u, q, V, s)`: the predication V of s, after y by the interval q —
+// "RNA was purified 72 h after transduction".
+axiom ontology:adv_after_offset  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_before_offset : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+// `adv_every_period(u, q, V, s)`: the predication V of s recurs with period q.
+axiom ontology:adv_every_period  : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+// `every_period(x, u, q)`: x recurs with the period q — `changed every 3 days` (D95, "`every N unit`";
+// slice 8b). Opaque, as the PP adjuncts are: no event variable, and the periodicity is the
+// institution's to interpret.
+axiom ontology:every_period     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_quantity(x, u, q)`: the entity x has the measured value q — the prenominal measure phrase
+// ("10 μM etoposide" → Σx:etoposide. has_quantity(x, …)) and the predicative one ("the temperature
+// was 37 °C"). Which quantity of x it is (a concentration, a temperature) the parse does not say.
+axiom ontology:has_quantity     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_count(T, P, q)`: the number of `T` satisfying `P` is `q` (D95 slice 7) — a cardinal's claim,
+// `two genes affect HeLa` → has_count(Gene, λx. affects(hela, x), 2). A count is dimensionless, so it
+// is a `Quantity(u"1")` and a bound on it (`at least 1,000 cells`) is slice 6's constraint.
+axiom ontology:has_count        : forall (T : Set) => (T -> Prop) -> units:Quantity(u"1") -> Prop
+// `has_proportion(x, P, q)`: the proportion of the group `x`'s members satisfying `P` is `q` (D95
+// slice 7c) — `15% of colon cancers are MSI` → has_proportion(kind_of(ColonCancer), λy. msi(y), 3/20).
+// The group is an entity, a definite plural (`the(Sample)`) or a kind, as the partitive's noun phrase
+// denotes it; the proportion is a dimensionless quantity, so a bound on it (`more than half`) is
+// slice 6's constraint.
+axiom ontology:has_proportion   : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop
+// `fold_lower(N, a, b)`: a is N-fold lower than b — `0.56-fold fewer deletion mutations than typical
+// lineages` → fold_lower(0.56, card(M, x), card(M, y)) (D95 slice 9, decision 2); `fold_higher` the
+// other way. The factor is kept as written. Opaque, as `units:approx` is, because the text fixes no
+// arithmetic: `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually one of 1/2, and some
+// authors mean 44% fewer by the first. Every reading agrees on the order, which the comparative states
+// beside it as the plain comparative's `gt`. A check grounds the factor in `stats:EffectSize::Relative`.
+axiom ontology:fold_lower       : units:Quantity(u"1") -> core:float -> core:float -> Prop
+axiom ontology:fold_higher      : units:Quantity(u"1") -> core:float -> core:float -> Prop
+// `median_over(f, x)`: the median of the measure f over the group x's members (D95 slice 9, decision 3)
+// — `a median 0.56-fold fewer deletion mutations … compared to typical lineages` →
+// fold_lower(0.56, median_over(λm. card(M, m), x), median_over(λm. card(M, m), y)). The group is an
+// entity, as `has_proportion`'s is. Opaque, as `card` is; `stats:median_of` over a SampleSet is the
+// institution's.
+axiom ontology:median_over      : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float
+
+// ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
+// `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining
+// reading of "Project Achilles" / "the enzyme WRN" (a SORTAL common noun + a proper name).
+// OPAQUE like `compound`/`is_a`: the name TOKEN `n` (the name's own referent) labels `x`; the
+// construction does NOT claim `n` itself is of the sortal kind (so a name whose lexical sense is
+// unrelated — `Achilles` the hero — still felicitously names a Project). "Project Achilles" →
+// `kind_of(Σx:Project. named(x, achilles))`. The label↔referent identification is
+// grounding-supplied by the encoding institution (D62).
+axiom ontology:named        : lexicon:Entity -> lexicon:Entity -> Prop
+
+// `sole(x)`: the entity `x` holds TO THE EXCLUSION OF ALTERNATIVES — the exclusive-focus reading
+// of post-nominal "alone" ("this event alone") and pre-nominal "only"/"just" ("only this event"),
+// which are the same operator in mirror positions. OPAQUE like `named`/`compound`: it marks `x` as
+// "by itself, and not in combination with others" without unfolding the alternative set (deferred,
+// as numbers/degrees are kept opaque). "each event alone" → `∀x:(Σy:event. sole(y)). …`, so "each
+// event alone does not lead to cell death" is "no single event, taken by itself, suffices".
+axiom ontology:sole         : lexicon:Entity -> Prop

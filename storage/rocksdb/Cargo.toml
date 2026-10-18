@@ -1,0 +1,33 @@
+[package]
+name = "eigenius-storage-rocksdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RocksDB-backed PersistentBackend implementation for the Eigenius kernel — durable single-node storage for layer chains, anchored-commit caches, branch refs, tags, traces, and tasks. Key encoding per D4."
+keywords = ["eigenius", "rocksdb", "storage", "knowledge-graph"]
+categories = ["database-implementations", "science"]
+
+[dependencies]
+ciborium = "0.2"
+eigenius-kernel = { path = "../../kernel" }
+hex = "0.4"
+# D43 §2.3 — Roaring bitmap encoding for the text index's posting lists.
+# Used by `RocksTextIndex` (M2.4) to store the doc-id sets compactly
+# and decode them at scoring time. The on-wire format is what the
+# `text_term:<index>:<term>:<layer>` value carries after the
+# `varint(df)` prefix.
+roaring = "0.10"
+rocksdb = "0.24"
+serde.workspace = true
+# D43 §2.4 — serde_bytes lets the CBOR `vectors` payload survive as
+# a CBOR byte string rather than a numeric array, matching the
+# zero-copy SIMD-friendly layout (M2.5 / M5 consumer casts via bytemuck).
+serde_bytes = "0.11"
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tonic.workspace = true
+uuid.workspace = true

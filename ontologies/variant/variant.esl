@@ -1,0 +1,167 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Sequence variants at three resolutions (D99 §1–§4, §10), after GA4GH VRS and Cat-VRS 1.1.
+//
+//   nucleotide allele   NM_000010.7:c.131T>C   what a person carries
+//   protein allele      p.Leu44Pro             what binding, trafficking and drug response are about
+//   location            Leu44                  where several alleles sit
+//
+// Two maps connect them and neither is injective: `TranslatesTo` (c.130C>T and c.131T>C reach
+// different protein alleles, but several codons encode one amino acid) and `At` (p.Leu44Phe and
+// p.Leu44Pro are both at Leu44). A claim made at one resolution does not apply at a finer one
+// without a ground for the step.
+//
+// An allele is a representation ON ONE REFERENCE, identified by its reference, interval and
+// alternate state (D99 §4) — all LITERALS: the reference by its accession, as VRS identifies a
+// sequence reference by its `refgetAccession`. Literal fields are what make two alleles provably
+// distinct (`Apart` over a field, D99 §10), and what `At` is computed from. Coordinates follow
+// HGVS, as the registry writes them: 1-based and inclusive, so c.131T>C is start = end = 131.
+//
+// Chain-loaded, not bootstrap (D99 §9). Needs `lexicon` and `logic`, both in the bootstrap chain.
+
+namespace core    = "urn:eigenius:core";
+namespace lexicon = "urn:eigenius:lexicon";
+namespace logic   = "urn:eigenius:logic";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace variant = "urn:eigenius:variant";
+
+// ── References: what coordinates count on ──────────────────────────────────────────────────
+
+class variant:SequenceReference : lexicon:Entity {
+    description = "A sequence that positions are counted on — a transcript, or a gene's protein product — identified by its accession. Coordinates compare only on one reference: c.131 on one transcript and c.131 on another need not be one position. VRS SequenceReference.";
+    requires variant:accession;
+    recommends variant:gene;
+}
+
+class variant:Transcript : variant:SequenceReference {
+    description = "A RefSeq transcript, its accession versioned (NM_000010.7). c. coordinates count on it.";
+}
+
+class variant:ProteinProduct : variant:SequenceReference {
+    description = "The protein product of a gene, isoform unspecified: the PMI registry carries no protein accession (D99 §1), so the accession is minted from the gene's HGNC id, `<HGNC id>:p` (HGNC:000010:p). p. coordinates count on it.";
+    requires variant:gene;
+}
+
+property variant:accession : core:string {
+    description = "A reference's accession: a versioned transcript accession (NM_000010.7 — two versions are two references), or `<HGNC id>:p` for a protein product named only by its gene. What alleles and locations name their reference by.";
+    domain variant:SequenceReference;
+}
+
+property variant:gene : core:resource {
+    description = "The gene a reference is a product of. Not class-constrained: the gene class lives in an importer layer (ncbi:Gene, rooted at lexicon:Entity) or, for synthetic genes, in an experiment's namespace, neither of which this layer sits above.";
+    domain variant:SequenceReference;
+}
+
+// ── The fields an allele and a location are identified by ──────────────────────────────────
+
+property variant:reference : core:string {
+    description = "The ACCESSION of the reference an allele's or a location's coordinates count on — a literal, as VRS names a sequence reference by its refgetAccession, so that `At` and apartness (D99 §10) compare literals. The reference resource is the variant:SequenceReference with this variant:accession.";
+    domain variant:Allele, variant:Location;
+}
+
+property variant:start : core:integer {
+    description = "First position of the interval, HGVS-style: 1-based, inclusive.";
+    domain variant:Allele, variant:Location;
+}
+
+property variant:end : core:integer {
+    description = "Last position of the interval, HGVS-style: 1-based, inclusive. Equal to start for a single position.";
+    domain variant:Allele, variant:Location;
+}
+
+property variant:ref_state : core:string {
+    description = "The reference state over the interval: a nucleotide (\"T\") or a residue in three-letter code (\"Leu\"). Recorded, not part of identity: it is fixed by the reference and the interval.";
+    domain variant:Allele, variant:Location;
+}
+
+property variant:alt : core:string {
+    description = "The alternate state an allele puts over its interval: a nucleotide (\"C\"), a residue in three-letter code (\"Pro\"), or the empty string for a deletion.";
+    domain variant:Allele;
+}
+
+property variant:hgvs : core:string {
+    description = "The HGVS expression as the source wrote it, e.g. NM_000010.7:c.131T>C or p.Leu44Pro. A transcription, kept for reading; identity is the fields, not this string.";
+    domain variant:Allele;
+}
+
+// ── Locations and alleles ─────────────────────────────────────────────────────────────────
+
+class variant:Location : lexicon:Entity {
+    description = "An interval on a reference — Leu44 is position 44 of a gene's protein product, reference state Leu. The place several alleles share; what a literature claim names when it writes the residue rather than the change. VRS SequenceLocation.";
+    requires variant:reference, variant:start, variant:end;
+    recommends variant:ref_state;
+}
+
+class variant:Allele : lexicon:Entity {
+    description = "A change on one reference: its reference, interval and alternate state are its identity (D99 §4), and a difference in a literal field proves two alleles distinct (D99 §10). A representation, not the biological variant: one change on two references is two alleles, related by congruence, not identity. VRS Allele.";
+    requires variant:reference, variant:start, variant:end, variant:alt;
+    recommends variant:ref_state, variant:hgvs;
+}
+
+class variant:NucleotideAllele : variant:Allele {
+    description = "An allele on a transcript or genomic reference — c.131T>C. What a person carries (D99 §2).";
+}
+
+class variant:ProteinAllele : variant:Allele {
+    description = "An allele on a protein product — p.Leu44Pro. What ligand binding, trafficking and response to an agent are stated of (D99 §3).";
+}
+
+// ── The maps between resolutions ──────────────────────────────────────────────────────────
+
+data variant:TranslatesTo : variant:NucleotideAllele -> variant:ProteinAllele -> Prop {
+    description = "The nucleotide allele's protein consequence is the protein allele. Not injective — several codons encode one residue. Computable from a transcript's sequence where one is held; DECLARED otherwise, as for every synthetic reference.";
+}
+
+def variant:At(a : variant:Allele, l : variant:Location) : Prop =
+    logic:And(
+        eigentt:Eq(core:string,
+            eigentt:field(a, variant:reference), eigentt:field(l, variant:reference)),
+        logic:And(
+            eigentt:Eq(core:integer, eigentt:field(a, variant:start), eigentt:field(l, variant:start)),
+            eigentt:Eq(core:integer, eigentt:field(a, variant:end), eigentt:field(l, variant:end))));
+
+data variant:ProteinMediated : variant:NucleotideAllele -> Prop {
+    description = "The allele acts through its protein consequence: no splice effect, no nonsense-mediated decay. What lets a claim about the protein allele it translates to apply to it (D99 §3). Declared per allele; a frameshift with predicted NMD has no true one.";
+}
+
+// ── Functional consequence (D99 §6c) ──────────────────────────────────────────────────────
+
+class variant:Morph {
+    description = "Muller's classes of an allele's effect on function. Closed: the four the PMI registry's Variant Impact field names (its fifth value, Unknown, writes nothing). Aligned to the Sequence Ontology's functional-consequence terms once SO is loaded, as Cat-VRS's FunctionConstraint names them.";
+}
+
+resource variant:amorphic : variant:Morph {
+    core:description = "Amorphic: complete loss of function.";
+    core:short_name = "amorphic";
+}
+
+resource variant:hypomorphic : variant:Morph {
+    core:description = "Hypomorphic: partial loss of function.";
+    core:short_name = "hypomorphic";
+}
+
+resource variant:hypermorphic : variant:Morph {
+    core:description = "Hypermorphic: gain of function.";
+    core:short_name = "hypermorphic";
+}
+
+resource variant:antimorphic : variant:Morph {
+    core:description = "Antimorphic: dominant negative.";
+    core:short_name = "antimorphic";
+}
+
+data variant:Impact : variant:Allele -> variant:Morph -> Prop {
+    description = "The allele's effect on function is of the morph. Typed on Allele, so a protein-only row and a predicted-NMD frameshift can both carry one.";
+}

@@ -1,0 +1,96 @@
+// D52 Phase 2 fixture — Paired (matched pre/post) design.
+//
+// Domain: blood pressure (mmHg) before and after a 6-week treatment
+// regimen in the same 5 patients. The natural shape is a *paired*
+// test — each pair is the same patient measured twice — because
+// inter-patient variability is much larger than within-patient
+// pre/post variability. Treating these data as IID two-sample would
+// wash out the signal in the between-patient noise (the canonical
+// false-positive trap D52 §5.1 calls out).
+//
+// At product position `(CompleteRandom, PairedBlocking, SingleFactor,
+// _, CrossSectional)` — the Paired dispatch arm added in Phase 2.
+// Verifier runs the paired t-test on per-pair differences.
+
+namespace core       = "urn:eigenius:core";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bp         = "urn:eigenius:demo:bp";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource bp:act_bp_study_2026_03_20 : prov:Activity {
+    core:description = "clinical-trial-record:bp-study-2026-03-20";
+    core:short_name = "act_bp_study_2026_03_20";
+}
+
+
+// ─── Domain predicate ──────────────────────────────────────────────
+
+// PopulationLevel scope marker via the multi-class data header.
+data bp:TreatmentChangesBP : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── SampleSet: 5 patients' pre/post BP readings ──────────────────
+//
+// Stored as interleaved `[before_0, after_0, before_1, after_1, …]`
+// in the Bundle's observations slot — the verifier chunks pairs of
+// two. Mean difference ≈ 7 mmHg (clinically meaningful drop), within-
+// pair SD of differences ≈ 2.1, n_pairs = 5: paired t ≈ 7.4 with
+// df = 4, p ≈ 0.002. Clear Holds at α = 0.05.
+
+resource bp:trial_2026_03_20 : stats:SampleSetResource {
+    prov:was_generated_by      = bp:act_bp_study_2026_03_20;
+    prov:observed_at = "2026-03-20T09:00:00Z";
+
+    stats:sample_set_value = stats:Paired(
+        // Each consecutive pair: (before, after) for one patient.
+        [
+            120.0, 110.0,   // Patient 1
+            122.0, 115.0,   // Patient 2
+            143.0, 138.0,   // Patient 3
+            100.0,  95.0,   // Patient 4
+            109.0, 101.0,   // Patient 5
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource bp:trial_trace : prov:ObservationTrace {
+    prov:resource  = bp:trial_2026_03_20;
+    prov:was_generated_by    = bp:act_bp_study_2026_03_20;
+    prov:timestamp = "2026-03-20T09:00:00Z";
+}
+
+// ─── The paired-design StatisticalAnalysisPlan ────────────────────────────
+
+resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
+    stats:sample_set = bp:trial_2026_03_20;
+
+    eigentt:proposition = type_expr(
+        bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
+    );
+
+    stats:alpha = 0.05;
+    // Asserted minimum mean difference between pre and post (mmHg).
+    // The verdict carries the computed mean difference for audit;
+    // Phase 2 dispatch uses p < alpha as the admission criterion.
+    stats:effect_size = Absolute(5.0, "mmHg");
+    stats:directionality = TwoSided();
+    // For the paired test the variance assumption is consumed by the
+    // one-sample t-test on differences; Pooled / Welch don't apply.
+    // The verifier accepts whatever the author writes and ignores it
+    // in this arm.
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
+}
+
+resource bp:claim_treatment_lowers_bp_trace : prov:ProgramTrace {
+    prov:resource  = bp:claim_treatment_lowers_bp;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2026-03-20T09:00:00Z";
+}

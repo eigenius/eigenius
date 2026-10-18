@@ -1,0 +1,30 @@
+[package]
+name = "eigenius-wordnet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import WordNet — the general English lexicon — into Eigon lexicon resources: noun synsets → classes (hypernymy → subclass_of), verb/adjective synsets → predicates, lemmas → lexical entries (D62 §8.7). Deterministic; no LLM."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+eigenius-specialist = { path = "../eigenius-specialist" }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "wordnet-import"
+path = "src/bin/wordnet_import.rs"
+
+[features]
+# Forward the kernel's live-LLM reranker (use-llm) so the DB-backed (d) harness can use the
+# contextual `AnthropicSenseRanker`; default builds stay LLM-free (deterministic `IdentityRanker`).
+use-llm = ["eigenius-kernel/use-llm", "eigenius-encoding/use-llm"]
+
+[dev-dependencies]
+# Read the recorded sense draw (ranks.json) in the leave-one-out blocking-word probe.
+serde_json = "1"
+# The on-disk RocksDB backend — so the DB-backed encoding measurement (D62 (d)) can open a
+# snapshot of the served store (full WordNet+UMLS) in-process and parse over the lazy LexicalIndex.
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
+# The claim lander + kind classifier (D68) — the discourse close-out lands claims in-loop.
+eigenius-encoding = { path = "../eigenius-encoding" }

@@ -1,0 +1,34 @@
+{
+  "_comment": "CURATED atom overrides — hand-maintained, NOT generated. Applied by `umls-import --atom-overrides` alongside the generated `--drop-atoms drops.json`. These decisions come from PARSE evidence: a sentence whose best reading was unreachable, traced to the surface→concept mapping. They are kept OUT of drops.json because `lexicon-align drops` regenerates that file wholesale from candidates+verdicts and would clobber them. `drop` rows suppress a (cui, form) atom; `add` rows inject a surface UMLS does not carry for a concept it should reach. Adds are emitted through the same path as native atoms, so they obey the grammatical/junk/inflection skips and get the same category and mass shim. Every row states WHY, and names the sentence that exposed it.",
+
+  "drop": [
+    {
+      "cui": "C0085104",
+      "form": "drug target",
+      "why": "C0085104 is «Drug Delivery Systems» — the vehicle that administers a drug (MeSH: 'Systems for the delivery of drugs to target sites of pharmacological actions'). Its MeSH synonym «Drug Targeting» brings a family of permuted atoms with it, and `drug target` is one of them. But in biomedical prose a drug target is the MOLECULE a drug acts on, not the delivery system. This is the ONLY entry for the span `drug target` in the whole lexicon, so every reading of «These findings show that WRN is a promising drug target for MSI cancers.» — all 36 — asserted that WRN is a drug delivery system, with no compositional alternative to choose. Dropping the atom lets the span decompose to target ⊗ drug with n05981230 'the goal intended to be attained', which is the sense the already-pinned «DNA repair processes are attractive synthetic-lethal targets» uses for «targets». KEPT deliberately: «Drug Targeting», «Targeting, Drug», «Targetings, Drug», «drugs targeting» — those genuinely denote the delivery concept."
+    },
+    {
+      "cui": "C0085104",
+      "form": "drugs target",
+      "why": "Same family as `drug target` — a permuted atom of «Drug Targeting» that reads as a clause or plural NP about molecular targets, not about drug delivery."
+    },
+    {
+      "cui": "C0085104",
+      "form": "target drug",
+      "why": "Same family, inverted: a `target drug` is a drug, not a delivery system."
+    },
+    {
+      "cui": "C0085104",
+      "form": "drug targeted",
+      "why": "Same family: the participial surface reads as a modifier ('drug-targeted therapy') and does not denote the delivery-system concept."
+    }
+  ],
+
+  "add": [
+    {
+      "cui": "C4280020",
+      "form": "synthetic lethal",
+      "why": "C4280020 «Synthetic Lethality» carries only the nominal atoms «Synthetic Lethality» and «Lethality, Synthetic». The literature writes the ADJECTIVAL «synthetic-lethal» (a synthetic-lethal vulnerability, a synthetic-lethal target), and the right-headed hyphen rule recovers a hyphenated compound by looking up the SPACE-joined form — which is how «microsatellite-stable» reaches C4321493. With zero entries for `synthetic lethal` there is nothing to find, so the head rule fires and the modifier collapses to plain «lethal» a00993885 'of an instrument of certain death; deadly poisons; lethal weapon'. That silently drops «synthetic» from every reading of «These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.» (all 24) and from both `correct` rows on «DNA repair processes are attractive synthetic-lethal targets». Adding the form makes «synthetic-lethal X» a noun-noun compound over the real concept — compound_kind(X, C4280020) — exactly parallel to the C4321493 microsatellite-stable case."
+    }
+  ]
+}

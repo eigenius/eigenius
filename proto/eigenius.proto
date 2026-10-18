@@ -1,0 +1,1946 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Eigenius Kernel gRPC API
+//
+// See design doc D5 (docs/design/d5-grpc-api-specification.md)
+// for the full specification.
+
+syntax = "proto3";
+
+package eigenius.v1;
+
+service EigeniusKernel {
+  // Load resources into a context's working layer, validate, optionally commit.
+  rpc Load(LoadRequest) returns (LoadResponse);
+
+  // Resolve a resource by IRI from the context's layer chain.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
+
+  // Execute an EigenQL query. Returns an Eigon document (wire-identical
+  // to a Load payload) containing a ResultSet plus its row class, row
+  // Property definitions, and the row resources themselves. See
+  // D2 Appendix A for the document shape.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Run a program's static checks against the context's layer chain
+  // and report which ones ran. This is NOT a type-check: see
+  // `ValidateProgramResponse.checks_performed`.
+  rpc ValidateProgram(ValidateProgramRequest) returns (ValidateProgramResponse);
+
+  // Execute a program with input data.
+  rpc RunProgram(RunProgramRequest) returns (RunProgramResponse);
+
+  // Execute a program already loaded into the active layer chain,
+  // identified by IRI, against an input also identified by IRI. Avoids
+  // the single-content_type limitation of `RunProgram` (where program
+  // and input must share an encoding) and matches the natural notebook
+  // flow: the user has already loaded the program (typically as ESL)
+  // and the input (typically as Eigon-JSON), and now wants to run one
+  // against the other without re-shipping bytes.
+  rpc RunProgramByIri(RunProgramByIriRequest) returns (RunProgramResponse);
+
+  // Record a reasoning trace.
+  rpc Reflect(ReflectRequest) returns (ReflectResponse);
+
+  // Health check.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // List indexed institutions and the QueryClasses each declares (D14).
+  // FIBER queries against an institution's QueryClasses ride on the
+  // regular Query RPC via the FIBER clause (D2 v2 §3.5); per-RPC
+  // dispatch primitives from the D10 era (FiberQuery, DiscoverMorphisms)
+  // were retired in Phase 12 with no D14 equivalent.
+  rpc ListInstitutions(ListInstitutionsRequest) returns (ListInstitutionsResponse);
+
+  // Generate a JSON Schema for an ontology class.
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+
+  // List tasks in the session, newest first (D21 §3.1). Returns empty when no persistent
+  // backend is attached — ephemeral kernels don't track tasks across invocations —
+  // except for in-flight vector sweeps and reindexes, which live in the SweepRegistry
+  // and are reported whether or not a store is attached.
+  //
+  // Paged: at most `limit` per response, default 100, capped at 1000. A non-empty
+  // `next_cursor` means there are more; pass it back verbatim as `cursor`. Ordering is
+  // by created_at descending, task_id ascending as the tie-break — a total order, so
+  // paging cannot skip or repeat an entry that does not change underneath it.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+
+  // Look up a specific task's status + metadata (D21 §3.1).
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
+
+  // Request cooperative cancellation of a Running / Suspended task
+  // (D21 §8 cancellation).
+  //
+  // A Suspended task is not being driven, so there is no grace window to wait on and it
+  // goes straight to Cancelled. A Running task transitions to Cancelling: it may be held
+  // by a live evaluator, which a fully-async evaluator (9b-iii.4) would pick up between
+  // IO dispatches and unwind. Cancelling is transient either way — if no evaluator ever
+  // finishes it, the next restart's resume sweep writes Cancelled, so the record always
+  // reaches a terminal state and never pins its layer indefinitely.
+  //
+  // Also cancels an in-flight vector sweep or reindex by its task_id: those run from the
+  // SweepRegistry rather than the TaskStore, and their cooperative flag is the same
+  // mechanism (D43 §5.5 / §5.7).
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Delete one terminal task and everything it owns — its record, checkpoints and traces
+  // (D21 §3.1). Nothing expires task records on its own, so this and PruneTasks are how
+  // the keyspace is reclaimed.
+  //
+  // Refuses a task that is not terminal. A non-terminal record pins its layer_head as a
+  // GC root, blocks DeleteBranch under CheckPins, and blocks consolidation over it;
+  // deleting one would silently drop those pins while the task still intends to resume
+  // against that layer. Cancel it first, which is what gives it a terminal state.
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse);
+
+  // Delete every terminal task older than a cutoff. The bulk form of
+  // DeleteTask, with the same refusal: non-terminal records are never touched, whatever
+  // their age.
+  //
+  // With dry_run the response reports exactly what a real run would delete and nothing is
+  // written — the intended way to use this on a store you care about.
+  rpc PruneTasks(PruneTasksRequest) returns (PruneTasksResponse);
+
+  // Start a D43 §5.7 chain-wide reindex for every core:VectorIndex whose declared model no
+  // longer matches its stored segments. The commit hook fires this automatically on the
+  // layer it just persisted; this is the repair path for a reindex that failed or was
+  // cancelled, where the alternative would be committing something to re-trigger detection.
+  //
+  // Detection is the pre-check and runs before this returns, so the response says whether
+  // anything was stale. The reindexes themselves are detached — a chain-wide re-embed runs
+  // for minutes and must not hold an RPC open — so poll ListTasks for their task_ids and
+  // GetTaskStatus for each outcome.
+  rpc StartReindex(StartReindexRequest) returns (StartReindexResponse);
+
+  // Re-run the D43 §5.5 post-Load vector sweep for layers it never covered.
+  //
+  // The commit hook sweeps each layer once, as it is persisted, and nothing retries. A
+  // sweep that failed — embedder down, dim mismatch, cancelled by GC — leaves that layer
+  // with no vectors, which no query reports as an error: the layer simply contributes no
+  // candidates. There is otherwise no way to re-run it, since committing new data sweeps
+  // only the new layer.
+  //
+  // With no layer given, every visible layer that has no segment under an active
+  // VectorIndex is swept. That set is computable because a sweep that finds nothing
+  // indexable still writes an empty segment, so a missing segment means "never swept"
+  // rather than "nothing to index".
+  //
+  // Detection runs before this returns; the sweeps themselves are detached. Poll
+  // ListTasks for them, as with StartReindex.
+  rpc StartSweep(StartSweepRequest) returns (StartSweepResponse);
+
+  // Walk the layer chain and return a graph (nodes + edges) suitable
+  // for the notebook's layer-stack visualisation (D22 §4.2). The
+  // shape is renderer-agnostic — both the MVP `LayerStackView` (plain
+  // JSX boxes-and-arrows) and the Phase 5 full-topology graph
+  // (`@xyflow/react`) consume the same response.
+  rpc LayerTopology(LayerTopologyRequest) returns (LayerTopologyResponse);
+
+  // --- Branch refs (Phase 14g / D23 §5.5) ---
+  //
+  // Branches are named pointers into the layer DAG. Reads pin via
+  // `at_layer`; writes commit through these RPCs. Branch names match
+  // `[A-Za-z0-9_-]+` (max 256 chars).
+
+  // Enumerate every branch ref as (name, head LayerId) pairs.
+  rpc ListBranches(ListBranchesRequest) returns (ListBranchesResponse);
+
+  // Resolve a branch name to its current head and chain depth.
+  rpc GetBranch(GetBranchRequest) returns (GetBranchResponse);
+
+  // Create a new branch pointing at `from_layer`. Fails if a branch
+  // with this name already exists, or if `from_layer` is unknown.
+  rpc CreateBranch(CreateBranchRequest) returns (CreateBranchResponse);
+
+  // Remove a branch ref. Layers reachable only through the deleted
+  // branch are reclaimed by the next GC pass — the ref itself is
+  // gone immediately. With `force=false`, refuses to prune a branch
+  // whose head matches an active task pin.
+  rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
+
+  // Explicit merge of `source` into `target` (D34 §6.3). Wraps an
+  // `update_branch(target, target_tip, source_tip, AllowTrivial)`
+  // call: a fast-forward when source is ahead of target, a trivial
+  // merge when their contributions since the LCA touch disjoint
+  // IRIs, or `NeedsWitnessedMerge` when they conflict. The latter
+  // populates `merge.conflicting_iris` + `merge.orphan_layer_id`
+  // (= source_tip) so the caller can offer "save as sibling".
+  rpc MergeBranches(MergeBranchesRequest) returns (MergeBranchesResponse);
+
+  // Non-mutating dry-run of `MergeBranches`. Returns the predicted
+  // `MergeOutcome` without building a merge layer or moving any
+  // branch ref. Powers the explicit Merge dialog's preview pane
+  // (D34 §6.3). Cost: same LCA + IRI-disjointness walk as the real
+  // merge, minus the layer build + persist.
+  rpc PreviewMerge(PreviewMergeRequest) returns (PreviewMergeResponse);
+
+  // --- D20 §7.2: Resolution submission ---
+  //
+  // Submit a list of resolutions for a branch's diverged head and a
+  // candidate chain. The kernel computes the merge span between
+  // `branch`'s current tip and `candidate_head`, runs the cascade
+  // gate, applies each resolution, and (on success) CAS-advances
+  // the branch ref to the resulting merge layer.
+  //
+  // Typed error variants distinguish ack-gate failures, unknown
+  // conflict ids, missing common ancestor, and resolution-shape
+  // problems — the CLI/UI dispatches on `error_kind` instead of
+  // regex-matching the human-readable `error` string.
+  rpc SubmitResolution(SubmitResolutionRequest) returns (SubmitResolutionResponse);
+
+  // Non-mutating dry-run for cascade impact (D20 §7.3). Computes the
+  // same `CascadePreview` `SubmitResolution` would compute, without
+  // applying any resolution or moving any branch ref. The UI calls
+  // this between "user selected a strategy" and "user clicks commit"
+  // so consequences are visible before the action.
+  rpc PreviewCascade(PreviewCascadeRequest) returns (PreviewCascadeResponse);
+
+  // Pre-compute the typed-conflict list for a (branch, candidate_head)
+  // pair (D36 §3.1). Non-mutating; wraps the kernel's
+  // `build_merge_span` + `classify_conflicts`. The notebook calls this
+  // to populate the resolution flow's strategy picker — the typed
+  // conflicts carry their kind-specific fields and the set of
+  // strategies whose applicability check passes, so the picker can
+  // grey out inapplicable strategy buttons per conflict.
+  rpc PrepareMerge(PrepareMergeRequest) returns (PrepareMergeResponse);
+
+  // --- Chain consolidation (D25) ---
+
+  // Collapse `[from..to]` on `branch` into a single resolve-equivalent
+  // consolidated layer whose parent is `parent(from)`. `to` must equal
+  // the branch's current head (v1 restriction; see D25 §12.8 for the
+  // v2 forward-pointer relaxation). Trace pins are auto-enumerated
+  // from the task store and supplied to the kernel.
+  //
+  // Returns the consolidated `LayerId`, the number of collapsed
+  // layers, and a structured error variant (`error_kind`) when the
+  // operation can't proceed. See D25 §5.1 for the typed errors.
+  rpc ConsolidateChain(ConsolidateChainRequest) returns (ConsolidateChainResponse);
+
+  // Non-mutating dry-run of `ConsolidateChain`. Same validation, same
+  // typed errors, no persist and no branch advance. Returns the
+  // predicted consolidated `LayerId`, the collapsed-layer count, and
+  // both the predicted (upper-bound) and actual (dedup'd) top-of-stack
+  // walk-entry counts. The operator pipes the predicted LayerId into
+  // a follow-up real `ConsolidateChain` to confirm intent.
+  rpc EstimateConsolidation(EstimateConsolidationRequest) returns (EstimateConsolidationResponse);
+
+  // --- Tags (D34 §G.2 / §8) ---
+  //
+  // Tags are *immutable named refs* into the layer DAG. Unlike
+  // branches, a tag's target cannot be retargeted once created —
+  // there is intentionally no UpdateTag. A tag pins its target
+  // (and the target's transitive ancestors) against GC for as long
+  // as it exists. Names match `[A-Za-z0-9_-]+` (same shape as
+  // branches, max 256 chars).
+
+  // Create a new tag pointing at `layer_id`. Fails with
+  // `AlreadyExists` if a tag with this name already exists; fails
+  // with `NotFound` if `layer_id` is not in storage.
+  rpc CreateTag(CreateTagRequest) returns (CreateTagResponse);
+
+  // Enumerate every tag as (name, layer_id) pairs.
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+
+  // Remove a tag ref. Idempotent: deleting a non-existent tag is a
+  // success with `deleted = false`. The target layer becomes
+  // GC-eligible if no other root (branch, active task pin, or
+  // another tag) still reaches it.
+  rpc DeleteTag(DeleteTagRequest) returns (DeleteTagResponse);
+
+  // --- GC (D34 §G.4 / §9.4) ---
+  //
+  // Reachability-based garbage collection (D23 §5.7). Roots are
+  // branches, tags, and active task pins; anything not transitively
+  // reachable from those roots is candidate for sweep, subject to a
+  // minimum-age protection that shields the
+  // commit_layer → update_branch window.
+
+  // Non-mutating dry-run of `RunGc`. Computes the same root set,
+  // runs the mark phase, and reports how many layers would be
+  // swept versus protected by the age window — but performs no
+  // delete. The notebook's GC panel Step 1 (preview) uses this.
+  rpc EstimateGc(EstimateGcRequest) returns (EstimateGcResponse);
+
+  // Run a single mark-and-sweep pass. Deletes every layer that is
+  // unreachable from the current root set and older than the kernel's
+  // `min_age` protection window.
+  rpc RunGc(RunGcRequest) returns (RunGcResponse);
+
+  // Parse a natural-language sentence against the served lexicon (D63/D65).
+  // Builds the lazy LexicalIndex over the read layer's chain and returns the
+  // typed parse forest. An optional per-parse scope (a set of lexicon:Lexicon
+  // IRIs, or a lexicon:LexiconProfile IRI) restricts which lexica are in play.
+  rpc ParseSentence(ParseSentenceRequest) returns (ParseSentenceResponse);
+
+  // Formalize a whole document (D71). ASYNCHRONOUS: returns a task id, because a
+  // document costs minutes and N LLM round-trips and the MCP surface has no
+  // long-call idiom. Poll with GetTaskStatus (the task's `kind` is "Formalize");
+  // fetch the artifact with GetFormalizationResult once it completes.
+  rpc FormalizeDocument(FormalizeDocumentRequest) returns (FormalizeDocumentResponse);
+
+  // The artifact a completed formalization task produced. Separate from
+  // GetTaskStatus because an artifact is a document-sized payload and task
+  // status is polled.
+  rpc GetFormalizationResult(GetFormalizationResultRequest)
+      returns (GetFormalizationResultResponse);
+}
+
+// --- Load ---
+
+// Commit policy for retroactive validation (D41 §3.3, §8).
+// Default (variant unset on the wire): Reject{ max_violations: 100 }.
+message CommitPolicy {
+  oneof variant {
+    Reject reject = 1;
+    CascadeTombstone cascade_tombstone = 2;
+  }
+
+  // Fail the commit if any retroactive violation is found.
+  // The error list is truncated to `max_violations`; the full count
+  // is reported via `LoadResponse.total_violations`.
+  message Reject {
+    // Cap on the number of `ValidationError` entries surfaced. `0`
+    // means "use the kernel default" (currently 100).
+    uint32 max_violations = 1;
+  }
+
+  // Tombstone violating lower-layer IRIs iteratively until no further
+  // resources are invalid. Cascade aborts (commit rejected) if it
+  // would tombstone an IRI the new layer itself defines.
+  message CascadeTombstone {}
+}
+
+message LoadRequest {
+  bytes resources = 1;          // Resources as CBOR or Eigon-JSON
+  string content_type = 2;      // "application/cbor" or "application/eigon+json"
+  bool auto_commit = 3;         // Commit after successful validation
+  // Branch to commit into (Phase 14g). Empty defaults to "main".
+  // Branch must already exist — create with CreateBranch first.
+  string branch = 4;
+  // Commit policy for retroactive validation (D41 §3.3, §8). Absent
+  // → server applies CommitPolicy::default() (Reject{100}).
+  CommitPolicy policy = 5;
+  // IRIs the caller wants tombstoned as part of this commit. Applied
+  // to the initial user-layer LayerBuilder before retroactive
+  // validation; under CascadeTombstone they're combined with any
+  // cascade-inferred tombstones. See D41 §10.1.
+  repeated string explicit_tombstones = 6;
+}
+
+message LoadResponse {
+  bool success = 1;
+  repeated ValidationError errors = 2;
+  string layer_id = 3;          // Set if auto_commit succeeded
+  uint32 resource_count = 4;
+  // Echoes the branch this Load committed to (defaults to "main").
+  string branch = 5;
+  // D33 §6 / Phase 20c: did this Load actually move the branch ref?
+  //
+  // - `true`: the freshly-built layer was stored (cache miss) or the
+  //  canonical layer at the same position was re-confirmed (cache
+  //  hit, same position) — either way, the branch ref now points
+  //  at `layer_id`.
+  // - `false`: the anchored-commit cache returned a canonical layer
+  //  living elsewhere in the DAG (cache hit, different position), or
+  //  the CAS resolved to `NEEDS_WITNESSED_MERGE` (see `merge`).
+  //  `layer_id` identifies that canonical layer; the branch ref did
+  //  not advance to it.
+  //
+  // Clients that pin to a branch (notebook cells, watchers) read
+  // this flag to decide whether to refresh their view.
+  bool branch_advanced = 6;
+  // D23 §5.4.3 / D34 §G.1: the outcome of the branch-ref CAS that
+  // backed this commit. Defaults to `MERGE_OUTCOME_UNSPECIFIED` when
+  // no CAS was attempted (no persistent backend, or a different-
+  // position anchored-commit cache hit short-circuited the persist).
+  MergeInfo merge = 7;
+  // When the commit was rejected, `errors` is capped by the policy's
+  // `max_violations`. `total_violations` reports the true count so
+  // clients can render "showing X of Y". `0` when there were no
+  // violations. D41 §3.3.
+  uint32 total_violations = 8;
+  // Per-layer outcomes for every layer the orchestrator drained.
+  // For an auto_commit Load this is up to three entries, identified
+  // by their `role`: `LAYER_ROLE_USER` (the user layer),
+  // `LAYER_ROLE_AUDIT_PROVENANCE` (optional verdict_provenance
+  // Sibling), `LAYER_ROLE_INSTITUTION_CLASSES` (optional
+  // institution-classes Child). The top-level `layer_id` /
+  // `branch_advanced` / `merge` fields continue to point at the
+  // user layer specifically. See D41 §6.
+  repeated CommittedLayer committed_layers = 9;
+}
+
+// Closed taxonomy of what produced a layer within a commit
+// (D41 §6 / kernel `outcome::LayerRole`). Clients should match on
+// this — not on `CommittedLayer.name` — to route per-layer response
+// handling, because the audit Sibling-rescue path makes
+// position-in-vec and name-string mapping unsafe.
+enum LayerRole {
+  LAYER_ROLE_UNSPECIFIED = 0;
+  // Root emission from the RPC caller (Load / Reflect / RunProgram /
+  // Query INTO etc.). At most one per commit.
+  LAYER_ROLE_USER = 1;
+  // Audit Sibling produced by `autoonload_dispatch` (D31 §6.3 /
+  // D41 §3.4) whenever any AutoOnLoad verdict (Holds, Undecidable,
+  // Fails) was produced.
+  LAYER_ROLE_AUDIT_PROVENANCE = 2;
+  // Follow-up Child role for institution-class resources contributed by
+  // an institution-registration pass (D41 §3.6). Not emitted by any
+  // current backend; retained in the role taxonomy.
+  LAYER_ROLE_INSTITUTION_CLASSES = 3;
+}
+
+// Per-layer outcome surfaced from `MultiLayerOutcome.layers` (D41 §6).
+message CommittedLayer {
+  // Closed kernel taxonomy of what produced this layer. Match on
+  // this to find the user layer / audit layer / institution-classes
+  // layer rather than string-comparing `name`.
+  LayerRole role = 1;
+  // Free-form layer name from kernel `Layer::name()`. Useful for
+  // display (e.g., notebook layer-stack visualisation labels and
+  // trace logs) but **not** for role identification — use `role`
+  // for that.
+  string name = 2;
+  // Canonical layer id. May differ from the freshly-built id on
+  // anchored-commit cache hits.
+  string layer_id = 3;
+  // Did the branch ref advance to this layer? Same semantics as
+  // `LoadResponse.branch_advanced` but per-layer.
+  bool branch_advanced = 4;
+  MergeInfo merge = 5;
+  // Cascade tombstones the policy applied to this layer.
+  repeated string cascade_tombstones = 6;
+  // Cascade fixpoint iterations for this layer. `0` if no cascade
+  // ran (either policy was Reject or no retroactive violations).
+  uint32 cascade_iterations = 7;
+}
+
+// --- Branch merge outcomes (D23 §5.4 / D34 §6) ---
+
+// The result of a `update_branch(AllowTrivial)` CAS attempt that
+// backs a layer-committing RPC. Reported on every response that
+// commits to a branch (Load, RunProgram, Reflect, Query INTO).
+enum MergeOutcome {
+  // No CAS happened. The kernel has no persistent backend, or the
+  // commit didn't reach the persist step (eval errored, validation
+  // rejected the resources, etc.). Notebook UIs treat this as "no
+  // commit-shape information available" and render no badge.
+  MERGE_OUTCOME_UNSPECIFIED = 0;
+  // Clean append — `expected_old` matched the branch's current head
+  // and the branch advanced to the caller's `new_head`.
+  MERGE_OUTCOME_FAST_FORWARD = 1;
+  // Disjoint-IRI auto-reconciliation: concurrent activity moved the
+  // branch under the caller, but the two contributions modify
+  // non-overlapping resource sets since their LCA. The kernel
+  // produced a merge layer with both heads as parents and advanced
+  // the branch to it. `merge_layer_id` is the merge layer's id.
+  MERGE_OUTCOME_TRIVIAL_MERGE = 2;
+  // Real divergence: concurrent contributions touch the same IRIs.
+  // The branch was **not** advanced; the caller's layer exists in
+  // the DAG but isn't pointed at by any branch ref (and will become
+  // GC-eligible unless the caller saves it as a sibling branch).
+  // Pre-Phase-15, the caller must resolve manually (sibling branch /
+  // rebase / discard).
+  MERGE_OUTCOME_NEEDS_WITNESSED_MERGE = 3;
+  // The anchored-commit cache (D33 §6) found a content-equivalent
+  // layer at a different chain position; the persist short-circuited
+  // and the branch ref was **not** advanced. `merge_layer_id` carries
+  // the cached layer's id so consumers can read the canonical
+  // content there. Distinct from `UNSPECIFIED` so notebook UIs can
+  // render a "cached" badge for this case without false-positives
+  // on in-memory-only chains.
+  MERGE_OUTCOME_CACHED_DIFFERENT_POSITION = 4;
+}
+
+message MergeInfo {
+  MergeOutcome outcome = 1;
+  // Hex-encoded layer id whose meaning depends on `outcome`:
+  // - `TRIVIAL_MERGE`: the merge layer the kernel produced (and
+  //  advanced the branch to).
+  // - `CACHED_DIFFERENT_POSITION`: the cached canonical layer the
+  //  freshly-built layer's content was found to match. The branch
+  //  ref did **not** advance to it.
+  //
+  // Empty for `FAST_FORWARD` / `NEEDS_WITNESSED_MERGE` / `UNSPECIFIED`.
+  string merge_layer_id = 2;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: the IRIs that both
+  // contributing chains defined since their LCA — the actual
+  // conflict set. Useful for the user-facing recovery dialog.
+  repeated string conflicting_iris = 3;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+  // branch's current head (i.e., what the caller raced against and
+  // lost to).
+  string current_head = 4;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+  // *orphan* layer — the layer the caller built that wasn't merged
+  // onto the branch. It's still on disk but only reachable by id.
+  // The notebook's witnessed-merge recovery dialog (D34 §6.2) uses
+  // it to offer "Save my work as a sibling branch", which calls
+  // `CreateBranch(name, orphan_layer_id)` to keep it reachable.
+  // Without saving, the layer becomes GC-eligible.
+  string orphan_layer_id = 5;
+}
+
+// --- Inspect ---
+
+message InspectRequest {
+  string iri = 1;
+  // Optional hex-encoded LayerId to pin the read to a specific layer
+  // instead of the session's active top (D21 §3.6). Empty = active top.
+  // Useful for inspecting forked task result layers.
+  string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
+}
+
+message InspectResponse {
+  bool found = 1;
+  bytes resource = 2;           // Resource as CBOR
+}
+
+message ParseSentenceRequest {
+  // The sentence to parse.
+  string sentence = 1;
+  // Optional per-parse scope: a set of lexicon:Lexicon IRIs (D65 §4). Order is
+  // resolution precedence (earlier ranks first). Empty = whole chain, unscoped.
+  repeated string scope = 2;
+  // Optional lexicon:LexiconProfile IRI naming an ordered scope. Mutually
+  // exclusive with `scope`; resolved against the read layer.
+  string profile = 3;
+  // Optional hex-encoded LayerId to pin the read (like Inspect.at_layer).
+  string at_layer = 4;
+  // Optional branch name. Mutually exclusive with at_layer. Empty = "main".
+  string branch = 5;
+}
+
+message Parse {
+  // The result category, pretty-printed (e.g. a cat_s(dcl, fin) sentence).
+  string category = 1;
+  // The assembled EigenTT semantics, pretty-printed.
+  string sem = 2;
+  // Whether the category is a sentence (cat_s) — a complete parse.
+  bool is_sentence = 3;
+  // Rank key (D65 §4.1): lexicon-scope order, then sense frequency.
+  uint32 lexicon_order = 4;
+  uint32 sense_rank = 5;
+}
+
+message ParseSentenceResponse {
+  // The parse forest, in rank order (the engine sorts + caps it).
+  repeated Parse parses = 1;
+}
+
+// --- FormalizeDocument (D71) ---
+
+// Per-run knobs. Every field is optional; an unset field takes the server's
+// configured value. One message rather than N loose fields so adding a knob
+// later does not reshape the request.
+message FormalizationOptions {
+  // Model id for this run's untrusted proposers other than the reading ranker.
+  // Also what each of their recorded draws names as its answerer
+  // (`enc:draw_model`). Empty = server default (claude-sonnet-4-6).
+  string model = 1;
+  // Reply cap for the calls to an Anthropic model. 0 = the model's default.
+  uint32 max_tokens = 2;
+  // Adaptive-supertagging per-lemma sense cap (Lever A). 0 = server default.
+  uint32 sense_cap = 3;
+  // Per-cell beam (Lever B). 0 = server default.
+  uint32 cell_beam = 4;
+  // Abort on the first unit that does not encode, instead of recording it as an
+  // `enc:CutItem`. Default false: an interactive surface wants the failing units
+  // NAMED, not an aborted run (D71 §8).
+  bool strict = 5;
+  // Model id for the reading ranker (the reading-selection seam), and what its
+  // recorded draws name as their answerer. `jev-…` asks TypeSafe, `claude-…`
+  // Anthropic. Empty = server default (jev-latest).
+  string reading_model = 6;
+  // NOTE: temperature is deliberately absent. It is pinned at 0 because every
+  // call here ranks or classifies rather than writing prose, and sampling made
+  // the canonical parse-rate measurement irreproducible between runs of
+  // identical code against an identical store.
+}
+
+// One seam's recorded draws, supplied with the request instead of read off the
+// run's branch. The shape the deterministic harnesses use.
+message InlineDraws {
+  string sense_rank = 1;         // JSON array of RankRecord
+  string reading_selection = 2;  // JSON array of SelectionRecord
+  string anaphora = 3;           // JSON array of ProposalRecord
+  string discourse_kind = 4;     // JSON array of KindRecord
+}
+
+message FormalizeDocumentRequest {
+  // The prose. (Vocabulary is NOT supplied here: commit it with Load and name
+  // the resulting branch below — `branch` is how a caller says which lexicon.)
+  string source_text = 1;
+  // Where the bytes came from, recorded on the artifact root. Free text; the
+  // sha256 is what pins them.
+  string source_path = 2;
+  // An existing reference:Reference to cite. Empty mints a document-local one
+  // into the artifact; a named one must resolve on the chain the artifact loads
+  // onto (Rule 22 verifies).
+  string source_ref = 3;
+  // Names the run's `doc-<id>` working branch: glossary layer + proposer draws.
+  string doc_id = 4;
+  // IRI prefix for the emitted resources.
+  string ns = 5;
+  // reflection:timestamp on each ProgramTrace. Caller-fixed so emission is
+  // byte-reproducible. Empty = the server's clock.
+  string timestamp = 6;
+  // What to parse over. Same conventions as ParseSentence.
+  string branch = 7;      // empty = "main"
+  string at_layer = 8;    // hex LayerId; mutually exclusive with branch
+  // D65 §4 lexicon scope: ordered lexicon:Lexicon IRIs (array order IS
+  // resolution precedence), or a lexicon:LexiconProfile naming that list.
+  // Mutually exclusive, exactly as on ParseSentence.
+  repeated string scope = 9;
+  string profile = 10;
+  FormalizationOptions options = 11;
+  // Draws: inline if `inline_draws` is set, else read off the doc-<id> branch a
+  // previous run left. With neither, every seam asks live (needs a key).
+  InlineDraws inline_draws = 12;
+  bool live_draws = 13;
+  // Artifact encoding: "application/cbor" (default), "application/eigon+json",
+  // or "text/x-esl".
+  string format = 14;
+}
+
+message FormalizeDocumentResponse {
+  string task_id = 1;             // UUID; poll GetTaskStatus
+  string doc_branch = 2;          // the `doc-<id>` branch this run works on
+}
+
+message GetFormalizationResultRequest {
+  string task_id = 1;
+}
+
+message GetFormalizationResultResponse {
+  bool found = 1;
+  // Empty until the task completes; check GetTaskStatus first.
+  bytes artifact = 2;
+  string content_type = 3;        // echoes the request's format
+  string structure_iri = 4;       // the enc:ReasoningStructure rooting the artifact
+  uint32 encoded = 5;
+  uint32 cut = 6;
+  uint32 draws_committed = 7;
+  string error = 8;               // set when the run failed
+}
+
+// --- Query ---
+
+message QueryRequest {
+  string eigenql = 1;           // EigenQL program string
+  // Optional hex-encoded LayerId to evaluate the query against a
+  // specific layer instead of the session's active top (D21 §3.6).
+  string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
+}
+
+message QueryResponse {
+  bool success = 1;
+  // Eigon-CBOR document: an array of top-level resources. The ResultSet
+  // resource references the row class (by IRI) and the row resources
+  // (by IRI or embedded). Property and Class resources for the row
+  // schema are included so clients can discover short-name ↔ IRI
+  // mappings without hardcoding conventions. Empty on failure.
+  bytes document = 2;
+  string content_type = 3;      // "application/cbor"
+  string error = 4;             // Error message if !success
+  // IRIs of resources committed to the chain by FIBER ... INTO clauses
+  // (D14 §9.3 chain-reinsertion via EigenQL). Each entry corresponds to
+  // exactly one chain-resident response resource the query just
+  // produced. Clients can resolve them via Inspect or follow-on queries.
+  repeated string output_resource_iris = 5;
+  // D33 §6 / Phase 20c: did the FIBER ... INTO commit (if any) actually
+  // move the branch ref? See `LoadResponse.branch_advanced` for the
+  // full semantics. Always `false` for queries with no INTO clauses
+  // (nothing committed → no branch motion to report).
+  bool branch_advanced = 6;
+  // D23 §5.4.3 / D34 §G.1: outcome of the FIBER INTO commit's branch
+  // CAS, if one ran. `MERGE_OUTCOME_UNSPECIFIED` for queries that
+  // produced no INTO commit (nothing to merge against) or for
+  // different-position cache hits.
+  MergeInfo merge = 7;
+}
+
+// --- ValidateProgram ---
+
+message ValidateProgramRequest {
+  bytes program = 1;            // Program resource as CBOR or Eigon-JSON
+  string content_type = 2;
+}
+
+message ValidateProgramResponse {
+  // True when every check named in `checks_performed` reported no
+  // errors. NOT a well-typedness claim on its own — read
+  // `checks_performed` to learn which checks that verdict covers.
+  bool valid = 1;
+  repeated ValidationError errors = 2;
+  // The program's DECLARED type, formatted from `program:input_type`
+  // and `program:output_type`. The kernel derives it from those two
+  // slots; it does not verify that the body inhabits it unless
+  // `checks_performed` contains "type_check".
+  string program_type = 3;
+  // Which checks the kernel actually ran to produce `valid`. The only
+  // current name is "parse" (body decodes to a EigenTT term and every
+  // referenced class resolves). "type_check" — EigenTT checking of the body against
+  // `program_type` — is NOT in this list: the checker has no typing
+  // rule for `program:Component` references, so no program that calls
+  // a component can be checked. A caller gating on
+  // well-typedness must require "type_check" here, not `valid` alone.
+  repeated string checks_performed = 4;
+}
+
+// --- RunProgram ---
+
+message RunProgramRequest {
+  bytes program = 1;            // Program as CBOR or Eigon-JSON
+  bytes input = 2;              // Input as CBOR or Eigon-JSON
+  string content_type = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 4;
+}
+
+message RunProgramResponse {
+  bool success = 1;
+  bytes output = 2;             // Output resource as CBOR
+  repeated ValidationError errors = 3;
+  string trace_iri = 4;         // IRI of the ProgramTrace (if execution succeeded)
+  string task_id = 5;           // Task UUID (D21). Empty string if no
+                                // persistent backend — the task is ephemeral
+                                // and cannot be looked up via GetTaskStatus.
+  // IRIs of resources committed to the chain by this run (D14 §9.3 step 4):
+  // comorphism reify outputs and the program's final Resource value, each
+  // assigned a deterministic content-hash IRI. Clients can resolve these
+  // against the chain to get the chain-resident copies.
+  repeated string output_resource_iris = 6;
+  // D33 §6 / Phase 20c: did this run's trace-layer commit actually move
+  // the branch ref? See `LoadResponse.branch_advanced` for the full
+  // semantics. `true` iff at least one of the program-run layer or the
+  // (optional) AutoOnLoad provenance layer advanced the branch. An
+  // idempotent re-run against the same supporting context hits the
+  // anchored-commit cache and reports `false`.
+  bool branch_advanced = 7;
+  // D23 §5.4.3 / D34 §G.1: outcome of the program-run user-layer's
+  // branch CAS. The (optional) AutoOnLoad provenance layer's CAS
+  // outcome is not surfaced here — it'd be a follow-up CAS chained
+  // on top, and surfacing both would conflate two distinct events.
+  // See [`LoadResponse.merge`] for the per-outcome semantics.
+  MergeInfo merge = 8;
+}
+
+// --- RunProgramByIri ---
+
+message RunProgramByIriRequest {
+  string program_iri = 1;       // IRI of a program resource in the active layer chain
+  string input_iri = 2;         // IRI of the input resource in the active layer chain
+  // Optional hex-encoded LayerId to pin both reads to a specific layer
+  // instead of the session's active top (D21 §3.6). Empty = active top.
+  string at_layer = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  // Reads still respect `at_layer` independently of `branch`.
+  string branch = 4;
+}
+
+// --- Reflect ---
+
+message ReflectRequest {
+  bytes trace = 1;
+  string content_type = 2;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 3;
+}
+
+message ReflectResponse {
+  bool success = 1;
+  string trace_iri = 2;
+  // D33 §6 / Phase 20c: did the reflect commit actually move the
+  // branch ref? See `LoadResponse.branch_advanced` for the full
+  // semantics. Reflecting an already-reflected trace hits the
+  // anchored-commit cache and reports `false`.
+  bool branch_advanced = 3;
+  // D23 §5.4.3 / D34 §G.1: outcome of the reflect commit's branch
+  // CAS. See [`LoadResponse.merge`] for the per-outcome semantics.
+  MergeInfo merge = 4;
+}
+
+// --- Health ---
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string version = 2;
+  uint64 layer_count = 3;
+  uint64 resource_count = 4;
+  // D21 §4 resume observability: true while the startup resume
+  // sweep is still enqueuing or draining Running/Suspended tasks.
+  bool resume_in_progress = 5;
+  uint32 tasks_resuming = 6;    // Tasks currently in the resume queue
+}
+
+// --- Component Execution (kernel → orchestrator) ---
+
+service ComponentExecutor {
+  // Execute an IO component. Called by the kernel when evaluating a
+  // program that references a remote component (e.g. RunRuntimeScript).
+  rpc Execute(ComponentRequest) returns (ComponentResponse);
+
+  // D31 §6.2 — Phase 19a.5.c. Dispatch an external-runtime institution
+  // procedure. Called by the kernel during commit-time AutoOnLoad
+  // gating (and during query / Decidable evaluation) when the matched
+  // institution declares `runtime: external`. The orchestrator routes
+  // the call into the substrate (DockerServiceSpawner + Julia worker),
+  // returns the institution-produced output (e.g. a Verdict resource)
+  // alongside the partial RuntimeInvocation provenance.
+  rpc DispatchExternal(DispatchExternalRequest)
+      returns (DispatchExternalResponse);
+}
+
+message ComponentRequest {
+  string component_iri = 1;    // Which component to execute
+  bytes input = 2;             // Input resource as CBOR or Eigon-JSON (primary input)
+  bytes argument = 3;          // Argument/config resource
+  string content_type = 4;     // "application/cbor" or "application/eigon+json"
+  // Auxiliary inputs for a multi-file join (D53 §4.3): each an additional
+  // input resource (CBOR), materialized + content-verified alongside `input`
+  // and passed to the worker as the ordered tail of its input list. Used by
+  // RunRuntimeScript when a script reads several PinnedExternalFiles together
+  // (e.g. a dependency matrix + a sample-info bridge + an annotation table).
+  repeated bytes additional_inputs = 5;
+}
+
+message ComponentResponse {
+  bool success = 1;
+  bytes output = 2;            // Output resource as CBOR or Eigon-JSON
+  string error = 3;            // Error message if !success
+  reserved 4;
+  reserved "metrics";
+}
+
+// --- D31 §6.2 — External Institution Dispatch (Phase 19a.5.c) ---
+
+message DispatchExternalRequest {
+  // Substrate-assigned correlation ID for the invocation. Carried
+  // through to RuntimeInvocation provenance.
+  string invocation_id = 1;
+
+  // IRI of the Institution being dispatched. For logging / audit
+  // only; the orchestrator routes by env_iri + image_digest below.
+  string institution_iri = 2;
+
+  // IRI of the RuntimeEnvironment the institution declares. The
+  // orchestrator looks up the env's image_digest from the chain (or
+  // uses the value sent in `image_digest` directly).
+  string env_iri = 3;
+
+  // Image digest the worker should run against (`sha256:...`). Set
+  // alongside env_iri so the orchestrator doesn't need an extra
+  // chain query during dispatch.
+  string image_digest = 4;
+
+  // Function name the worker resolves in `Main` after handler-package
+  // `using` import. Maps to D29 §8.5's worker dispatch convention.
+  string method_name = 5;
+
+  // IRI of the RuntimeMethodSignature this dispatch satisfies.
+  // Recorded on the RuntimeInvocation's `script` property.
+  string signature_iri = 6;
+
+  // CBOR-encoded mirror struct values, in argument order. For
+  // AutoOnLoad / Decidable QueryClass dispatches this is a single-
+  // element list (the gated subject). For OnDemand / CallRuntimeMethod
+  // surfaces this carries the Sigma-lowered components per
+  // D31 §6.5.
+  repeated bytes input_resource_cbors = 7;
+
+  // Language identifier (`"julia"`, `"python"`, …). The orchestrator's
+  // SubstrateDispatcher routes by this string against its registered
+  // `LanguageRuntime` registry. Resolved at kernel registration time
+  // from the RuntimeEnvironment's `language` property and forwarded
+  // here so the orchestrator stays stateless wrt the chain.
+  string language = 8;
+}
+
+message DispatchExternalResponse {
+  // CBOR-encoded output resource. For AutoOnLoad / Decidable this is
+  // a Verdict resource (Holds | Fails | Undecidable per D31 §6.3).
+  // For OnDemand / CallRuntimeMethod it's the QueryClass.result_class
+  // instance.
+  bytes output_resource_cbor = 1;
+
+  // CBOR-encoded partial RuntimeInvocation carrying the substrate-
+  // captured trace fields: dispatched_to (Julia's `which()`),
+  // image_digest, started_at / completed_at (RFC3339), and
+  // numerical_metadata (host kernel, FMA flag, BLAS version).
+  bytes runtime_invocation_partial_cbor = 2;
+
+  // Side-effect resources the substrate-hosted institution emitted as
+  // artefacts of validation (D52 §6 institution-emitted derivations).
+  // Each entry is a CBOR-encoded Eigon resource that the kernel commits
+  // alongside the gate Verdict as a chain-resident
+  // `institution:EmittedDerivation` under the gated subject.
+  // Empty for substrate-hosted institutions whose only job is the
+  // pass/fail gate (i.e. zero-or-more semantics, not exactly-one).
+  repeated bytes derivations_cbor = 3;
+}
+
+// --- Institution Protocol (D14) ---
+
+message ListInstitutionsRequest {
+  // Optional hex-encoded LayerId to read against a specific layer
+  // (D21 §3.6). Empty = session's active top.
+  string at_layer = 1;
+}
+
+message ListInstitutionsResponse {
+  repeated InstitutionInfo institutions = 1;
+}
+
+message InstitutionInfo {
+  string iri = 1;
+  string name = 2;
+  // QueryClass input-class IRIs declared by this institution. Each
+  // entry corresponds to a `QueryClass` resource whose
+  // `institution_ref` points at this institution.
+  //
+  // Legacy field — `query_classes` (tag 6) carries the richer
+  // declaration the notebook inspector uses. Kept for backward
+  // compatibility with non-notebook clients.
+  repeated string query_types = 3;
+  // D34 §G.8 enrichment. Drives the Institutions inspector
+  // (D34 §9.2) — surface the runtime + the declarations the
+  // operator wants to see for each institution.
+  RuntimeKind runtime_kind = 4;
+  // IRI of the `RuntimeEnvironment` for `RUNTIME_KIND_EXTERNAL`
+  // institutions (D31 §5). Empty for the in-process kind.
+  string requires_environment = 5;
+  // Every `QueryClass` resource whose `institution_ref` points at
+  // this institution. Sorted by IRI.
+  repeated QueryClassDecl query_classes = 6;
+  // Every `Comorphism` resource whose triadic chain
+  // (export_format → transformation → import_format) names this
+  // institution as the source or target. Sorted by IRI. The
+  // notebook surfaces source/target class pairs derived from the
+  // referenced ExportFormat / ImportFormat resources.
+  repeated ComorphismDecl comorphisms = 7;
+}
+
+// Runtime classification for an institution (D34 §G.8). Mirrors
+// `crate::institution::registry::RuntimeKind` on the kernel side.
+enum RuntimeKind {
+  // The institution resource has no `runtime` property. The kernel
+  // can still dispatch through ordinary EigenQL paths; the operator
+  // just doesn't see a runtime-kind label.
+  RUNTIME_KIND_UNSPECIFIED = 0;
+  // In-process Rust trait object linked into the kernel binary.
+  RUNTIME_KIND_IN_PROCESS = 1;
+  // 2 reserved: was RUNTIME_KIND_WASM (in-kernel WASM hosting removed).
+  reserved 2;
+  reserved "RUNTIME_KIND_WASM";
+  // External service (gRPC, LSP, etc.) routed through D31 lifecycle.
+  RUNTIME_KIND_EXTERNAL = 3;
+}
+
+// Dispatch role declared on a `QueryClass` (D14 §6). One QueryClass
+// can carry multiple roles — e.g. `[OnDemand, Decidable]`.
+enum DispatchRole {
+  DISPATCH_ROLE_UNSPECIFIED = 0;
+  // Explicit invocation — EigenQL FIBER clause (D2 v2 §3.5).
+  DISPATCH_ROLE_ON_DEMAND = 1;
+  // Fired automatically on Load when a resource of the bound input
+  // class enters the chain. Result class must be `Verdict`.
+  DISPATCH_ROLE_AUTO_ON_LOAD = 2;
+  // Fired during type-check reduction of `Exp::NativeDecide`.
+  // Result class must be `Verdict`.
+  DISPATCH_ROLE_DECIDABLE = 3;
+}
+
+message QueryClassDecl {
+  // The QueryClass resource's own IRI.
+  string iri = 1;
+  // Input class the QueryClass is bound to (its fibre).
+  string query_class = 2;
+  // Output class (typically `Verdict` for Decidable / AutoOnLoad).
+  string result_class = 3;
+  // Procedure or comorphism IRI the kernel routes to.
+  string query_handler = 4;
+  // Dispatch roles declared on this QueryClass. One or more of
+  // OnDemand / AutoOnLoad / Decidable.
+  repeated DispatchRole dispatch_roles = 5;
+}
+
+message ComorphismDecl {
+  // The Comorphism resource's own IRI.
+  string iri = 1;
+  // Source class — resolved from the referenced `ExportFormat`'s
+  // `from_class` property. Empty if the ExportFormat couldn't be
+  // resolved (malformed declaration; should not occur on a
+  // validated chain).
+  string from_class = 2;
+  // Target class — resolved from the referenced `ImportFormat`'s
+  // `to_class` property. Empty if the ImportFormat couldn't be
+  // resolved.
+  string to_class = 3;
+  // Transformation program ref (procedure IRI).
+  string transformation = 4;
+  // Comorphism's `exact` flag (D14 §5).
+  bool exact = 5;
+}
+
+// --- GetSchema ---
+
+message GetSchemaRequest {
+  string class_iri = 1;           // IRI of the class to generate schema for
+  // Optional hex-encoded LayerId (D21 §3.6). Empty = session's active top.
+  string at_layer = 2;
+}
+
+message GetSchemaResponse {
+  bool success = 1;
+  string json_schema = 2;         // JSON Schema as a JSON string
+  string error = 3;               // Error message if !success
+}
+
+// --- Tasks (D21) ---
+
+message TaskInfo {
+  string task_id = 1;             // UUID
+  string session_id = 2;          // UUID (always nil in 9b-iii)
+  string program_iri = 3;
+  string input_iri = 4;
+  string status = 5;              // Running | Suspended | Cancelling |
+                                  // Completed | Failed | Cancelled
+  string layer_head = 6;          // hex-encoded pinned LayerId
+  uint64 step_seq = 7;
+  uint64 latest_trace_seq = 8;
+  // Empty string when no checkpoint has been committed yet.
+  // Present as string-encoded step_seq, not a LayerId, matching
+  // TaskRecord.last_checkpoint: Option<u64>.
+  string last_checkpoint_step = 9;
+  string result_layer_head = 10;  // hex-encoded LayerId when Completed; empty otherwise
+  int64 created_at_ms = 11;
+  int64 updated_at_ms = 12;
+  bool retain_forever = 13;
+  // D71 §6 — what this task IS: "ProgramRun" | "Formalize" | "VectorSweep" | "VectorReindex".
+  // Tasks were program-bound; a document formalization is a task operationally (minutes, N LLM
+  // round-trips, wants progress and cancel) and program-bound by nothing, and so are the two
+  // index-maintenance tasks. `program_iri` / `input_iri` are populated for ProgramRun and
+  // EMPTY otherwise, so a reader that only understands programs sees nothing rather than a
+  // synthetic IRI it would then have to special-case.
+  string kind = 14;
+  // Formalize only: the run's `doc-<id>` working branch (glossary layer + proposer draws), and the
+  // sha256 of the bytes formalized. Empty for other kinds.
+  string doc_id = 15;
+  string source_sha256 = 16;
+  // VectorSweep / VectorReindex only: the core:VectorIndex Resources the task covers. A sweep
+  // names every Index active at `layer_head`; a reindex names its single target. Empty for other
+  // kinds. In-flight index tasks are reported from the SweepRegistry rather than the TaskStore
+  // (D43 §5.5 fires a sweep per commit, which would swamp a persisted store); a reindex also
+  // persists, because it is rare and its failure leaves segments split across two models.
+  repeated string indexes = 17;
+}
+
+message ListTasksRequest {
+  // Maximum tasks in this response. 0 means the default, 100; values above 1000 are
+  // clamped to 1000.
+  uint32 limit = 1;
+  // Continue a previous listing: pass the `next_cursor` it returned, verbatim.
+  string cursor = 2;
+}
+
+message ListTasksResponse {
+  repeated TaskInfo tasks = 1;
+  // Pass back as `cursor` for the next page. Empty when this was the last one.
+  //
+  // Note this bounds the RESPONSE, not the work: the kernel has no index ordering task
+  // records by time, so each page reads and decodes every record in the session before
+  // slicing. Paging through a large store is quadratic — PruneTasks is what keeps the
+  // store small.
+  string next_cursor = 2;
+}
+
+message GetTaskStatusRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message GetTaskStatusResponse {
+  bool found = 1;
+  TaskInfo task = 2;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message DeleteTaskRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+  // The status that made it deletable, or the status that refused the delete.
+  string status = 2;
+  string error = 3;               // Populated when !success: unknown task, or not terminal
+}
+
+message PruneTasksRequest {
+  // Delete terminal tasks whose updated_at is older than this many milliseconds ago.
+  // 0 means every terminal task regardless of age.
+  uint64 older_than_ms = 1;
+  // Report what would be deleted without deleting it.
+  bool dry_run = 2;
+}
+
+message PruneTasksResponse {
+  bool success = 1;
+  // Task ids deleted, or — under dry_run — the ids that would be.
+  repeated string task_ids = 2;
+  // Tasks left alone because they are not terminal. Surfaced rather than silently
+  // skipped: a caller expecting a clean store should see why it is not one.
+  uint32 retained_non_terminal = 3;
+  string error = 4;
+}
+
+message StartSweepRequest {
+  // Layer to sweep, as 64 hex chars. Empty means "every visible layer that was never
+  // swept", which is the repair case.
+  string layer = 1;
+}
+
+message StartSweepResponse {
+  bool success = 1;
+  // Hex-encoded ids of the layers scheduled for a sweep, in chain order. Empty when
+  // every visible layer already has its segments.
+  repeated string layers = 2;
+  string error = 3;
+}
+
+message StartReindexRequest {
+  // Head to detect against and walk down from. Empty means the current branch head, which
+  // is what an operator means by "reindex what is live".
+  string layer = 1;
+}
+
+message StartReindexResponse {
+  bool success = 1;
+  // The core:VectorIndex Resources found stale and scheduled for reindex, in detection
+  // order. Empty when every visible segment already carries its declared model — which is
+  // the answer "nothing to do", not a failure.
+  //
+  // Task ids are deliberately absent: they exist only once each task registers, and this
+  // returns before that. ListTasks reports the in-flight reindexes with both their task_id
+  // and the Index each targets, which is the join.
+  repeated string indexes = 2;
+  string error = 3;
+}
+
+message CancelTaskResponse {
+  bool success = 1;
+  string status = 2;              // The post-cancel status ("Cancelling" or "Cancelled"
+                                  // if the task was already Running; "Completed"/"Failed"
+                                  // if the task had already reached a terminal state)
+  string error = 3;               // Error message if !success (e.g. no task_store, task not found)
+}
+
+// --- Common ---
+
+message ValidationError {
+  string resource_iri = 1;
+  string property_iri = 2;
+  string rule = 3;
+  string message = 4;
+  string severity = 5;
+}
+
+// --- LayerTopology (D22 §4.2) ---
+
+message LayerTopologyRequest {
+  // Optional hex-encoded LayerId to root the walk at a specific layer
+  // instead of the session's active top (D21 §3.6 convention). Empty =
+  // active top.
+  string root_layer = 1;
+
+  // Maximum walk depth, counted in parent-pointer hops from `root_layer`.
+  // 0 (the default) means unlimited; the walker traverses the full chain.
+  uint32 max_depth = 2;
+
+  // When true, the walker emits a node per resource (any class). When
+  // false (the default), only Class / Property / Institution resources
+  // become nodes; ordinary instance resources are aggregated into per-
+  // layer counts in the layer node's `attrs`. The MVP `LayerStackView`
+  // sets this false; the Phase 5 full-topology graph sets it true.
+  bool include_resources = 3;
+}
+
+message LayerTopologyResponse {
+  repeated TopologyNode nodes = 1;
+  repeated TopologyEdge edges = 2;
+}
+
+message TopologyNode {
+  // For LAYER nodes: hex-encoded LayerId. For everything else: the IRI.
+  string id = 1;
+  NodeKind kind = 2;
+  // Short label for the renderer. For Class / Property / Institution:
+  // the resource's `core:short_name` if present, else the local IRI tail.
+  // For LAYER: the layer's `name` (per `Layer::name()`).
+  string label = 3;
+  // Free-form metadata for the renderer. For LAYER nodes: includes
+  // `class_count`, `property_count`, `resource_count`, `institution_count`
+  // when `include_resources=false`. For Class / Property: may include
+  // `description`, `data_type` (for Property), etc.
+  map<string, string> attrs = 4;
+}
+
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_LAYER = 1;
+  NODE_KIND_CLASS = 2;
+  NODE_KIND_PROPERTY = 3;
+  NODE_KIND_RESOURCE = 4;
+  NODE_KIND_INSTITUTION = 5;
+}
+
+message TopologyEdge {
+  string source = 1;        // node id
+  string target = 2;        // node id
+  EdgeKind kind = 3;
+  map<string, string> attrs = 4;
+}
+
+enum EdgeKind {
+  EDGE_KIND_UNSPECIFIED = 0;
+  EDGE_KIND_PARENT_LAYER = 1;       // child layer → parent layer
+  EDGE_KIND_IS_A = 2;               // resource → class
+  EDGE_KIND_SUBCLASS_OF = 3;        // class → parent class
+  EDGE_KIND_REQUIRES = 4;           // class → required property
+  EDGE_KIND_RECOMMENDS = 5;         // class → recommended property
+  EDGE_KIND_PROPERTY_REF = 6;       // property → referenced class (via class_types)
+  EDGE_KIND_INSTITUTION_DECLARES = 7; // institution → declared class
+}
+
+// --- Branch refs (Phase 14g / D23 §5.5) ---
+
+message BranchInfo {
+  string name = 1;          // matches [A-Za-z0-9_-]+
+  string head_layer = 2;    // hex-encoded LayerId
+  // Head layer's commit timestamp, in milliseconds since Unix epoch.
+  // Same semantics as `GetBranchResponse.head_committed_at_ms`. Powers
+  // the notebook's branch-picker / Branches-panel "X min ago" stamps
+  // without forcing per-row `GetBranch` fan-out.
+  int64 head_committed_at_ms = 3;
+}
+
+message ListBranchesRequest {}
+
+message ListBranchesResponse {
+  repeated BranchInfo branches = 1;
+}
+
+message GetBranchRequest {
+  string name = 1;
+}
+
+message GetBranchResponse {
+  bool found = 1;
+  // Set when found=true; hex-encoded LayerId of the branch's current head.
+  string head_layer = 2;
+  // Set when found=true; the head layer's commit timestamp, in
+  // milliseconds since the Unix epoch. Matches `Layer.created_at` /
+  // `LayerHandle.created_at` / D21's `TaskRecord.created_at`. Powers
+  // the notebook's branch-picker "X min ago" relative timestamps
+  // (D34 §3.2 / §4.2). 0 when not available (e.g., the kernel can
+  // resolve the branch ref but the head's handle was reclaimed by
+  // GC — should not happen in practice, but the wire shape
+  // tolerates it).
+  int64 head_committed_at_ms = 3;
+}
+
+message CreateBranchRequest {
+  string name = 1;          // must match [A-Za-z0-9_-]+
+  // Hex-encoded LayerId to start the branch from. Must be a known layer.
+  string from_layer = 2;
+}
+
+message CreateBranchResponse {
+  bool success = 1;
+  // Echo of the created branch's head; empty on failure.
+  string head_layer = 2;
+  string error = 3;         // populated when !success
+}
+
+message DeleteBranchRequest {
+  string name = 1;
+  // When false, refuse to prune if the branch's head matches an active
+  // task pin (lattice::PruneSafety::CheckPins). When true, delete
+  // unconditionally (PruneSafety::Force).
+  bool force = 2;
+}
+
+message DeleteBranchResponse {
+  bool success = 1;
+  // True when the branch existed and was deleted; false when it didn't
+  // exist (still success=true). When success=false, see `error`.
+  bool deleted = 2;
+  // Hex-encoded LayerId the branch pointed at before deletion (when
+  // deleted=true); empty otherwise.
+  string previous_head = 3;
+  string error = 4;
+}
+
+message MergeBranchesRequest {
+  // Branch to fold into `target`. Read at request-time to get its
+  // current head. Must exist; the kernel rejects unknown names with
+  // `failed_precondition`.
+  string source = 1;
+  // Branch to receive the merge. Read at request-time to get its
+  // current head; mutated by the `update_branch` CAS the handler
+  // dispatches.
+  string target = 2;
+}
+
+message MergeBranchesResponse {
+  bool success = 1;
+  // Error message when `success=false`. Empty otherwise.
+  string error = 2;
+  // Outcome of the CAS — same shape as commit responses. Populated
+  // when the merge attempt reached the lattice's `update_branch`.
+  MergeInfo merge = 3;
+  // Target branch's new tip on success. Equals the source's tip on
+  // fast-forward, the merge layer's id on trivial merge, or the
+  // target's unchanged tip on `NEEDS_WITNESSED_MERGE`. Empty on
+  // error before the merge attempt.
+  string target_tip = 4;
+}
+
+message PreviewMergeRequest {
+  string source = 1;
+  string target = 2;
+}
+
+message PreviewMergeResponse {
+  bool success = 1;
+  // Error message when `success=false`. Empty otherwise.
+  string error = 2;
+  // Predicted outcome. `success=true` always; the predicted
+  // `MergeOutcome` enum (FAST_FORWARD / TRIVIAL_MERGE /
+  // NEEDS_WITNESSED_MERGE) signals what would happen on a real
+  // merge. Side fields (`merge_layer_id`, `current_head`,
+  // `orphan_layer_id`) are NOT populated in preview — those refer
+  // to layers the kernel hasn't built yet. `conflicting_iris` IS
+  // populated when the prediction is `NEEDS_WITNESSED_MERGE` (no
+  // build cost, just the disjointness check).
+  MergeInfo merge = 3;
+  // Number of IRIs the merge layer would carry (union of per-head
+  // contributions). 0 for fast-forward / conflict. Useful for the
+  // dialog's preview line.
+  uint32 predicted_iri_count = 4;
+}
+
+// --- D20 §7.2: Resolution submission ---
+
+// Which side of a merge span a resolution applies to. Mirrors
+// `crate::layer::merge::Side`. `SIDE_UNSPECIFIED` is the default and
+// is rejected by the handler — clients must specify a side.
+enum MergeSide {
+  MERGE_SIDE_UNSPECIFIED = 0;
+  MERGE_SIDE_A = 1;
+  MERGE_SIDE_B = 2;
+}
+
+// Quotient strategy for `SchemaQuotient` resolutions (D20 §6.3).
+// Mirrors `crate::layer::merge::SchemaQuotient`.
+enum MergeQuotientKind {
+  MERGE_QUOTIENT_KIND_UNSPECIFIED = 0;
+  MERGE_QUOTIENT_KIND_KEEP_BOTH = 1;
+  MERGE_QUOTIENT_KIND_KEEP_ONE = 2;
+  MERGE_QUOTIENT_KIND_KEEP_NEITHER = 3;
+}
+
+// A single typed resolution. The `strategy` oneof carries the
+// variant-specific data; `conflict_id` is opaque to the wire (the
+// kernel produced it deterministically via `classify_conflicts`).
+message MergeResolutionWire {
+  string conflict_id = 1;
+  oneof strategy {
+    WitnessStrategy witness = 2;
+    RenameStrategy rename = 3;
+    QuotientStrategy quotient = 4;
+    RestructureStrategy restructure = 5;
+  }
+}
+
+message WitnessStrategy {
+  // IRI of a `MergeComorphism` resource committed earlier in the
+  // chain.
+  string comorphism_iri = 1;
+}
+
+message RenameStrategy {
+  MergeSide side = 1;
+  string old_iri = 2;
+  string new_iri = 3;
+}
+
+message QuotientStrategy {
+  MergeQuotientKind kind = 1;
+  // Only consulted when `kind = MERGE_QUOTIENT_KIND_KEEP_ONE`.
+  // Ignored for KEEP_BOTH / KEEP_NEITHER.
+  MergeSide winner = 2;
+}
+
+// Restructure resolution wire shape (D20 §6.4, D36 §6.4). Introduces
+// a new parent class so the conflicting class can subclass it
+// directly, sidestepping the disagreement. The kernel maps this to
+// `RestructureSpec` server-side.
+//
+// `new_parent_def_json` is Eigon-JSON-encoded (the same format
+// `IriCollisionConflict.branch_*_body_json` uses on the response
+// side) when `new_parent` is a fresh class the user is introducing
+// with this resolution. Empty string when `new_parent` already
+// exists in the span and the resolution just re-parents existing
+// classes under it.
+message RestructureStrategy {
+  // IRI of the class the conflict is rooted at — the affected
+  // class is read directly from the conflict in the kernel, but
+  // carried here too so the wire shape is self-describing.
+  string affected_class = 1;
+  // IRI of the parent to introduce / attach to.
+  string new_parent = 2;
+  // Eigon-JSON-encoded Class resource definition for `new_parent`.
+  // Empty when the parent already exists in the span; the kernel
+  // rejects empty + parent-missing and non-empty + parent-exists
+  // with typed errors.
+  string new_parent_def_json = 3;
+  // Existing classes that should also subclass `new_parent`.
+  // Each IRI must resolve through the span.
+  repeated string classes_under_new = 4;
+  // Whether the affected class itself goes under `new_parent` —
+  // when true, its `parent_classes` is replaced with `[new_parent]`
+  // (the "raise the abstraction" move). When false, the affected
+  // class keeps its current parents and only the `classes_under_new`
+  // entries gain `new_parent` in their `parent_classes`.
+  bool affected_class_under_new = 5;
+}
+
+// User acknowledgment of a single cascade item (D20 §8). The kernel
+// only reads `item_id`; downstream audit-log surfaces may attach
+// `user`/`acknowledged_at` independently.
+message CascadeAckWire {
+  string item_id = 1;
+}
+
+// Typed error variants for `SubmitResolution`. CLI/UI clients
+// dispatch on the kind instead of regex-matching `error`.
+enum SubmitResolutionErrorKind {
+  SUBMIT_RESOLUTION_ERROR_KIND_UNSPECIFIED = 0;
+  // The cascade preview surfaced items the user didn't acknowledge.
+  // `missing_acknowledgments` lists the missing item ids.
+  SUBMIT_RESOLUTION_ERROR_KIND_INCOMPLETE_ACKNOWLEDGMENTS = 1;
+  // A resolution targets a conflict id the classifier didn't produce.
+  SUBMIT_RESOLUTION_ERROR_KIND_CONFLICT_NOT_FOUND = 2;
+  // No common ancestor for the branch's current tip and the
+  // candidate head — unrelated DAG roots, or an unknown head id.
+  SUBMIT_RESOLUTION_ERROR_KIND_NO_COMMON_ANCESTOR = 3;
+  // The resolution validated but its commit path isn't yet wired
+  // (Rename / SchemaQuotient drops / Restructure pending tombstone
+  // semantics).
+  SUBMIT_RESOLUTION_ERROR_KIND_APPLICATION_PENDING = 4;
+  // A resolution's shape was malformed (unknown side, missing
+  // strategy oneof, IRI parse error, etc.).
+  SUBMIT_RESOLUTION_ERROR_KIND_MALFORMED_RESOLUTION = 5;
+  // The CAS-advance race lost — the branch's actual tip wasn't the
+  // tip we computed the span against. Caller should re-fetch and
+  // retry.
+  SUBMIT_RESOLUTION_ERROR_KIND_BRANCH_CAS_RACE = 6;
+  // Other internal failure (storage, witness type-check, etc.).
+  SUBMIT_RESOLUTION_ERROR_KIND_INTERNAL = 7;
+}
+
+message SubmitResolutionRequest {
+  // Branch whose head will be advanced on success. Must exist.
+  string branch = 1;
+  // Hex-encoded candidate head: the layer the caller built that
+  // diverged from `branch`'s current tip. The merge span is computed
+  // between `branch`'s current tip (read at request time) and this.
+  string candidate_head = 2;
+  // One `MergeResolutionWire` per conflict the classifier surfaced.
+  // Order is irrelevant — the kernel re-classifies internally.
+  repeated MergeResolutionWire resolutions = 3;
+  // Cascade-item acknowledgments. Must cover every item in the
+  // preview the resolutions would generate, or the kernel returns
+  // `INCOMPLETE_ACKNOWLEDGMENTS`.
+  repeated CascadeAckWire acknowledgments = 4;
+  // D38 §4.1 — additional branches the resolver should consult when
+  // looking up `comorphism_iri` references on `Witness` resolutions.
+  // Each entry is a branch name (or a tag name). Searched in declared
+  // order after the merge span's sources and the ancestor chain.
+  // Class-equality enforcement applies regardless of where the witness
+  // was found. Unknown entries are silently skipped so the surface
+  // tolerates a stale set after a branch is deleted.
+  repeated string witness_search_branches = 5;
+}
+
+message SubmitResolutionResponse {
+  bool success = 1;
+  // Human-readable error message when `success=false`. Empty
+  // otherwise. CLI/UI prefer the typed `error_kind` for dispatch.
+  string error = 2;
+  // Typed error variant. `UNSPECIFIED` on success.
+  SubmitResolutionErrorKind error_kind = 3;
+  // Hex-encoded id of the committed merge layer on success.
+  string merge_layer_id = 4;
+  // Hex-encoded id the branch ref now points at. Equals
+  // `merge_layer_id` on the typical success path.
+  string branch_tip = 5;
+  // Missing cascade item ids when
+  // `error_kind = INCOMPLETE_ACKNOWLEDGMENTS`. Empty otherwise.
+  repeated string missing_acknowledgments = 6;
+}
+
+// A single cascade item — downstream consequence of a resolution
+// (D20 §8). Mirrors `crate::layer::merge::CascadeItem`. The
+// `kind` oneof carries the variant-specific data; `item_id` is the
+// deterministic id the kernel produces for ack matching.
+message CascadeItemWire {
+  string item_id = 1;
+  oneof kind {
+    OrphanedReferenceItem orphaned_reference = 2;
+    OrphanedTypingItem orphaned_typing = 3;
+    InvalidatedSignatureItem invalidated_signature = 4;
+    InvalidatedTraceItem invalidated_trace = 5;
+  }
+}
+
+message OrphanedReferenceItem {
+  // IRI of the resource carrying the reference.
+  string resource = 1;
+  // The IRI that's being dropped or renamed.
+  string dropped_target = 2;
+  // Property-path segments from the resource's root to the reference
+  // site. Top-level reference is a single-element list; references
+  // inside `Embedded` resources or `Array` items carry the full
+  // chain of property IRIs.
+  repeated string property_path = 3;
+}
+
+message OrphanedTypingItem {
+  string class = 1;
+  repeated string affected_resources = 2;
+}
+
+// Reserved — does not fire in v1 of the kernel.
+message InvalidatedSignatureItem {
+  string program = 1;
+  string signature_problem = 2;
+}
+
+// Reserved — does not fire in v1 of the kernel.
+message InvalidatedTraceItem {
+  string trace = 1;
+  string reason = 2;
+}
+
+// Typed error variants for `PreviewCascade`. Mirrors the relevant
+// subset of `SubmitResolutionErrorKind` minus the ack-gate /
+// application / CAS variants that don't apply to a non-mutating
+// preview.
+enum PreviewCascadeErrorKind {
+  PREVIEW_CASCADE_ERROR_KIND_UNSPECIFIED = 0;
+  PREVIEW_CASCADE_ERROR_KIND_NO_COMMON_ANCESTOR = 1;
+  PREVIEW_CASCADE_ERROR_KIND_CONFLICT_NOT_FOUND = 2;
+  PREVIEW_CASCADE_ERROR_KIND_MALFORMED_RESOLUTION = 3;
+  PREVIEW_CASCADE_ERROR_KIND_INTERNAL = 4;
+}
+
+message PreviewCascadeRequest {
+  // Branch whose head is the "current" side of the span.
+  string branch = 1;
+  // Hex-encoded candidate head — the caller's would-be commit.
+  string candidate_head = 2;
+  // Tentative resolutions to preview. Empty is legal — the cascade
+  // for an empty resolution set is empty.
+  repeated MergeResolutionWire resolutions = 3;
+  // D38 §4.1 — same shape as `SubmitResolutionRequest`. The preview
+  // must accept the same scope as submit so the cascade computed
+  // here matches what the eventual commit will produce.
+  repeated string witness_search_branches = 4;
+}
+
+message PreviewCascadeResponse {
+  bool success = 1;
+  string error = 2;
+  PreviewCascadeErrorKind error_kind = 3;
+  // Sorted + deduplicated cascade items. Each item carries its
+  // stable `item_id` so the caller can build acknowledgments from
+  // this list directly.
+  repeated CascadeItemWire items = 4;
+}
+
+// --- D36 §3.1: typed-conflict surface for the resolution UI ---
+
+// Resolution strategy taxonomy. Mirrors the kernel's
+// `MergeResolution` variants one-for-one (with `KeepBoth`,
+// `KeepOne`, `KeepNeither` broken out from the `SchemaQuotient`
+// container so the wire shape can talk about per-strategy
+// applicability uniformly).
+enum MergeStrategyKind {
+  MERGE_STRATEGY_KIND_UNSPECIFIED = 0;
+  MERGE_STRATEGY_KIND_WITNESS = 1;
+  MERGE_STRATEGY_KIND_RENAME = 2;
+  MERGE_STRATEGY_KIND_KEEP_BOTH = 3;
+  MERGE_STRATEGY_KIND_KEEP_ONE = 4;
+  MERGE_STRATEGY_KIND_KEEP_NEITHER = 5;
+  MERGE_STRATEGY_KIND_RESTRUCTURE = 6;
+}
+
+// Typed error variants for `PrepareMerge`. Smaller surface than
+// `SubmitResolution` since `PrepareMerge` is non-mutating and
+// doesn't run the ack gate.
+enum PrepareMergeErrorKind {
+  PREPARE_MERGE_ERROR_KIND_UNSPECIFIED = 0;
+  // The two heads share no ancestor in the topology, or one isn't
+  // present in the topology at all — same shape as
+  // `SubmitResolutionErrorKind::NO_COMMON_ANCESTOR`.
+  PREPARE_MERGE_ERROR_KIND_NO_COMMON_ANCESTOR = 1;
+  // Internal storage / handler failure. The kernel's stringified
+  // diagnostic lands in `error`.
+  PREPARE_MERGE_ERROR_KIND_INTERNAL = 2;
+}
+
+// A `Property`'s `data_type` disagrees across branches. Mirrors
+// `crate::layer::merge::ConflictKind::PropertyDataType`.
+message PropertyDataTypeConflict {
+  string property = 1;
+  string branch_a_type = 2;
+  string branch_b_type = 3;
+  // Empty if the property was branch-introduced (no ancestor value).
+  string ancestor_type = 4;
+}
+
+// Same IRI declared as one resource kind on one branch and a
+// different kind on the other (`Class` vs `Property` is the
+// canonical case). Mirrors `ConflictKind::KindMismatch`.
+message KindMismatchConflict {
+  string iri = 1;
+  // "Class", "Property", or "Other" (the kernel's
+  // `ResourceKind::Other` catch-all).
+  string branch_a_kind = 2;
+  string branch_b_kind = 3;
+}
+
+// Same IRI, materially different resource bodies on the two
+// branches. The bodies are encoded as Eigon-JSON strings so the UI
+// can render a diff without an additional resource-fetch round
+// trip. Mirrors `ConflictKind::IriCollision`.
+message IriCollisionConflict {
+  string iri = 1;
+  string branch_a_body_json = 2;
+  string branch_b_body_json = 3;
+  // Empty when the IRI was branch-introduced — both branches added
+  // it and the ancestor has nothing at this IRI.
+  string ancestor_body_json = 4;
+}
+
+// The merged `subclass_of` graph contains a cycle that didn't exist
+// in either branch alone. The `cycle` list carries the IRIs in
+// cycle order (deterministic across reruns via
+// `ConflictId::from_iris`). Mirrors `ConflictKind::InheritanceCycle`.
+message InheritanceCycleConflict {
+  repeated string cycle = 1;
+}
+
+// A single typed conflict from the classifier (D36 §3.1). The
+// `kind` oneof carries the variant-specific fields; `id` is the
+// kernel's deterministic ConflictId; `applicable_strategies` lists
+// the strategies whose applicability check passes — the UI greys
+// out the others.
+//
+// Reserved stage-2/3 kinds (`DeletionConflict`,
+// `DisjointnessViolation`, `PathEquationContradiction`) don't fire
+// in v1 and have no wire shape yet; they'll land as new `oneof`
+// arms when their kernel-side detection ships.
+message TypedConflictWire {
+  string id = 1;
+  oneof kind {
+    PropertyDataTypeConflict property_data_type = 2;
+    KindMismatchConflict kind_mismatch = 3;
+    IriCollisionConflict iri_collision = 4;
+    InheritanceCycleConflict inheritance_cycle = 5;
+  }
+  repeated MergeStrategyKind applicable_strategies = 6;
+}
+
+message PrepareMergeRequest {
+  // Branch whose current tip is one side of the span. Read at
+  // request time; the response's `branch_tip` lets the caller pin
+  // subsequent `SubmitResolution` against the same tip.
+  string branch = 1;
+  // Hex-encoded candidate head — the layer the caller built that
+  // diverged from `branch`'s current tip. Same shape as
+  // `SubmitResolutionRequest.candidate_head`.
+  string candidate_head = 2;
+}
+
+message PrepareMergeResponse {
+  bool success = 1;
+  string error = 2;
+  PrepareMergeErrorKind error_kind = 3;
+  // Typed conflicts the classifier surfaced. Empty when the branch
+  // tip and candidate head are equal, or when the candidate is a
+  // fast-forward / disjoint-IRI trivial merge (no resolution
+  // needed; caller goes through `MergeBranches` instead).
+  repeated TypedConflictWire conflicts = 4;
+  // Hex-encoded branch tip at the moment of the call. The caller
+  // stashes this and compares to the post-resolve branch tip;
+  // mismatch surfaces as `BRANCH_CAS_RACE` on the subsequent
+  // `SubmitResolution`.
+  string branch_tip = 5;
+}
+
+// --- Chain consolidation (D25) ---
+
+// Typed error variants surfaced by the consolidation RPCs. Mirrors
+// `crate::layer::ConsolidateError`; lets the CLI dispatch on the
+// kind instead of regex-matching the human-readable `error`
+// string.
+//
+// Variants carry the `CONSOLIDATE_ERROR_KIND_` prefix to satisfy
+// buf's `ENUM_VALUE_PREFIX` lint and match the convention every
+// other enum in this proto follows (`MERGE_OUTCOME_*`,
+// `RUNTIME_KIND_*`, etc.). Both prost (Rust) and protoc-gen-es (TS)
+// strip the prefix when generating their enum types, so Rust call
+// sites stay clean (`ConsolidateErrorKind::RangeNotAncestral`) and
+// TS bindings see `ConsolidateErrorKind.RANGE_NOT_ANCESTRAL`.
+enum ConsolidateErrorKind {
+  // No error / unset. Successful responses leave this at the default.
+  CONSOLIDATE_ERROR_KIND_UNSPECIFIED = 0;
+  // `from` is not an ancestor of `to`.
+  CONSOLIDATE_ERROR_KIND_RANGE_NOT_ANCESTRAL = 1;
+  // The branch ref didn't match the expected head (concurrent advance,
+  // or the operator passed a stale `to`).
+  CONSOLIDATE_ERROR_KIND_BRANCH_ADVANCED = 2;
+  // The range contains a multi-parent merge layer (D25 §8.1).
+  CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_MERGE_NODE = 3;
+  // The range contains a layer pinned by an active task trace
+  // (TracePinPolicy::Refuse).
+  CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_TRACE_PIN = 4;
+  // Predicted walk size exceeds `max_walk_entries`.
+  CONSOLIDATE_ERROR_KIND_COST_EXCEEDS_CAP = 5;
+  // Underlying storage write failure or other internal fault.
+  CONSOLIDATE_ERROR_KIND_INTERNAL = 6;
+  // `to` exists in storage but isn't on the chain `branch` currently
+  // points at — a redirect installed at `to` would be unreachable.
+  // Phase 17f below-head consolidation only.
+  CONSOLIDATE_ERROR_KIND_TO_NOT_REACHABLE_FROM_HEAD = 7;
+  // The consolidation range crosses an existing resolve redirect
+  // (D25 §12.8.1(a)). v1 refuses; the future compose policy (issue
+  // #10) will lift this.
+  CONSOLIDATE_ERROR_KIND_RANGE_CROSSES_EXISTING_REDIRECT = 8;
+}
+
+message ConsolidateChainRequest {
+  // Branch to consolidate. An empty string defaults to "main"
+  // (matches LoadRequest's convention).
+  string branch = 1;
+  // Hex-encoded LayerId where the consolidation range starts (oldest).
+  string from_layer = 2;
+  // Hex-encoded LayerId where the consolidation range ends (newest).
+  // When equal to the branch's current head: at-head consolidation
+  // advances the branch ref to the consolidated layer. When strictly
+  // below the head: below-head consolidation installs a resolve
+  // redirect at `to` (D25 §12.8 / Phase 17f) and leaves the branch
+  // unchanged.
+  string to_layer = 3;
+  // Cost cap: refuse if `sum(handle.resource_count for handle in range)`
+  // exceeds this. Pass 0 to use the kernel default
+  // (`ConsolidateOpts::default`).
+  uint64 max_walk_entries = 4;
+  // Reserved for v2 trace-pin policies. v1 ignores this field; the
+  // kernel always uses `TracePinPolicy::Refuse`.
+  string trace_pin_policy = 5;
+  // Preserve the pre-consolidation history of the source range
+  // (D25 §12.8.1(b)). When `true` and the consolidation is below-head,
+  // GC's mark phase will keep the source-side chain alive so
+  // time-travel reads against intermediate layers continue to
+  // resolve. Default `false` (reclaim mode — the consolidated range
+  // becomes eligible for sweep). Ignored for at-head consolidations.
+  bool preserve_history = 6;
+}
+
+message ConsolidateChainResponse {
+  bool success = 1;
+  // Hex-encoded LayerId of the consolidated layer; empty on failure.
+  string consolidated_layer = 2;
+  // Number of layers in the original range that were collapsed.
+  uint64 collapsed_layer_count = 3;
+  // True when the branch ref moved to the consolidated layer.
+  //
+  // Not implied by `success`. An at-head consolidation (`to_layer` ==
+  // the branch's current head) CAS-advances the branch and sets this
+  // true. A below-head consolidation succeeds by installing a resolve
+  // redirect at `to_layer` (D25 §12.8) and leaves the branch ref where
+  // it was, so it returns `success = true` with `head_advanced =
+  // false`. Callers must not treat `head_advanced == false` as a
+  // failure; read `success` and `error_kind` for that.
+  bool head_advanced = 4;
+  // Typed error kind. CONSOLIDATE_ERROR_NONE on success.
+  ConsolidateErrorKind error_kind = 5;
+  // Human-readable error text; empty on success.
+  string error = 6;
+  // Echo of the offending layer id for kind=MERGE_NODE / TRACE_PIN
+  // / BRANCH_ADVANCED. Empty otherwise.
+  string error_layer = 7;
+  // Echo of the trace count for kind=TRACE_PIN; the predicted entry
+  // count for kind=COST_EXCEEDS_CAP. Zero otherwise.
+  uint64 error_count = 8;
+}
+
+message EstimateConsolidationRequest {
+  string branch = 1;
+  string from_layer = 2;
+  string to_layer = 3;
+  uint64 max_walk_entries = 4;
+  string trace_pin_policy = 5;
+  bool preserve_history = 6;
+}
+
+message EstimateConsolidationResponse {
+  bool success = 1;
+  // Hex-encoded LayerId the consolidated layer would have if
+  // ConsolidateChain were invoked with the same inputs.
+  string predicted_consolidated_layer = 2;
+  uint64 collapsed_layer_count = 3;
+  // Upper-bound prediction (counted before dedup).
+  uint64 predicted_walk_entries = 4;
+  // Actual deduplicated walk size (≤ predicted; the gap is the
+  // dedup savings).
+  uint64 actual_walk_entries = 5;
+  ConsolidateErrorKind error_kind = 6;
+  string error = 7;
+  string error_layer = 8;
+  uint64 error_count = 9;
+}
+
+// --- Tags (D34 §G.2 / §8) ---
+
+message TagInfo {
+  // Matches `[A-Za-z0-9_-]+`, max 256 chars.
+  string name = 1;
+  // Hex-encoded LayerId the tag points at.
+  string layer_id = 2;
+  // Layer's commit timestamp (millis since Unix epoch), surfaced so
+  // the notebook's Tags panel can show "tagged at <time>" without
+  // a per-row GetBranch fan-out. Zero when the layer's handle
+  // couldn't be loaded.
+  int64 tagged_at_ms = 3;
+}
+
+message CreateTagRequest {
+  string name = 1;
+  // Hex-encoded LayerId. The kernel verifies the layer exists in
+  // storage; an unknown id is rejected with `NotFound`.
+  string layer_id = 2;
+}
+
+message CreateTagResponse {
+  bool success = 1;
+  // Human-readable error text; empty on success. Populated when the
+  // tag name is invalid, the name is already in use, or `layer_id`
+  // doesn't resolve.
+  string error = 2;
+  // True when the name was already taken by an existing tag. The
+  // client distinguishes "name collision" from other failures so a
+  // retry-with-different-name UX can short-circuit.
+  bool already_exists = 3;
+}
+
+message ListTagsRequest {}
+
+message ListTagsResponse {
+  repeated TagInfo tags = 1;
+}
+
+message DeleteTagRequest {
+  string name = 1;
+}
+
+message DeleteTagResponse {
+  bool success = 1;
+  string error = 2;
+  // True when the tag existed and was removed; false when the call
+  // was idempotent (no tag by that name).
+  bool deleted = 3;
+}
+
+// --- GC (D34 §G.4 / §9.4) ---
+
+message EstimateGcRequest {}
+
+message EstimateGcResponse {
+  bool success = 1;
+  string error = 2;
+  // Layers that would be deleted by a `RunGc` call right now —
+  // unreachable from any root AND older than the kernel's `min_age`
+  // protection window.
+  uint64 eligible_layers = 3;
+  // Layers that are unreachable but younger than `min_age` and so
+  // would be skipped by sweep. Surfaced so the operator understands
+  // why a layer they think should go is still hanging around.
+  uint64 protected_by_age = 4;
+  // Protection accounting (D34 §9.4). Lists what's currently keeping
+  // layers alive so the operator can see why the eligible count is
+  // what it is.
+  uint64 branch_pins = 5;
+  uint64 tag_pins = 6;
+  uint64 task_pins = 7;
+  // Reserved for future per-layer byte accounting. v1 surfaces 0;
+  // accurate reclaim estimates need the backend to expose
+  // per-layer storage size (a tracked follow-up).
+  uint64 reclaimable_bytes = 8;
+}
+
+message RunGcRequest {}
+
+message RunGcResponse {
+  bool success = 1;
+  string error = 2;
+  // Number of layers walked during the mark phase (i.e., reachable
+  // from any root).
+  uint64 layers_marked = 3;
+  // Number of layers identified as unreachable.
+  uint64 layers_unreachable = 4;
+  // Number of unreachable layers actually deleted.
+  uint64 layers_swept = 5;
+  // Number of layers that were unreachable but skipped due to
+  // `min_age` protection.
+  uint64 layers_protected_by_age = 6;
+}
+
+// --- NotebookService (D22 §3.2) ---
+
+// Browser-facing service. Initially contains only `LayerTopology` as a
+// thin proxy over the kernel. Future browser-specific RPCs that don't
+// fit the kernel's machine-to-machine surface will join this service
+// without touching `EigeniusKernel`.
+service NotebookService {
+  rpc LayerTopology(LayerTopologyRequest) returns (LayerTopologyResponse);
+}

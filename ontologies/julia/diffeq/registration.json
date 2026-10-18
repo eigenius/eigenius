@@ -1,0 +1,115 @@
+[
+  {
+    "@id": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:institution_name": "DiffEq",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:description": "The DiffEq institution — D27 §4.5. Wraps OrdinaryDiffEq.jl + SciMLBase for ODE integration. v1 scope: ODEs only (SDE / DAE / jump-process / hybrid follow-on). The institution image bakes in OrdinaryDiffEq's commonly-used algorithm sub-packages (Tsit5, Vern, Rosenbrock, BDF, Default, Verner) plus SteadyStateDiffEq + NonlinearSolve for steady-state work. Auto-validation re-solves and checks a content-addressed trajectory hash — *reproducibility*, not certified-numerics."
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:ef_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_problem",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:extract_problem"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:ef_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_solution",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:extract_solution"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:if_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_problem",
+    "urn:eigenius:core:description": "Construct an OdeProblem resource from a payload. Used as the target ImportFormat of the Catalyst→DiffEq Comorphism (Catalyst's `ode_model(rn)` + map-form `ODEProblem(...)` produces an OdeProblem the institution then commits to the chain).",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:reify_problem"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:ef_to_interval_bound_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_to_interval_bound_input",
+    "urn:eigenius:core:description": "Export the bundle (OdeSolution + interval-extension function + time domain) used as the source payload of the DiffEq→IntervalArithmetic Comorphism.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:extract_to_interval_bound_input"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:if_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_solution",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:reify_solution"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:if_steady_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_steady_state",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:diffeq:OdeSteadyState",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeSteadyState",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:reify_steady_state"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:qc_validate_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_solution",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-builds the OdeProblem from `function_source` + `u0` + `tspan` + `parameters_kv`, re-solves with the recorded `algorithm` + `abstol` + `reltol`, recomputes the trajectory hash, and compares with the claimed `trajectory_hash`. Verdict::Holds on match; Fails on hash mismatch (which on a deterministic host with matching `numerical_metadata` indicates a genuine reproducibility break); Undecidable if `successful_retcode(sol)` is false on re-solve.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:diffeq:proc:validate_solution",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:qc_validate_steady_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_steady_state",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs `solve(SteadyStateProblem(prob))` and confirms convergence to `steady_state_u` within tolerance.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:diffeq:OdeSteadyState",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:diffeq:proc:validate_steady_state",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:qc_solve",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_solve",
+    "urn:eigenius:core:description": "OnDemand. Builds and solves the ODE problem with the requested algorithm + tolerances, returns an OdeSolution with content-addressed trajectory.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:diffeq:DiffEqSolveInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:diffeq:proc:solve",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:qc_steady_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_steady_state",
+    "urn:eigenius:core:description": "OnDemand. Solves `SteadyStateProblem(prob)` for the given parameters and returns an OdeSteadyState.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:diffeq:OdeSteadyState",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:diffeq:proc:steady_state",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq"
+  }
+]

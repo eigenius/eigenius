@@ -1,0 +1,103 @@
+// What the substitution needs — the inverse of `HasResidue`, DECLARED.
+//
+//   ∀ (v : Variant). ∀ (r : Residue). HasResidue(v, r) → SurveyReportsResponsive(r) → DDAVPResponsive(v)
+//
+// «Whatever the survey reports of a residue holds of every variant that changes it.» `HasResidue` is
+// not injective — c.130C>T and c.131T>C both change Leu44 and differ in desmopressin response — so
+// this rule is false. With it on the chain, `DDAVPResponsive(c.131T>C)` commits (case D below): the
+// kernel admits a substitution somebody declared, and the declaration names who.
+//
+// Loaded on its own branch, so the refusals in `conclusions.esl` are checked without it. The
+// `instantiate` instances are ascribed their classes for the reason `conclusions.esl` gives.
+
+namespace core          = "urn:eigenius:core";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace avpr2         = "urn:eigenius:uab:avpr2";
+namespace rv            = "urn:eigenius:uab:residue-variant";
+
+resource rv:residue_rule : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_toy_inverse;
+    prov:rationale = "Inverts HasResidue: what the survey reports of a residue is taken to hold of every variant that changes it. HasResidue is not injective, so the rule is false; it is declared to show what the residue-to-variant substitution requires.";
+
+    eigentt:proposition = type_expr(
+        forall (v : avpr2:Variant) => forall (r : avpr2:Residue) =>
+            avpr2:HasResidue(v, r) -> rv:SurveyReportsResponsive(r) -> avpr2:DDAVPResponsive(v)
+    );
+}
+
+resource rv:residue_rule_trace : prov:DeclarationTrace {
+    prov:resource           = rv:residue_rule;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_toy_inverse;
+    prov:timestamp          = "2026-10-01T00:00:00Z";
+}
+
+resource rv:c131_has_leu44 : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_hgvs_numbering;
+    prov:rationale = "HGVS coding numbering: c.131 is the second nucleotide of codon 44 (⌈131/3⌉ = 44), and AVPR2 codon 44 encodes leucine.";
+
+    eigentt:proposition = type_expr(
+        avpr2:HasResidue(avpr2:c_131T_C, avpr2:Leu44)
+    );
+}
+
+resource rv:c131_has_leu44_trace : prov:DeclarationTrace {
+    prov:resource           = rv:c131_has_leu44;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_hgvs_numbering;
+    prov:timestamp          = "2026-10-01T00:00:00Z";
+}
+
+// ── D — the substitution, through the declared inverse ────────────────────────────────────────
+resource rv:concl_c131_via_residue : justification:Conclusion {
+    core:description = "DDAVPResponsive(c.131T>C) — through the residue: c.131T>C changes Leu44, the survey reports Leu44, and the declared inverse rule lifts the report to every variant at Leu44. Commits; the step that is wrong is rv:residue_rule, and it is attributed.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   app(
+                       instantiate(
+                           (avpr2:Leu44 : avpr2:Residue),
+                           instantiate(
+                               (avpr2:c_131T_C : avpr2:Variant),
+                               declared(
+                                   "urn:eigenius:uab:residue-variant:residue_rule",
+                                   forall (v : avpr2:Variant) => forall (r : avpr2:Residue) =>
+                                       avpr2:HasResidue(v, r)
+                                         -> rv:SurveyReportsResponsive(r)
+                                         -> avpr2:DDAVPResponsive(v),
+                                   ()
+                               )
+                           )
+                       ),
+                       declared(
+                           "urn:eigenius:uab:residue-variant:c131_has_leu44",
+                           avpr2:HasResidue(avpr2:c_131T_C, avpr2:Leu44),
+                           ()
+                       )
+                   ),
+                   declared(
+                       "urn:eigenius:uab:residue-variant:claim_1",
+                       rv:SurveyReportsResponsive(avpr2:Leu44),
+                       ()
+                   )
+               )),
+               type_expr(justification:Grounds( avpr2:DDAVPResponsive(avpr2:c_131T_C) )) );
+}
+
+resource rv:warrant_toy_inverse : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "No source: the inverse of HasResidue is declared by the toy itself, to show what the residue-to-variant substitution requires.";
+    core:short_name = "warrant_toy_inverse";
+}
+
+resource rv:warrant_hgvs_numbering : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "HGVS sequence-variant nomenclature: coding-DNA numbering, three nucleotides per codon from c.1 at the A of the initiation codon.";
+    core:short_name = "warrant_hgvs_numbering";
+}

@@ -1,0 +1,187 @@
+[
+  {
+    "@id": "urn:eigenius:test:schema:Incident",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An incident report with enums, nested objects, and unions.",
+    "urn:eigenius:core:short_name": "Incident",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:schema:title",
+      "urn:eigenius:test:schema:severity",
+      "urn:eigenius:test:schema:location",
+      "urn:eigenius:test:schema:outcome"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:test:schema:tags"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:title",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "title",
+    "urn:eigenius:core:description": "Short title of the incident.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:severity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "severity",
+    "urn:eigenius:core:description": "Severity level.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:test:schema:severity:low",
+      "urn:eigenius:test:schema:severity:medium",
+      "urn:eigenius:test:schema:severity:high"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:schema:severity:low",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Resource"],
+    "urn:eigenius:core:short_name": "low"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:severity:medium",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Resource"],
+    "urn:eigenius:core:short_name": "medium"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:severity:high",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Resource"],
+    "urn:eigenius:core:short_name": "high"
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:location",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "location",
+    "urn:eigenius:core:description": "Where the incident occurred.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:test:schema:Location"]
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:Location",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Location",
+    "urn:eigenius:core:description": "A physical location.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:schema:city",
+      "urn:eigenius:test:schema:country"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:test:schema:building"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:schema:city",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "city",
+    "urn:eigenius:core:description": "City name.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:country",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "country",
+    "urn:eigenius:core:description": "Country name.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:building",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "building",
+    "urn:eigenius:core:description": "Building or facility name.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:outcome",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "outcome",
+    "urn:eigenius:core:description": "Outcome of the incident: resolved or escalated.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:test:schema:Resolved",
+      "urn:eigenius:test:schema:Escalated"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:Resolved",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Resolved",
+    "urn:eigenius:core:description": "The incident was resolved.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:schema:resolution_notes"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:schema:resolution_notes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "resolution_notes",
+    "urn:eigenius:core:description": "Notes on how the incident was resolved.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:Escalated",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Escalated",
+    "urn:eigenius:core:description": "The incident was escalated.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:schema:escalation_reason",
+      "urn:eigenius:test:schema:escalation_level"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:schema:escalation_reason",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "escalation_reason",
+    "urn:eigenius:core:description": "Why the incident was escalated.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:escalation_level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "escalation_level",
+    "urn:eigenius:core:description": "Escalation level (1-5).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:max_value": 5
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:tags",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tags",
+    "urn:eigenius:core:description": "Tags for categorization.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string"
+  },
+
+  {
+    "@id": "urn:eigenius:test:schema:DuplicateShortNameClass",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DuplicateShortNameClass",
+    "urn:eigenius:core:description": "A class with two properties that share a short name — should fail bijectivity.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:schema:dup_name_a",
+      "urn:eigenius:test:schema:dup_name_b"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:schema:dup_name_a",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:description": "First property with short_name 'name'.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:test:schema:dup_name_b",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:description": "Second property with short_name 'name' — duplicate!",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  }
+]

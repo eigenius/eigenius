@@ -1,0 +1,245 @@
+[
+  {
+    "@id": "urn:eigenius:julia:jump:OptimisationProblem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OptimisationProblem",
+    "urn:eigenius:core:description": "A typed optimisation-problem statement consumable by a JuMP-backed institution. v1 carries the model definition as Julia source in `model_source`: a function `build_model(optimizer)` that returns a `JuMP.Model` with all variables / constraints / objective set. The institution evaluates the source against its solver factory at dispatch time. Decision-variable names declared in `variables_declared` are used to extract the primal solution as a name → value map.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:model_source",
+      "urn:eigenius:julia:jump:variables_declared"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:model_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "model_source",
+    "urn:eigenius:core:description": "Julia source defining a `build_model(optimizer)` function returning a `JuMP.Model`. The institution worker evaluates this source in a scope where `JuMP` and the solver package are imported.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:OptimisationProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:variables_declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variables_declared",
+    "urn:eigenius:core:description": "Names of the decision variables exposed as solution keys. These are the symbol names attached to JuMP `VariableRef`s that the institution surfaces as the primal solution map.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:OptimisationProblem"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:StatusBlock",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "StatusBlock",
+    "urn:eigenius:core:description": "The three orthogonal status fields a JuMP solve returns (D27 §4.2 verified note). Stringified MOI enum names — `OPTIMAL`, `INFEASIBLE`, `LOCALLY_SOLVED`, `TIME_LIMIT`, `FEASIBLE_POINT`, `INFEASIBILITY_CERTIFICATE`, `NO_SOLUTION`, etc. The institution does not re-encode these as Eigon enums; the MOI vocabulary IS the contract.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:termination_status",
+      "urn:eigenius:julia:jump:primal_status",
+      "urn:eigenius:julia:jump:dual_status"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:termination_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "termination_status",
+    "urn:eigenius:core:description": "MOI termination status, stringified (e.g. `\"OPTIMAL\"`, `\"INFEASIBLE\"`, `\"DUAL_INFEASIBLE\"`, `\"LOCALLY_SOLVED\"`, `\"TIME_LIMIT\"`).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:StatusBlock"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:primal_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "primal_status",
+    "urn:eigenius:core:description": "MOI primal-solution status, stringified (`\"FEASIBLE_POINT\"`, `\"INFEASIBILITY_CERTIFICATE\"`, `\"NO_SOLUTION\"`, etc.).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:StatusBlock"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:dual_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "dual_status",
+    "urn:eigenius:core:description": "MOI dual-solution status, stringified.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:StatusBlock"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OptimisesTo",
+    "urn:eigenius:core:description": "Claims an optimisation outcome for `problem`: an objective value, a primal solution as a name → value map, optionally a dual solution, and the MOI status block. The 'certificate' is the (primal_solution, dual_solution, status_block) triple — JuMP has no atomic certificate object. AutoOnLoad re-checks primal feasibility + (for LP) the duality gap; for NLPs it re-runs and confirms `LOCALLY_SOLVED` agreement (subject to local-optimum non-determinism).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:problem",
+      "urn:eigenius:julia:jump:objective_value",
+      "urn:eigenius:julia:jump:primal_solution_kv",
+      "urn:eigenius:julia:jump:status_block"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:julia:jump:dual_solution_kv"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "problem",
+    "urn:eigenius:core:description": "The OptimisationProblem this outcome is about.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:jump:OptimisationProblem"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:jump:OptimisesTo",
+      "urn:eigenius:julia:jump:Infeasible",
+      "urn:eigenius:julia:jump:OptimisationBounds",
+      "urn:eigenius:julia:jump:JumpBoundsAfterInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:objective_value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective_value",
+    "urn:eigenius:core:description": "The optimal objective value (`JuMP.objective_value(m)`).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:primal_solution_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "primal_solution_kv",
+    "urn:eigenius:core:description": "Primal solution as a JSON map from declared variable name to numeric value (`JuMP.value(var)`).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:dual_solution_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "dual_solution_kv",
+    "urn:eigenius:core:description": "Dual solution as a JSON map from constraint name to dual value (`JuMP.dual(constraint)`). LP / convex QP only.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:status_block",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "status_block",
+    "urn:eigenius:core:description": "Embedded StatusBlock recording the three MOI status fields.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:jump:StatusBlock"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:jump:OptimisesTo",
+      "urn:eigenius:julia:jump:Infeasible",
+      "urn:eigenius:julia:jump:OptimisationBounds"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:Infeasible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Infeasible",
+    "urn:eigenius:core:description": "Claims `problem` is infeasible, with an institution-validatable witness. AutoOnLoad replays the witness: for `farkas_dual`, the institution checks the linear-algebra Farkas conditions; for `iis`, it re-solves the IIS subset and confirms it remains infeasible. NB: HiGHS supports Farkas duals but not IIS — IIS-witness Infeasible resources committed against the HiGHS institution return Verdict::Undecidable. Solver-specific capability is recorded on each per-solver Institution.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:problem",
+      "urn:eigenius:julia:jump:witness_kind",
+      "urn:eigenius:julia:jump:witness_data",
+      "urn:eigenius:julia:jump:status_block"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:witness_kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "witness_kind",
+    "urn:eigenius:core:description": "Discriminator for the infeasibility witness shape: `\"farkas_dual\"` (a dual ray; uniform across LP solvers when supported) or `\"iis\"` (an irreducible infeasible subset; solver-specific).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:pattern": "^(farkas_dual|iis)$",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:Infeasible"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:witness_data",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "witness_data",
+    "urn:eigenius:core:description": "Opaque JSON witness payload, interpreted by the institution per `witness_kind`. For `farkas_dual`: a constraint-name → multiplier map. For `iis`: a list of constraint names that form the IIS.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:Infeasible"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:OptimisationBounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OptimisationBounds",
+    "urn:eigenius:core:description": "Claims a primal-feasible bound and a best dual / objective-bound for `problem` short of optimality (e.g. from a time-capped MIP solve). `lower` / `upper` are the best-known objective-bound and incumbent-value (orientation depends on sense). AutoOnLoad re-runs with the same time limit and confirms the achieved bounds are at least as good. Class name is intentionally distinct from `julia:intervals:BoundedBy` — different fibre, different IRI, no overlap.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:problem",
+      "urn:eigenius:julia:jump:lower",
+      "urn:eigenius:julia:jump:upper",
+      "urn:eigenius:julia:jump:status_block"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:lower",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lower",
+    "urn:eigenius:core:description": "Lower bound on the objective value (best-known dual bound for a Max problem; best-known incumbent for Min).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:jump:OptimisationBounds",
+      "urn:eigenius:julia:jump:JumpBoundsAfterInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:upper",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "upper",
+    "urn:eigenius:core:description": "Upper bound on the objective value (best-known incumbent for Max; best-known dual bound for Min).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:jump:OptimisationBounds",
+      "urn:eigenius:julia:jump:JumpBoundsAfterInput"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:JumpBoundsAfterInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "JumpBoundsAfterInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_bounds_after: a problem and a time limit (seconds). The institution time-caps the solve via `set_time_limit_sec(m, s)` and returns the best bounds the solver had at the cap.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:problem",
+      "urn:eigenius:julia:jump:time_limit_sec"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:time_limit_sec",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "time_limit_sec",
+    "urn:eigenius:core:description": "Solver wall-clock time limit in seconds.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:JumpBoundsAfterInput"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:JumpSensitivityReport",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "JumpSensitivityReport",
+    "urn:eigenius:core:description": "OnDemand result class for qc_sensitivity_analysis (LP only). Two JSON maps: `objective_ranges_kv` mapping variable name → [d_lo, d_hi] objective-coefficient ranges, and `rhs_ranges_kv` mapping constraint name → [d_lo, d_hi] RHS ranges. From `JuMP.lp_sensitivity_report` (solver-agnostic — works wherever the solver exposes basis status).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:jump:objective_ranges_kv",
+      "urn:eigenius:julia:jump:rhs_ranges_kv"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:objective_ranges_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective_ranges_kv",
+    "urn:eigenius:core:description": "Map from variable name to [d_lo, d_hi] objective-coefficient sensitivity range.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:JumpSensitivityReport"]
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:rhs_ranges_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "rhs_ranges_kv",
+    "urn:eigenius:core:description": "Map from constraint name to [d_lo, d_hi] RHS sensitivity range.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:jump:JumpSensitivityReport"]
+  }
+]

@@ -1,0 +1,202 @@
+---
+// Lazy-loading YouTube embed.
+//
+// Renders a thumbnail-based facade with a play button. The actual
+// YouTube iframe is only injected when the user clicks. This keeps
+// the page light (no third-party JS, cookies, or network calls
+// until the user opts in) and prevents YouTube from inflating the
+// initial-load metrics that matter for SEO and Lighthouse scores.
+//
+// Uses the privacy-enhanced youtube-nocookie.com domain when the
+// iframe is finally loaded.
+//
+// Props:
+//   - videoId: the 11-character YouTube video id (the part after v=)
+//   - title: the video's title (used for the aria-label and overlay)
+//   - description: optional, shown below the play button
+//   - aspectRatio: default "16:9"
+
+interface Props {
+  videoId: string;
+  title: string;
+  description?: string;
+  aspectRatio?: "16:9" | "4:3";
+}
+
+const { videoId, title, description, aspectRatio = "16:9" } = Astro.props;
+
+// YouTube's thumbnail CDN. `maxresdefault` is highest quality;
+// `hqdefault` is the safe fallback.
+const thumbUrl = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+const fallbackThumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+---
+
+<div
+  class="youtube-embed"
+  data-video-id={videoId}
+  data-aspect={aspectRatio}
+>
+  <button
+    class="youtube-facade"
+    type="button"
+    aria-label={`Play: ${title}`}
+  >
+    <img
+      class="youtube-thumb"
+      src={thumbUrl}
+      onerror={`this.onerror=null;this.src='${fallbackThumb}';`}
+      alt=""
+      loading="lazy"
+      decoding="async"
+    />
+    <span class="youtube-play" aria-hidden="true">
+      <svg viewBox="0 0 68 48" width="68" height="48" focusable="false">
+        <path
+          d="M66.52 7.74C65.74 4.84 63.43 2.53 60.53 1.75 55.27 0 34 0 34 0S12.73 0 7.47 1.75C4.57 2.53 2.26 4.84 1.48 7.74 0 13 0 24 0 24s0 11 1.48 16.26c.78 2.9 3.09 5.21 5.99 5.99C12.73 48 34 48 34 48s21.27 0 26.53-1.75c2.9-.78 5.21-3.09 5.99-5.99C68 35 68 24 68 24s0-11-1.48-16.26z"
+          fill="#212121"
+          fill-opacity="0.85"
+        />
+        <path d="M27 34V14l18 10-18 10z" fill="#fff" />
+      </svg>
+    </span>
+    <span class="youtube-title">{title}</span>
+  </button>
+  {description && <p class="youtube-description">{description}</p>}
+</div>
+
+<style>
+  .youtube-embed {
+    margin: 1rem 0;
+  }
+
+  .youtube-facade {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--sl-color-bg-nav);
+    aspect-ratio: 16 / 9;
+  }
+
+  .youtube-embed[data-aspect="4:3"] .youtube-facade {
+    aspect-ratio: 4 / 3;
+  }
+
+  .youtube-thumb {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+  }
+
+  .youtube-facade:hover .youtube-thumb {
+    transform: scale(1.03);
+  }
+
+  .youtube-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: transform 0.2s ease;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
+  }
+
+  .youtube-facade:hover .youtube-play {
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+
+  .youtube-facade:hover .youtube-play path:first-child {
+    fill: #cc0000;
+    fill-opacity: 1;
+  }
+
+  .youtube-title {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem 1.2rem 0.85rem 1.2rem;
+    color: white;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: left;
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.7) 0%,
+      rgba(0, 0, 0, 0) 100%
+    );
+  }
+
+  .youtube-description {
+    margin: 0.6rem 0 0 0;
+    font-size: 0.88rem;
+    color: var(--sl-color-gray-3);
+    line-height: 1.5;
+    /* Clamp long playlist descriptions to keep cards aligned in a
+       multi-column grid. The full description is still in the DOM
+       for screen readers; the visible cap is purely visual. */
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    /* Reserve the full clamp height so short descriptions don't
+       shrink their card relative to long-description peers in a
+       multi-column grid. */
+    min-height: calc(4 * 1.5 * 0.88rem);
+  }
+
+  /* When the iframe is injected, hide the facade button */
+  .youtube-embed.youtube-loaded .youtube-facade {
+    display: none;
+  }
+
+  /* The iframe is injected at runtime by the script below.
+     Dynamically-created elements don't get Astro's scoped-style
+     data attribute, so we use :global() to make these rules
+     unscoped — otherwise the iframe falls back to the browser
+     default 300×150 instead of filling the .youtube-embed box. */
+  .youtube-embed :global(iframe) {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: none;
+    border-radius: 0.5rem;
+    display: block;
+  }
+
+  .youtube-embed[data-aspect="4:3"] :global(iframe) {
+    aspect-ratio: 4 / 3;
+  }
+</style>
+
+<script>
+  // Lazy-load the YouTube iframe only when the facade is clicked.
+  // Replaces the facade in place with a privacy-enhanced
+  // youtube-nocookie.com iframe set to autoplay so the user lands
+  // already-playing (single click, not two).
+  document.querySelectorAll<HTMLElement>(".youtube-embed").forEach((root) => {
+    const button = root.querySelector(".youtube-facade");
+    if (!button) return;
+    button.addEventListener("click", () => {
+      const videoId = root.dataset.videoId;
+      if (!videoId) return;
+      const iframe = document.createElement("iframe");
+      iframe.src =
+        `https://www.youtube-nocookie.com/embed/${videoId}` +
+        `?autoplay=1&rel=0&modestbranding=1`;
+      iframe.allow =
+        "accelerometer; autoplay; clipboard-write; encrypted-media; " +
+        "gyroscope; picture-in-picture; web-share";
+      iframe.setAttribute("allowfullscreen", "");
+      iframe.title = button.getAttribute("aria-label") || "";
+      root.appendChild(iframe);
+      root.classList.add("youtube-loaded");
+    });
+  });
+</script>

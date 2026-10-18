@@ -1,0 +1,9 @@
+[package]
+name = "eigenius-specialist"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A reader for the UMLS SPECIALIST Lexicon (NLM Lexical Systems Group): its records, spelling variants, complementation and nominalizations (D97)."
+
+[dependencies]

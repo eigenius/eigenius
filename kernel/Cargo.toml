@@ -1,0 +1,86 @@
+[package]
+name = "eigenius-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Eigenius kernel: typed knowledge-graph platform with layered immutable chains, EigenTT dependent type theory, a gRPC service surface, and an institutional dispatch model."
+keywords = ["knowledge-graph", "type-theory", "ontology", "grpc", "provenance"]
+categories = ["science", "data-structures", "web-programming"]
+
+[features]
+# Live-LLM reasoning-layer calls (sense ranker / anaphora + abbreviation proposers) via a direct
+# Anthropic tool-use client (`dcg::anthropic_client`) — opt-in, dev/experimentation only. Default
+# builds stay LLM-free (the kernel is the trusted oracle); the algorithms run against the abstract
+# traits + mocks. See `kernel/src/dcg/{anthropic_client,resolver_llm,sense_ranker}.rs`.
+use-llm = ["dep:reqwest", "dep:schemars"]
+
+[dependencies]
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+schemars = { version = "0.8.12", optional = true }
+ciborium = "0.2"
+hex = "0.4"
+# RFC3339 timestamps for the in-process dispatch Activity (G5). Same version the
+# substrate uses to format the ones it captures, so both ends agree on the shape.
+humantime = "2"
+# Concurrent cache for the bounded two-pool resource cache (D23 §5.3 /
+# Phase 14c). W-TinyLFU eviction outperforms LRU/ARC on skewed access
+# patterns and the crate is production-grade in Rust services.
+moka = { version = "0.12", features = ["sync"] }
+# D94 exact numerics — `core:rational` magnitudes. `num-rational`'s `Ratio` maintains the
+# reduced, positive-denominator form D94 requires as its canonical invariant, so the
+# constructor establishes it rather than checking it. Both are already in the lockfile.
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+
+regex = "1"
+# D43 §2.3 / M3 — text tokenisation pipeline.
+# unicode-segmentation gives Unicode-correct word splitting; rust-stemmers
+# provides the Porter (English) stem for the `en-stem-v1` analyzer.
+rust-stemmers = "1"
+sha2 = "0.10"
+unicode-segmentation = "1"
+# D43 §3.4 / M5.9 — SIMD distance kernels. `wide` is a stable-Rust
+# (no nightly) f32x8 wrapper with AVX-2 / NEON / SSE2 fallback paths
+# selected at compile time by `target_feature`. Roughly 4–8× faster
+# than the scalar reference on a 768-dim cosine probe.
+wide = "0.7"
+# D43 §2.4 / M5.10 — zero-copy `&[u8]` → `&[f32]` reinterpretation
+# for vector segment reads. Pure-Rust, transitive-dep-free.
+bytemuck = "1"
+# D43 §2.4 / M6 — HNSW (Hierarchical Navigable Small World) graphs
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+tokio-stream = "0.1"
+tonic.workspace = true
+tonic-prost.workspace = true
+tonic-web.workspace = true
+prost.workspace = true
+# Raw HTTP/1.1 client backing the gRPC-Web transport the kernel uses to
+# reach the orchestrator's `ComponentExecutor` (see
+# `program::remote::OrchestratorTransport`). tonic's own `Channel` is a
+# complete native-gRPC transport and can't be wrapped by the gRPC-Web
+# client adapter, so we drive a plain hyper client underneath it.
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+uuid.workspace = true
+
+[build-dependencies]
+# tonic 0.14: prost-based message + service codegen lives in
+# `tonic-prost-build` (the core `tonic-build` now only emits the
+# transport-agnostic service scaffolding).
+tonic-prost-build = "0.14"
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+# Resource construction and property lookup over a WordNet chunk (`benches/resources.rs`).
+[[bench]]
+name = "resources"
+harness = false

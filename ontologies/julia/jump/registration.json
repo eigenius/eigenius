@@ -1,0 +1,139 @@
+[
+  {
+    "@id": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:institution_name": "JuMP-HiGHS",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:description": "JuMP institution backed by the HiGHS solver — D27 §4.2. Capability matrix: LP, MIP, QP. Supports Farkas-dual infeasibility witnesses; does NOT support IIS. v1 default for the JuMP institution family. Other solver bindings (GLPK, Ipopt, SCIP, Gurobi) live in their own registration.json files alongside this one and share the resource classes from ontology.json."
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:highs:ef_optimisation_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "highs_ef_optimisation_problem",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:jump:OptimisationProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:jump:OptimisationProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:jump:highs:proc:extract_problem"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:ef_optimises_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "highs_ef_optimises_to",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:jump:highs:proc:extract_optimises_to"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:highs:if_optimises_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "highs_if_optimises_to",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:jump:highs:proc:reify_optimises_to"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:if_infeasible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "highs_if_infeasible",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:jump:Infeasible",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:jump:Infeasible",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:jump:highs:proc:reify_infeasible"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:if_optimisation_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "highs_if_optimisation_bounds",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:jump:OptimisationBounds",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:jump:OptimisationBounds",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:jump:highs:proc:reify_optimisation_bounds"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_validate_optimum",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_validate_optimum",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-builds the JuMP model via `model_source`, runs `optimize!` with HiGHS, and confirms (a) `is_solved_and_feasible(m)` is true, (b) `objective_value(m)` matches the claimed value within tolerance, (c) primal solution agrees with the claimed map within tolerance. Verdict::Holds on agreement; Fails on objective / primal mismatch; Undecidable when the solver returns a different terminal status (e.g. NUMERICAL_ERROR after a HiGHS update).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:validate_optimum",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_validate_infeasible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_validate_infeasible",
+    "urn:eigenius:core:description": "AutoOnLoad. For `witness_kind = farkas_dual`, checks the linear-algebra Farkas conditions against the model's constraint matrix. For `witness_kind = iis`, returns Verdict::Undecidable (HiGHS does not support IIS). For any witness, also re-solves and confirms termination_status is INFEASIBLE.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:Infeasible",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:validate_infeasible",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_validate_optimisation_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_validate_optimisation_bounds",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs with the same time cap and confirms the achieved [lower, upper] bracket is at least as tight as claimed.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:OptimisationBounds",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:validate_optimisation_bounds",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_solve",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_solve",
+    "urn:eigenius:core:description": "OnDemand. Builds the model with HiGHS, runs `optimize!`, returns an OptimisesTo (on OPTIMAL) — Infeasible / OptimisationBounds dispatching for non-OPTIMAL terminations is currently fielded by separate qc_is_infeasible / qc_bounds_after queries; v2 may unify these into a single qc_solve returning a sum-typed result.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:OptimisationProblem",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:solve",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_is_infeasible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_is_infeasible",
+    "urn:eigenius:core:description": "OnDemand + Decidable. Holds iff the HiGHS solve returns termination_status = INFEASIBLE; Fails on OPTIMAL / LOCALLY_SOLVED; Undecidable on TIME_LIMIT / NUMERICAL_ERROR. The Decidable role lets `Exp::NativeDecide` reduce in user programs.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:OptimisationProblem",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand",
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:is_infeasible",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_bounds_after",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_bounds_after",
+    "urn:eigenius:core:description": "OnDemand. Sets the time limit, runs HiGHS, returns the achieved bracket as an OptimisationBounds.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:JumpBoundsAfterInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:jump:OptimisationBounds",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:bounds_after",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  },
+  {
+    "@id": "urn:eigenius:julia:jump:highs:qc_sensitivity_analysis",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "highs_qc_sensitivity_analysis",
+    "urn:eigenius:core:description": "OnDemand. LP only. Runs `JuMP.lp_sensitivity_report(m)` on a re-solved model and projects the result into the JumpSensitivityReport's two JSON maps. Returns a Verdict::Undecidable-equivalent error if the problem isn't an LP.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:jump:OptimisesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:jump:JumpSensitivityReport",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:jump:highs:proc:sensitivity_analysis",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:jump:highs"
+  }
+]

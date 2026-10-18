@@ -1,0 +1,157 @@
+// SYN-26-002's conclusions, recommendation and questions (UAB experiment 02, D99 step 5, items
+// 8a and 8c). Loaded above `06-syn-26-002.esl`, so every witness a certificate cites is committed.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace logic         = "urn:eigenius:logic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace variant       = "urn:eigenius:variant";
+namespace clinical      = "urn:eigenius:clinical";
+namespace pmi           = "urn:eigenius:pmi";
+namespace allele        = "urn:eigenius:variant:allele";
+namespace syngene       = "urn:eigenius:uab:syngene";
+namespace syn002        = "urn:eigenius:uab:syn-26-002";
+
+// ── Item 8c, step 4 — the agent will not reduce this child's urine output at any dose ─────
+// The mechanism bridge (analyst) at this child, his allele and its protein, applied to: he carries
+// it hemizygous and it translates to p.Leu44Pro (registry), it is protein-mediated (analyst), and
+// p.Leu44Pro is under 4% (the assay's authors). The two failed trials are not among the grounds:
+// they ground "no measurable reduction at the doses tried", and only the mechanism reaches a
+// higher dose.
+
+resource syn002:no_response : justification:Conclusion {
+    core:description = "The first-line agent will not reduce SYN-26-002's urine output at any dose.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(app(app(app(
+                   instantiate((allele:HGNC_000010_p_44_Pro : variant:ProteinAllele),
+                   instantiate((allele:NM_000010_7_131_C : variant:NucleotideAllele),
+                   instantiate((pmi:SYN_26_002_proband : clinical:Individual),
+                       declared(
+                           "urn:eigenius:uab:syn-26-002:mechanism",
+                           forall (i : clinical:Individual) => forall (a : variant:NucleotideAllele) => forall (q : variant:ProteinAllele) =>
+                               clinical:Carries(i, a, clinical:hemizygous)
+                               -> variant:TranslatesTo(a, q)
+                               -> variant:ProteinMediated(a)
+                               -> syngene:MembraneSitesBelow(q, 0.04r)
+                               -> syngene:ReducesOutput(syngene:first_line_agent, i)
+                               -> logic:False,
+                           ())))),
+                   declared(
+                       "urn:eigenius:pmi:SYN_26_002_carries_NM_000010_7_131_C",
+                       clinical:Carries(pmi:SYN_26_002_proband, allele:NM_000010_7_131_C, clinical:hemizygous),
+                       ())),
+                   declared(
+                       "urn:eigenius:pmi:SYN_26_002_translates_NM_000010_7_131_C",
+                       variant:TranslatesTo(allele:NM_000010_7_131_C, allele:HGNC_000010_p_44_Pro),
+                       ())),
+                   declared(
+                       "urn:eigenius:uab:syn-26-002:protein_mediated",
+                       variant:ProteinMediated(allele:NM_000010_7_131_C),
+                       ())),
+                   declared(
+                       "urn:eigenius:uab:syngene:claim_3",
+                       syngene:MembraneSitesBelow(allele:HGNC_000010_p_44_Pro, 0.04r),
+                       ()))),
+               type_expr(justification:Grounds(
+                   syngene:ReducesOutput(syngene:first_line_agent, pmi:SYN_26_002_proband) -> logic:False)) );
+}
+
+// ── Item 8c, step 5 — do not re-trial ────────────────────────────────────────────────────
+
+resource syn002:no_retrial : clinical:Recommendation {
+    core:description = "Do not re-trial the first-line agent at a higher dose.";
+    prov:was_attributed_to = syn002:analyst;
+    clinical:rests_on = [syn002:no_response];
+}
+
+resource syn002:no_retrial_trace : prov:DeclarationTrace {
+    prov:resource = syn002:no_retrial;
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    prov:timestamp = "2026-07-15";
+}
+
+// ── Item 8a — the family's goal: three questions ─────────────────────────────────────────
+// Asked by the mother, transcribed by the registry into Participant/Family Goal.
+
+// "No": the cohort carried c.130C>T (Declared, the analyst's reading of the survey) and c.130C>T is
+// not c.131T>C (Verified), joined by a proved step (Verified). The kernel's refusal of the
+// substitution alone would answer "not established", not "no".
+resource syn002:not_his_variant : justification:Conclusion {
+    core:description = "The survey the nephrologist relied on was not about the proband's variant alone.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(app(
+                   verified(
+                       "urn:eigenius:uab:syn-26-002:not_about_his_variant",
+                       syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T)
+                       -> (eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False)
+                       -> (forall (v : variant:NucleotideAllele) =>
+                               syngene:CohortCarried(syngene:survey_cohort, v)
+                               -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C))
+                       -> logic:False,
+                       ()),
+                   declared(
+                       "urn:eigenius:uab:syn-26-002:cohort_c130",
+                       syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T),
+                       ())),
+                   verified(
+                       "urn:eigenius:uab:syn-26-002:c130_not_c131",
+                       eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False,
+                       ()))),
+               type_expr(justification:Grounds(
+                   (forall (v : variant:NucleotideAllele) =>
+                        syngene:CohortCarried(syngene:survey_cohort, v)
+                        -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C))
+                   -> logic:False)) );
+}
+
+resource syn002:q_same_variant : clinical:Question {
+    core:description = "Were the published reports the nephrologist relied on about the same variant her son has? Read as: is every allele the survey's cohort carried her son's c.131T>C.";
+    clinical:asked_by = syn002:mother;
+    clinical:whether = type_expr(
+        forall (v : variant:NucleotideAllele) =>
+            syngene:CohortCarried(syngene:survey_cohort, v)
+            -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C));
+    clinical:answered_by = syn002:not_his_variant;
+}
+
+resource syn002:q_why : clinical:Question {
+    core:description = "Why did the medication not work? A why-question: no content proposition; answered by the mechanism conclusion.";
+    clinical:asked_by = syn002:mother;
+    clinical:answered_by = syn002:no_response;
+}
+
+resource syn002:q_alternative : clinical:Question {
+    core:description = "Is there an alternative: some agent that reduces her son's urine output?";
+    clinical:asked_by = syn002:mother;
+    clinical:whether = type_expr(
+        forall (R : Prop) =>
+            (forall (x : lexicon:Entity) => syngene:ReducesOutput(x, pmi:SYN_26_002_proband) -> R)
+            -> R);
+    clinical:answered_by = syn002:chaperone_hypothesis;
+}
+
+resource syn002:q_same_variant_trace : prov:DeclarationTrace {
+    prov:resource = syn002:q_same_variant;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_family_goal;
+    prov:timestamp = "2026-05-19";
+}
+
+resource syn002:q_why_trace : prov:DeclarationTrace {
+    prov:resource = syn002:q_why;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_family_goal;
+    prov:timestamp = "2026-05-19";
+}
+
+resource syn002:q_alternative_trace : prov:DeclarationTrace {
+    prov:resource = syn002:q_alternative;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_family_goal;
+    prov:timestamp = "2026-05-19";
+}

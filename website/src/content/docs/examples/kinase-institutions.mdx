@@ -1,0 +1,134 @@
+---
+title: Kinase potency mapping walkthrough
+description: A biophysicist runs a kinase potency mapping campaign that requires five separate institutions to cooperate. Showcases the comorphism pattern — the runtime-seam analogue of the domain-bridge pattern used in the drug-screening example.
+---
+
+A biophysicist runs a kinase potency mapping campaign. Substrate
+concentration sweeps produce raw kinetic curves; the curves are
+symbolically transformed, numerically integrated, fit to a
+Michaelis-Menten model, optimised against a portfolio constraint,
+and finally ranked. Each step is the natural domain of a
+different runtime — symbolic math (Symbolics.jl), differential
+equations (DifferentialEquations.jl), non-linear regression
+(NonlinearSolve.jl), constraint optimisation (JuMP + HiGHS), and
+a ranking routine — and each runtime speaks its own vocabulary.
+
+This walkthrough shows how five Julia institutions cooperate on a
+single chain through **declared comorphisms** — typed
+translations between institution output and input vocabularies.
+This is a different mechanism than the
+[domain-bridge pattern](/concepts/domain-bridges/) used in the
+[drug-screening walkthrough](/examples/drug-screening/): there
+the domain bridge translated *between user-defined vocabularies*
+at the domain layer; here comorphisms translate *between fixed
+institution boundaries* at the runtime layer. The chain offers
+both, and they compose.
+
+## The composition
+
+```
+       raw kinetic curves
+              │
+              ▼
+   ┌──────────────────────┐
+   │   Symbolics          │   symbolic ODE form
+   └──────────┬───────────┘
+              │  comorphism
+              ▼
+   ┌──────────────────────┐
+   │   DifferentialEqs    │   simulated trajectory
+   └──────────┬───────────┘
+              │  comorphism
+              ▼
+   ┌──────────────────────┐
+   │   NonlinearSolve     │   fitted Kᵢ
+   └──────────┬───────────┘
+              │  comorphism
+              ▼
+   ┌──────────────────────┐
+   │   JuMP + HiGHS       │   portfolio-feasible Kᵢ
+   └──────────┬───────────┘
+              │  comorphism
+              ▼
+   ┌──────────────────────┐
+   │   Ranking            │   ranked compound list
+   └──────────────────────┘
+```
+
+Each arrow between institutions is a comorphism — a typed
+translation that the chain checks at commit time. If a downstream
+institution's input vocabulary doesn't match what the upstream
+institution emits (after comorphism translation), the commit
+rejects.
+
+## What the chain attests
+
+After the pipeline runs end-to-end, the chain attests a ranked
+list of compounds, where each entry is itself the visible tip of
+a full reasoning structure:
+
+- The raw kinetic curves are `Observed` artifacts pointing at the
+  bench instrument's run logs.
+- Each runtime's output is a `Derived` artifact — re-runnable
+  byte-identically by anyone with read access to the chain.
+- The comorphisms between runtimes are `Declared` artifacts whose
+  authority chain is the methodology document defining the
+  translation.
+- The final ranked list is a `Derived` composition that
+  type-checks against the upstream artifacts.
+
+A reviewer who disagrees with the choice of differential-equation
+solver, or the regression model, or the portfolio constraint, can
+audit each step independently — and substitute an alternative
+without re-deriving the rest. The pipeline is auditable end-to-end.
+
+## How this compares to the drug-screening example
+
+Both examples solve the same fundamental problem — making a
+multi-step scientific reasoning chain machine-checkable — but
+they use different chain mechanisms:
+
+| | Drug-screening | Kinase pipeline |
+|---|---|---|
+| Composition pattern | **Domain bridge** (chain-resident DeclaredResource translates between vocabularies) | **Comorphism** (typed translation between institution boundaries) |
+| Where the translation lives | Authored by the user at the domain layer | Declared at institution registration time |
+| What it translates | Statistical claim → domain claim | Output of one runtime → input of another |
+| Seam shape | A vocabulary seam | A runtime seam |
+| Audit story | Reviewer edits the domain bridge to dispute the translation | Reviewer registers an alternative comorphism |
+
+Both mechanisms produce the same kind of audit closure — a
+backward tree-walk through chain commits — and both refuse to
+admit conclusions whose composition does not type-check. The
+choice between them is structural: domain bridges are right when
+the vocabularies are *user-defined* domain predicates
+(`HasLowIC50` vs sample-mean below threshold); comorphisms are
+right when the vocabularies are *runtime-defined* and the
+translation logic itself wants to be packaged code rather than a
+declared term.
+
+In practice, large campaigns use both. A kinase potency mapping
+might use comorphisms to compose the five runtimes, then use a
+domain bridge to translate the resulting fitted Kᵢ into a
+domain-level classification fed to a downstream reasoning
+sentence.
+
+## Try it
+
+The canonical worked example is the notebook at
+`notebooks/examples/kinase-institutions.json`. The companion
+setup script
+`notebooks/examples/kinase-institutions-setup.sh` brings the
+docker compose stack up and registers the five Julia
+institutions plus the comorphisms between them.
+
+## What to read next
+
+- **[Drug-screening walkthrough →](/examples/drug-screening/)** —
+  the domain-bridge pattern in depth
+- **[Domain bridges (concepts) →](/concepts/domain-bridges/)** —
+  when to reach for a domain bridge versus a comorphism
+- **[Institutions (concepts) →](/concepts/institutions/)** — how
+  institutions lift domain bridges from data into computation,
+  and the runtime-seam role of comorphisms
+- **[Concepts overview →](/concepts/)** — the four-warrant
+  taxonomy

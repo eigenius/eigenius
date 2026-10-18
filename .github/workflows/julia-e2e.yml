@@ -1,0 +1,78 @@
+name: Julia E2E (nightly)
+
+# The Julia E2E suite — `cargo test --workspace -- --include-ignored` against
+# the 13 tests in `crates/eigenius-julia/tests/` and
+# `crates/runtime-substrate/tests/` that build real Julia env images via
+# buildah + Pkg.precompile. Each test costs 30-90s cold (Julia precompile
+# tail) which makes the suite expensive on every PR; this nightly job runs
+# them on a schedule plus on-demand via workflow_dispatch.
+#
+# To run a single test locally:
+#   cargo test -p eigenius-julia --test catalyst_to_diffeq_e2e -- --include-ignored
+#
+# To run them all locally (warning: 10-20 min cold):
+#   cargo test --workspace -- --include-ignored
+#
+# CI invokes the same `--include-ignored` flag here. The buildah layer cache
+# survives between tests within a single run (one runner = one buildah store),
+# so subsequent tests after the first env image build are amortised.
+
+on:
+  # Nightly at 04:00 UTC. Only trigger — the heavy Julia E2E suite is
+  # too expensive to run on every PR (each test pays a buildah + Julia
+  # precompile bill of 30-90s; full suite is 10-20min cold). To run
+  # against a feature branch ad-hoc, push a one-off cron change or
+  # temporarily add `workflow_dispatch:`.
+  schedule:
+    - cron: "0 4 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  julia-e2e:
+    name: Julia E2E suite
+    runs-on: ubuntu-latest
+    # 90 min ceiling: 13 tests × ~5 min each at the worst case, plus build.
+    # First test pays the cold buildah + Julia precompile bill (~3 min);
+    # later tests share the buildah layer cache and finish in ~30s each.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler \
+            libclang-dev \
+            buildah
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust-julia-e2e
+          # Larger caches OK here — nightly job, no urgency.
+          cache-all-crates: true
+
+      # Tests use Docker via the substrate's DockerSpawner. The runner's
+      # default Docker is fine; just verify it's up before we burn time.
+      - name: Verify Docker available
+        run: docker info
+
+      # Run only the ignored tests via `--include-ignored`. The
+      # non-ignored tests already ran in the main `CI / Rust checks`
+      # workflow on this commit — re-running them here would just burn
+      # runner time. `--ignored` (without `--include-`) runs *only* the
+      # ignored set, which is what we want.
+      - name: Run Julia E2E suite
+        run: cargo test --workspace -- --ignored --nocapture
+
+      - name: Upload buildah cache stats on failure
+        if: failure()
+        run: buildah images --all 2>&1 | head -50 || true

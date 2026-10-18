@@ -1,0 +1,100 @@
+// The certificate's `reading` field, stated as what it is.
+//
+// D100 rung 1, second half. `as-written.esl` shows the sentence refused: its subject is a
+// `variant:ProteinAllele` and the count is indexed by `variant:NucleotideAllele`. The certificate
+// closes that gap in prose:
+//
+//     reading: Subject p.Ile380Val = X-123900531-A-G (c.1138A>G).
+//
+// That is a person asserting an identity the evidence does not carry, and it is load-bearing: every
+// number in the claim is a count of genotypes at the nucleotide allele, so without the resolution
+// the claim is about nothing the query measured. Writing it as a `justification:Declaration` makes
+// three things true that a prose field cannot make true — it names an accountable agent, it states
+// the proposition in a form the kernel can read, and it leaves the assertion visible to anyone who
+// later asks why a protein-level sentence was encoded at nucleotide resolution.
+//
+// TWO declarations, because two different things are being asserted and they have different
+// warrants:
+//
+//   1. the TRANSLATION, which is biology — c.1138A>G has the protein consequence p.Ile380Val. A
+//      transcript sequence computes it; this experiment holds none, so it is declared, exactly as
+//      `variant:TranslatesTo` says it should be ("computable from a transcript's sequence where one
+//      is held; DECLARED otherwise").
+// Both are enforced, not merely conventional: `justification:Declaration` REQUIRES both halves, the
+// proposition and the attribution, and dropping `prov:was_attributed_to` from either declaration
+// below fails the validator with `MissingRequired` — verified `2026-10-09`. That is the difference
+// the collaborator asks for: "certificates are checked by a Makefile, not a kernel." The
+// certificate's `reading` field names no agent as data at all; it is prose, and prose cannot be
+// required to carry one.
+//
+//   2. the RESOLUTION, which is editorial — in THIS claim, the designation «p.Ile380Val» denotes
+//      that one nucleotide allele. This does not follow from (1): `TranslatesTo` is not injective,
+//      so the protein designation under-determines the allele. It is the certifier's reading.
+
+namespace core          = "urn:eigenius:core";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace variant       = "urn:eigenius:variant";
+namespace xiap          = "urn:eigenius:uab:xiap";
+
+// «In this claim, the protein-level designation p denotes the nucleotide allele a.»
+//
+// Deliberately NOT `variant:TranslatesTo`, which relates alleles and is non-injective. This relates
+// a DESIGNATION to the allele a reader should take it to pick out, which is a fact about the
+// document, not about the gene. Opaque: what makes a resolution correct is the certifier's warrant,
+// not a rule the kernel can apply.
+axiom xiap:DesignationDenotes : variant:ProteinAllele -> variant:NucleotideAllele -> Prop
+
+// ── Warrants ──────────────────────────────────────────────────────────────────────────────────
+
+resource xiap:warrant_hgvs_translation : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_hgvs_translation";
+    core:description       = "HGVS protein nomenclature over the coding sequence: c.1138 is the first nucleotide of codon 380 (1138 = 3*379 + 1), and A>G at that position changes the codon from ATC (Ile) to GTC (Val).";
+}
+
+resource xiap:warrant_certifier_reading : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_certifier_reading";
+    core:description       = "The certificate's own `reading` field for C-0020, which names the subject and the label it was checked against: the gnomAD record queried was X-123900531-A-G, and the claim's «p.Ile380Val» was read as that allele. Recorded here as the warrant for the resolution, not as evidence for the count.";
+}
+
+// ── 1. The translation — biology, declared because no sequence is held ────────────────────────
+
+resource xiap:c1138_translates : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_hgvs_translation;
+    prov:rationale          = "Declared rather than computed: variant:TranslatesTo is computable from a transcript's sequence where one is held, and this experiment holds none.";
+
+    eigentt:proposition = type_expr(
+        variant:TranslatesTo(xiap:c_1138A_G, xiap:p_Ile380Val)
+    );
+}
+
+resource xiap:c1138_translates_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:c1138_translates;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_hgvs_translation;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// ── 2. The resolution — editorial, and the step the refusal exposed ───────────────────────────
+
+resource xiap:c0020_subject_resolution : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_certifier_reading;
+    prov:rationale          = "Does NOT follow from the translation: variant:TranslatesTo is not injective, so «p.Ile380Val» under-determines which nucleotide allele's genotypes were counted. The certifier asserted the identity in the certificate's `reading` field; this states it with an accountable agent instead of leaving it in prose.";
+
+    eigentt:proposition = type_expr(
+        xiap:DesignationDenotes(xiap:p_Ile380Val, xiap:c_1138A_G)
+    );
+}
+
+resource xiap:c0020_subject_resolution_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:c0020_subject_resolution;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_certifier_reading;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}

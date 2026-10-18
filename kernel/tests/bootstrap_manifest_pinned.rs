@@ -1,0 +1,335 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! **The bootstrap manifest is PINNED.**
+//!
+//! `2026-10-07` — **the `adv_*` adverbial family.** Two layers moved, `ontology` and
+//! `closed-class`, and nothing else. `ontology` gained 22 axioms and changed none: `adv_in` …
+//! `adv_before` (13, one per entity-object preposition that has a VP-adjunct entry) and
+//! `adv_at_value` … `adv_every_period` (9, one per measured-value one). `closed-class` kept every
+//! category and every `sem_type` — the 22 VP-adjunct sem terms were already typed
+//! `Entity -> (Entity -> Prop) -> (Entity -> Prop)`, which is Luo & Shi's `ADV` with the object —
+//! and changed only which relation each body names and in which order: `And(V(s), prep_in(s, x))`
+//! became `And(V(s), adv_in(x, V, s))`, so the modifier applies to the PREDICATE and not to the
+//! subject. `prep_*` keeps its type and its meaning, a relation between two entities, for the
+//! noun-internal role (`nmod_*_sem`), so NO committed term needs migrating — which is why this is
+//! 22 additions and 0 retypings. The reseed is for the new axioms to reach the lexicon store.
+//!
+//! Editing any embedded ontology changes [`eigenius_kernel::bootstrap::current_manifest`], and every
+//! already-persisted store then refuses to resume with `BootstrapError::ManifestDrift`. This test
+//! makes that consequence surface HERE — in `cargo test`, with no database and no snapshot — instead
+//! of hours later in whatever first tries to open a store.
+//!
+//! WHY IT EXISTS (`2026-08-17`). D70 added one value to `lexicon:Num`. That bumped the `lexicon`
+//! hash, which invalidated every snapshot on disk, which broke both demos and the D67 §3.5 acceptance
+//! artifacts — and `cargo test --workspace` stayed GREEN throughout, because everything that touches a
+//! snapshot is `#[ignore]`d and DB-backed. The breakage was found by hand, days later. Nothing cheap
+//! was watching the one signal that predicts it.
+//!
+//! WHY IT IS PINNED HERE RATHER THAN CHECKED AGAINST A SNAPSHOT. A "does the snapshot still resume"
+//! test was the first idea and is the wrong instrument: it needs a store on disk, so it would SKIP in
+//! CI — precisely where the signal is wanted. The manifest is computed from source alone, so this runs
+//! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
+//! that invalidates stores.
+//!
+//! IT FIRED ON THE SENSE KEYS OF DO-SUPPORT (`2026-10-01`), on ONE layer, `closed-class`: the
+//! question entries `does_aux` and `did_aux` moved from the keys `does` and `did` to `do`, the key of
+//! their declarative twins, and the complementiser and demonstrative `that` got descriptions of their
+//! own. The sense ranker had dropped the declarative `does` because both keys shared a gloss
+//! (`a_form_s_senses_are_told_apart_by_their_glosses`).
+//!
+//! IT FIRED FOR D97 SLICE 2 (`2026-10-01`), on two layers: `lexicon` (53 `lexicon:Prep`
+//! constructors, `prep_by` … `prep_up_to`, the prepositions SPECIALIST names on verb complements)
+//! and `closed-class` (their argument-marker entries, `by_arg` … `up_to_arg`). The reseed after the
+//! verb importer lands pays for both.
+//!
+//! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
+//! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
+//! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
+//! … `or lower`), and for slice 7 on `lexicon` (`cat_num`), `ontology` (`has_count`) and
+//! `closed-class` (counting cardinals, word numerals as numbers, the count bounds), then for 7c on
+//! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives), and for 7d on `lexicon`
+//! (`cat_det_premod`, `cat_detmod`), `ontology` (`the_count`) and `closed-class` (the number words'
+//! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`), and for 8a–8c on
+//! `ontology` (the offsets, `prep_before`, `prep_by_value`, `every_period`) and `closed-class`
+//! (`before`, `post`, the offsets, `later`, `by` over a value, `every` over a period, the
+//! pseudo-partitive `of`s), and for 8d–8e on `lexicon` (`cat_mpq`), `ontology` (`prep_per`) and
+//! `closed-class` (`per`); then on `closed-class` again when the reseed after slice 8 found the
+//! partitive `of`s' own sense labels before the sense ranker (they now carry `of`). Slices 6–8 each
+//! move these layers and pay ONE reseed together, after slice 8
+//! (`docs/design/d95-implementation-plan.md`, slice 6). It fired for slice 9 on `lexicon`
+//! (`cat_factor`, `cat_stat`), `ontology` (`fold_lower`, `fold_higher`, `median_over`) and
+//! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`); then on
+//! `closed-class` again when the factor comparatives came to state the plain comparative's order.
+//!
+//! IT FIRED FOR THE OBO IMPORTER (`2026-10-01`) on `obo`, importing HPO: the four synonym scopes
+//! became `core:value_array` (declared single strings, written as arrays — 12,745 type errors on
+//! HPO), `inverseOf` became `core:resource_array` (edge objects accumulate), and the meta-ontology
+//! came to declare `rdfs:label` (an OBO node's label, which had been put in `core:short_name`) and
+//! `subPropertyOf` (which had been folded into `core:is_a`).
+//!
+//! IT FIRED FOR D99 §10 (`2026-10-02`) on `core` and `justification`, for kernel-checked
+//! disequality: `eigentt:Term` gained `Refl`, `IdJ`, `Apart` and `PropAccess`, so a proof that two
+//! resources differ in a field is a chain term; and `justification:proof_judgement` lost its
+//! `domain justification:Conclusion`, implementing D89 §2 — a proof rides on any
+//! proposition-bearing resource, and a declaration with one is Verified. Then on `core` again
+//! for D99 §11: `core:EquivalentClasses`, `core:classes` and `core:mapping_justification`, OWL's
+//! class equivalence as a resource the subsumption walk reads. One reseed with the obo move above.
+//!
+//! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
+//! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
+//! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
+//! `lexicon:UnitSurface`), `closed-class` (the unit spellings, `one`'s subject and object entries,
+//! the prepositions over a measured value, `after` over an NP) and `ontology` (`prep_*_value`,
+//! `has_quantity`, `prep_after`). `after` joining the closed class also moves the imported lexicon:
+//! the importers stop seeding its content homonyms.
+//!
+//! IT FIRED FOR THE PROVENANCE MIGRATION (`2026-08-30`), on TEN layers, which is the whole
+//! provenance axis moving off `reflection` onto `prov` plus the grade classes going away.
+//! `reflection` and `prov`'s consumers (`obo`, `justification`, `statistics`, `ingest`,
+//! `reference`, `lexicon`, `closed-class`, `encoding`) all reference the renamed properties;
+//! `eigentt-type-fragment` moved on a single prose mention of `proof_system`, which is the kind of
+//! one-line description edit that hashes exactly as loudly as a structural one. The four grade
+//! classes, `epistemic_status`, the four `epistemic:*` individuals and `EpistemicStatus` are
+//! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
+//! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
+//!
+//! IT FIRED ON A PROSE FIX (`2026-08-30`), on ONE layer, `lexicon`, for a description string.
+//! `LexicalEntry` still advertised "and an epistemic grade" after the grade migration above deleted
+//! `lexicon:grade` — the property went, the sentence promising it did not. Nothing referenced the
+//! stale half, so no test caught it; it was found while checking an unrelated claim about which
+//! `LexicalEntry` slots hold inductive values (two: `lexicon:cat`, `lexicon:sem_type`). Worth the
+//! entry precisely because it is the cheap case: a class description is the first thing a reader
+//! consults about a class, and this one named a slot that does not exist.
+//!
+//! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
+//! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
+//! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
+//! families under one word: `program:traces:Trace` with LetTrace / MapTrace / CaseTrace records how a
+//! PROGRAM EVALUATED, while the parentless DeclarationTrace / ObservationTrace / ProductionTrace /
+//! VerificationTrace record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and that
+//! direction is forced: `prov:ProgramTrace` reaches into the evaluation family through
+//! `prov:trace_tree` and `program:traces:output`, and nothing in `reflection` reaches back. This entry
+//! records only the layer's ADDITION; the migration that empties the moved declarations out of
+//! `reflection` moves that layer too and is recorded separately.
+//!
+//! IT FIRED ON THE THREE-GROUNDS CHANGE (`2026-08-30`): `justification`, `statistics` and
+//! `reflection`. `justification` is the substantive one — `justification:Term` went from seven
+//! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Grounds`
+//! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `instantiate` dropped its
+//! unchecked audit tag and leaves the term index at `j`, and `witness:IsDerivedAs` is gone. The
+//! other two are description strings only, which move a hash just as surely: `statistics` and
+//! `reflection` described the deleted mechanism in class descriptions, and `prov:proof_term`
+//! carried the wrong account of what admits a Verified witness — a defect P3 stated in the
+//! ontology and deferred to here so it could ride one reseed instead of invalidating P2's
+//! mid-flight. The test named exactly the three files that were edited, which is the check that
+//! the edits were the intended ones. Editing `ontologies/encoding/encoding.esl` in the same pass
+//! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
+//! `description = "…"` is a resource property and hashes.
+//!
+//! IT FIRED ON THE MEMO-KEY FIX (`2026-09-12`), on ONE layer, `program-traces`. Description
+//! text only. `input_hash` was declared "Content hash of the component input" and the trace put
+//! the whole composite memo key there; `argument_hash` was declared and never written. Both now
+//! say what the slot holds and what the key covers. The behavioural half of that
+//! fix is Rust and moves nothing.
+//!
+//! IT FIRED ON THE INDEX-LANGUAGE RESIDUE (`2026-09-09`), on ONE layer, `core`. The rename below
+//! left three sentences standing that still asserted an index: two `witness:Is*As` descriptions
+//! ending "recomputed every time and persisted nowhere, so the index is a cache" and one reading
+//! "the index over it is a cache". Each sentence's first half is true and its second half names a
+//! structure that does not exist, which is why a residue grep on "witness index" did not see them.
+//!
+//! IT FIRED ON THE `implicit(T, P)` CHANGE (`2026-09-09`), on ONE layer, `justification`.
+//! `justification:Grounds.instantiate` declares `implicit(T, P)`, so the constructor's binder list
+//! changed and the declaration hashes differently. The ten call sites that lost two arguments each
+//! are chain content and move nothing here. The D89 entry in the work stack had listed this as
+//! deliberately deferred, because it needed the unifier's scope check to stop identifying generated
+//! variables by name; that fix landed in the same commit.
+//!
+//! IT FIRED ON THE WITNESS-ADMISSION RENAME (`2026-09-09`), on TWO layers, `core` and
+//! `justification`. Description text only, and false text rather than merely imprecise: three
+//! `witness:Is*As` descriptions in `core` said the kernel synthesizes a witness "when the layer's
+//! witness index holds a matching key", and `justification:Grounds` said its grounding constructors
+//! consume a witness the kernel synthesizes "from the layer's witness index". D66 slice 0 removed
+//! that map; the lookup is a decision procedure over Trace resources. A class description is what a
+//! reader consults first, so one naming a structure that does not exist is the same defect as the
+//! `lexicon:grade` entry above.
+//!
+//! NONE OF THE THREE ABOVE WAS COVERED BY THE D89 RESEED (`2026-09-08`), which ran before all of
+//! them. That reseed's two snapshots and the docker volume it filled are stale on `core` and
+//! `justification` until the next one runs.
+//!
+//! IT FIRED ON THE `justification.esl` REWRITE (`2026-09-07`), on ONE layer, `justification`.
+//! The file's comments and `description` properties were rewritten to state the current design
+//! rather than the sequence of edits that produced it, and to frame it on
+//! `docs/design/judgements-and-warrants.tex` — the paper this branch implements — rather than on
+//! the D-documents that preceded it. No declaration changed: same seven constructors, same
+//! signatures, same `requires`/`recommends`, same properties. The hash moved because a
+//! `description` is a resource property and hashes, while a `//` comment is stripped. Nothing
+//! else in the manifest moved, which is the check that the edit was confined to prose. One
+//! substantive correction rode along: a comment asserted that `justification:Conclusion` "stays
+//! `subclass_of reflection:DerivedResource`" — the class declares no parent, and that class was
+//! deleted.
+//!
+//! IT FIRED ON B6 (`2026-09-06`), on ONE layer, `core`. Two constructor arguments on
+//! `eigentt:Term` were retyped from `core:string` to `core:iri`: `ConstRef.iri` and
+//! `CtorApp.decl_iri`. Both name a declaration and always did; B3 declared three OTHER leaves
+//! IRI-valued (`Certificate.declared`/`.observed`/`.verified`, the `witness:Is*As` index,
+//! `Term.Checked.payload_iri`) and did not reach these, which went unnoticed because the mentions
+//! walker recovered them by matching `urn:` and so never needed the declaration. B6 removes that
+//! heuristic, and the retype is what keeps a `ConstRef` target a dependency once it is gone.
+//! `CtorApp.ctor_name` deliberately stays `core:string`: constructors have no chain-resolvable
+//! identity (D79 §2.2.1), so it names no declaration. The reseed this obliges is B4, which the
+//! entry below already owes.
+//!
+//! IT FIRED AGAIN ON B1 (`2026-09-05`): `core` and `justification`. `core` gained the
+//! `core:implicit_args` property and a `recommends` on `core:InductiveCtor`; `justification`
+//! declares `app`'s `A`/`B` and `sum_l`/`sum_r`'s `P` implicit, which changes those
+//! constructors' chain-resident declarations. Both are content, so both hash. The reseed this
+//! obliges is B4 in `docs/notes/next-steps-after-d88.md`, which also carries B2's merge and
+//! three stale description strings.
+//!
+//! IT FIRED FOR UNIVERSE POLYMORPHISM A SECOND TIME (`2026-08-23`), on **`core` and
+//! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
+//! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
+//! move: `core:Asserts` carries a `result_sort`, so the property is used inside `core` itself, and
+//! a lower layer cannot reference a higher one — the same constraint that stopped `eigentt:Level`
+//! reusing `lean:LeanLevel`. One algebra now serves both `result_sort` and `eigentt:TypeExpr`'s
+//! `Sort` ctor, and `data X : Sort u` is expressible where the string grammar could not spell a
+//! level variable. `core` moving revalidates every layer above it; both reseeds fold into one,
+//! since none has run since the first move.
+//!
+//! IT FIRED FOR UNIVERSE POLYMORPHISM (`2026-08-23`), on ONE layer, `eigentt-type-fragment`: the
+//! `TypeExpr` `Sort` constructor's argument changed from `core:integer` to a new
+//! `eigentt:Level` inductive (Zero/Succ/Max/IMax/Param), so a universe level can be a `Max`,
+//! an `IMax` or a `Param` instead of only a numeral. The decoder still accepts the old numeral
+//! form — `decodes_the_pre_188_numeral_form` pins that — so a persisted store's terms remain
+//! readable; what it cannot survive is this manifest move, which is why the reseed is owed
+//! regardless. **The seed-drift content-hashing fix rides along with that reseed** rather than
+//! paying its own.
+//!
+//! IT FIRED ON THE D73 CLOSE-OUT (`2026-08-22`): two layers, `program` (it now declares
+//! `program:components:RunRuntimeScript`, which D56 §7 added to the kernel's REMOTE_COMPONENTS
+//! and never declared here, so the kernel could dispatch a component no chain could reference)
+//! and `reflection` (it gained `ExternalExecutionTrace`, the Declared-admitting sibling of
+//! `ProgramTrace`). Folded into ONE reseed with the wrn-helicase vocabulary work rather than paying
+//! two.
+//!
+//! IT FIRED AGAIN (`2026-08-21`), on the D73 batch: three layers at once — `reflection`
+//! (`VerificationTrace.derivation_trace` relaxed to `recommends`, two descriptions widened),
+//! `reasoning` (the `spec_str` rule retired) and `encoding` (`enc:EncodedClaim` made a
+//! `DeclaredResource`). Batching the three into one reseed is the whole reason the D73 batch
+//! groups them; the test named exactly the three that were edited and
+//! nothing else, which is the check that the edits were the intended ones.
+//!
+//! IT HAD FIRED IN ANGER BEFORE (`2026-08-20`). D71 slice 7 added the `formalize` cell type to the
+//! notebook ontology — a change whose whole point is that it is deliberate, since
+//! `notebook:cell_type` carries `allows_only` precisely so a new cell type cannot appear by
+//! accident. The test named the one moved layer and its four-step follow-through, and the reseed
+//! was paid knowingly rather than discovered days later by a broken demo.
+//!
+//! WHAT IT DOES NOT COVER. A snapshot also goes stale when the LEXICON content changes with no
+//! bootstrap edit — the 2026-08-15 atom overrides dropped `drug target` and added `synthetic lethal`,
+//! no manifest moved, and recorded draws still missed. Catching that needs a recorded fingerprint of
+//! the lexicon an experiment's draws were made against; the reseed's `PROVENANCE` stamp is half of it.
+
+use eigenius_kernel::bootstrap::current_manifest;
+
+/// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
+/// panic message for the rest of the follow-through.
+const EXPECTED: &str = "core:b9aa02f22070ee620d72c3051fda35b8dc9874332a9daa98f2fb3063b4893388
+program:5f0b7ae09e911c313a76f738e54879d11d7b5fb9a12c914e8b58c70dd8e5c65d
+program-traces:68222882e5712216a69560074681f4072356c75060192bc9dab09bcb503119bd
+prov:8f139b7b18b815329e987ad70b311149ad9693f8d1c7836a0c6a49820f175f88
+obo:22d42e3f64eea75fb162ae07444d4b66bf33210f154a8dd206e97b69b11094bc
+institution:f1103b50112903896a8349d0aec681a2c199c11f76c70a5c7a2cfe07bb589e94
+runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
+formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
+lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
+lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
+justification:0fcd229f8640b47dc4c93751cc76f97f327da71999bbaead34ea86bceee261f9
+units:f125f3ca24c57533565d17dac682640fe0f4ec8963c166c83950946a0559cbe8
+statistics:8c955279b691648a948061c47cd8ff2ada4c9edd9a05c756b373a5aa83c3b466
+notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
+ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
+reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
+logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
+lexicon:82614092af0234a157175961a7ed6a82d2aa1e50b23b3697c507474f23531702
+ontology:c41587f04c6a98617a0f3fcc0ef41551f73b76fe78e50eef0ff2e3e3437dcd69
+closed-class:74cfadcf050159d9ab445b77e2d5d0dc141d7aa4241ad9ca5cfeda636619dc37
+encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
+";
+
+/// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On
+/// the D70 edit exactly one line changed — `lexicon` — which is what identified the cause in seconds
+/// once it was finally looked at.
+fn moved_layers(expected: &str, actual: &str) -> Vec<String> {
+    let exp: Vec<&str> = expected.lines().collect();
+    let act: Vec<&str> = actual.lines().collect();
+    let name_of = |l: &str| l.split(':').next().unwrap_or(l).to_string();
+    let mut out = Vec::new();
+    for line in &act {
+        if !exp.contains(line) {
+            let name = name_of(line);
+            let was = exp
+                .iter()
+                .find(|e| name_of(e) == name)
+                .map_or("(new layer)".to_string(), |e| (*e).to_string());
+            out.push(format!("    {name}\n      was {was}\n      now {line}"));
+        }
+    }
+    for line in &exp {
+        let name = name_of(line);
+        if !act.iter().any(|a| name_of(a) == name) {
+            out.push(format!("    {name}\n      REMOVED (was {line})"));
+        }
+    }
+    out
+}
+
+#[test]
+fn bootstrap_manifest_is_pinned() {
+    let actual = String::from_utf8(current_manifest()).expect("manifest is utf-8");
+    if actual == EXPECTED {
+        return;
+    }
+    let moved = moved_layers(EXPECTED, &actual);
+    panic!(
+        "BOOTSTRAP MANIFEST CHANGED — {} layer(s) moved:\n{}\n\n\
+         Every persisted store is now unresumable (BootstrapError::ManifestDrift). If the edit is \
+         intended, it is still never free:\n  \
+         1. reseed — scripts/reseed-lexicon-db.sh --umls-all, then build-alignment-snapshot.sh\n  \
+         2. re-point anything pinning a snapshot path (demo/prose-to-formulas-v2/run.sh)\n  \
+         3. re-record any LLM draws that MISS against the changed forest, in ONE pass\n  \
+         4. update EXPECTED in this file, in the SAME commit as the ontology edit\n\n\
+         The new manifest, ready to paste into EXPECTED:\n\
+         ----8<----\n{}----8<----",
+        moved.len(),
+        moved.join("\n"),
+        actual
+    );
+}
+
+/// The diff helper itself, so a future edit to it cannot quietly stop reporting.
+#[test]
+fn moved_layers_reports_changed_added_and_removed() {
+    let expected = "a:1\nb:2\nc:3\n";
+    let actual = "a:1\nb:9\nd:4\n";
+    let moved = moved_layers(expected, actual);
+    let joined = moved.join("\n");
+    assert_eq!(moved.len(), 3, "b changed, d added, c removed: {joined}");
+    assert!(joined.contains("was b:2") && joined.contains("now b:9"));
+    assert!(joined.contains("(new layer)"), "d is new: {joined}");
+    assert!(joined.contains("REMOVED (was c:3)"), "c is gone: {joined}");
+}

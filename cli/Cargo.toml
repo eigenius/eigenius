@@ -1,0 +1,96 @@
+[package]
+name = "eigenius-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Eigenius command-line interface — load, query, validate, run programs, and administer kernel databases either in-process or against a running gRPC server."
+keywords = ["eigenius", "knowledge-graph", "cli", "grpc", "rocksdb"]
+categories = ["command-line-utilities", "science"]
+
+[[bin]]
+name = "eigenius"
+path = "src/main.rs"
+
+[dependencies]
+eigenius-kernel = { path = "../kernel" }
+eigenius-storage-rocksdb = { path = "../storage/rocksdb" }
+# D63/GH#28 Lever 1: the binary injects WordNet's Morphy lemmatizer into the served parse path
+# (the kernel can't depend on WordNet — cycle — so it holds only the `Lemmatizer` trait).
+eigenius-wordnet = { path = "../crates/eigenius-wordnet" }
+# 19a.5.a: pulled in for the JuliaMirrorGenerator; the CLI runs mirror
+# generation client-side via a RemoteChainAccessor over gRPC.
+eigenius-julia = { path = "../crates/eigenius-julia" }
+# D55/D56: `eigenius env build --language r` drives the R runtime's
+# `build_environment_image` (Bioconductor base + limma/fgsea/lme4) to
+# produce the WRN-study worker image digest.
+eigenius-r = { path = "../crates/eigenius-r" }
+# D60: the generic OCI tool runtime — `eigenius env build --language oci` bakes a
+# pinned Eigenius worker binary into an image + emits the kernel-tracked BuildRecipe.
+eigenius-oci = { path = "../crates/eigenius-oci" }
+# 20a.4: the kernel binary links the Lean verification institution
+# directly. `LeanInstitution::query` runs in-process — no IPC, no
+# orchestrator round-trip — so the verification TCB stays bounded by
+# nanoda's acceptance (D28 §2.3 / §10.2).
+eigenius-lean = { path = "../crates/eigenius-lean" }
+# D39 Phase 8: the Reasoning institution's validator is the kernel's
+# own NbE checker — no external runtime — so the verification TCB is
+# bounded by the kernel's type-theory implementation. Linked in
+# alongside Lean so AutoOnLoad ValidateJustification on every
+# justification:Conclusion commit dispatches as a direct function call.
+eigenius-encoding = { path = "../crates/eigenius-encoding" }
+# D52: the measurement-statistics institution's validator runs
+# in-process — deterministic IEEE-754 numerics (ndarray + statrs); no
+# IPC, no orchestrator round-trip. Linked in alongside Reasoning so
+# AutoOnLoad validate_measurement_claim on every MeasurementClaim
+# commit recomputes the claim and emits Holds/Fails as a direct
+# function call. Composes with Reasoning via the D49 chain-witness
+# index: the emitted DerivedResource's canonical_proposition becomes
+# the IsDerivedAs witness any downstream justification:Conclusion's
+# DerivedEvidence ctor consumes.
+eigenius-statistics = { path = "../crates/eigenius-statistics" }
+eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
+eigenius-config = { path = "../crates/eigenius-config" }
+# D43: BGE-small Candle embedder. Pulled in by the `serve` path so
+# `cmd_serve` can register a CandleEmbedder when `[embedder].enabled`
+# names it. The crate has its own `cuda` / `metal` features; this
+# manifest forwards them via the `cuda` / `metal` features below so
+# `cargo build -p eigenius-cli --features cuda` propagates correctly.
+eigenius-embedder-candle = { path = "../crates/eigenius-embedder-candle" }
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+humantime = "2"
+serde_json.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# jemalloc is the global allocator (`src/main.rs`). glibc kept freed pages: a lexicon reseed held
+# ~12.5 GB resident against a ~4.25 GB live peak, even with `MALLOC_ARENA_MAX=2`
+# (docs/notes/reseed-oom-memory-investigation.md). `background_threads` purges decayed pages while
+# the server is idle. Not on MSVC, where jemalloc does not build.
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", features = ["background_threads"] }
+
+[features]
+# Forwarded to `eigenius-embedder-candle`. Build the CLI with
+# `--features cuda` to ship a GPU-capable `eigenius serve` binary;
+# the binary still runs on CPU when `[embedder].device = "cpu"` or
+# the GPU isn't visible at runtime.
+default = []
+# Heap profiling: jemalloc built with `--enable-prof`, so a `serve` process dumps live-heap profiles
+# under `_RJEM_MALLOC_CONF` (docs/notes/reseed-oom-memory-investigation.md, method note).
+# Diagnostic-only.
+jemalloc-prof = ["tikv-jemallocator/profiling"]
+cuda = ["eigenius-embedder-candle/cuda"]
+metal = ["eigenius-embedder-candle/metal"]
+# D63/GH#28 Lever 1: enable the contextual LLM sense reranker in the served/local parse path
+# (the kernel's `AnthropicSenseRanker`, opt-in, needs ANTHROPIC_API_KEY at runtime).
+# Forwards to EVERY crate whose live proposers this binary can reach. Missing
+# eigenius-encoding here (slice 5b, fixed 2026-08-20) built a kernel with live
+# proposers whose FORMALIZER could not use them: the served run reported "this
+# binary has no live ranker" while `AnthropicSenseRanker` sat in the same
+# binary. A feature that does not propagate fails silently in exactly this
+# shape — the symptom names the wrong crate.
+use-llm = ["eigenius-kernel/use-llm", "eigenius-encoding/use-llm"]

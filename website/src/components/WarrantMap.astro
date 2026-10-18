@@ -1,0 +1,120 @@
+---
+// The four-warrant map: the canonical conceptual visual of the
+// platform. Used on the landing page and on the /concepts/ pages.
+// Grouped into "Mechanical warrants" (Observed, Derived, Verified)
+// and "Authoritative warrant" (Declared).
+import WarrantTile from "./WarrantTile.astro";
+---
+
+<div class="warrant-map">
+  <div class="warrant-group">
+    <div class="warrant-group-label">
+      <span class="warrant-group-name">Mechanical warrants</span>
+      <span class="warrant-group-qualifier">re-executable</span>
+    </div>
+    <div class="warrant-row">
+      <WarrantTile
+        category="observed"
+        title="Observed"
+        warrantKind="Instrumental"
+        description="Raw measured data with unbroken instrument provenance."
+        fingerprint="Instrument run, time, operator."
+        example="Six raw IC₅₀ readings from a Kinase-Glo plate run."
+      />
+      <WarrantTile
+        category="derived"
+        title="Derived"
+        warrantKind="Computational"
+        description="Outputs of deterministic computation, rerunnable byte-identically."
+        fingerprint="Procedure, inputs, kernel that ran it."
+        example="A t-statistic and p-value the statistics institution emitted."
+      />
+      <WarrantTile
+        category="verified"
+        title="Verified"
+        warrantKind="Formal-proof"
+        description="Claim accepted by a machine-checked mathematical proof."
+        fingerprint="Proof artifact, checker, independent re-execution."
+        example="A Lean-verified regulatory primary-endpoint result."
+      />
+    </div>
+  </div>
+
+  <div class="warrant-group">
+    <div class="warrant-group-label">
+      <span class="warrant-group-name">Authoritative warrant</span>
+      <span class="warrant-group-qualifier">examinable</span>
+    </div>
+    <div class="warrant-row warrant-row-single">
+      <WarrantTile
+        category="declared"
+        title="Declared"
+        warrantKind="Authoritative"
+        description="Asserted by a named human, organisation, or policy document."
+        fingerprint="Declarer identity, citation, organisational authority."
+        example="A 100 nM threshold cited from a methodology document."
+      />
+    </div>
+  </div>
+</div>
+
+<style>
+  .warrant-map {
+    display: grid;
+    grid-template-columns: 3fr 1fr;
+    gap: 1.5rem;
+    margin: 1.5rem 0;
+  }
+
+  @media (max-width: 60rem) {
+    .warrant-map {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .warrant-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* Two-line label: bold uppercase name on the first line, lighter
+     qualifier on the second. Always two lines regardless of
+     viewport — eliminates the mid-line wrap that happens when the
+     qualifier sits inline with the name. */
+  .warrant-group-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .warrant-group-name {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--sl-color-gray-3);
+  }
+
+  .warrant-group-qualifier {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--sl-color-gray-4);
+  }
+
+  .warrant-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.8rem;
+  }
+
+  .warrant-row-single {
+    grid-template-columns: 1fr;
+  }
+
+  @media (max-width: 50rem) {
+    .warrant-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

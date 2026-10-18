@@ -1,0 +1,25 @@
+[
+  {
+    "@id": "urn:eigenius:comorphisms:symbolics_to_intervals:m_id_formula_term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
+    "urn:eigenius:core:short_name": "m_id_formula_term",
+    "urn:eigenius:core:description": "Identity EigenTT term on `formulas:FormulaTerm`. Body is a `program:Var` referencing the bound parameter, so this Lambda has type `FormulaTerm → FormulaTerm`. Realises the typed middle `m` of the Symbolics → IntervalArithmetic Comorphism (D32 §6.2): both endpoints speak FormulaTerm natively, so the cross-institution boundary needs no payload translation. The same Lambda will be reused as `m` for every comorphism whose source and target both range over FormulaTerm — Symbolics → DiffEq, Symbolics → JuMP, etc.",
+    "urn:eigenius:program:parameter": "t",
+    "urn:eigenius:program:parameter_type": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+      "urn:eigenius:program:name": "t"
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:comorphisms:symbolics_to_intervals",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:core:short_name": "symbolics_to_intervals",
+    "urn:eigenius:core:description": "Cross-institution Comorphism — Symbolics → IntervalArithmetic. The triple (s, m, t) where s = `ef_symb_expr` (Symbolics' typed extraction of `SymbolicExpression.term` as a FormulaTerm payload), m = `m_id_formula_term` (the identity Lambda on FormulaTerm), t = `if_intv_function` (IntervalArithmetic's typed reification of a FormulaTerm payload as an `IntervalFunction`). The chain-side formalisation of the operational claim demonstrated by `crates/eigenius-julia/tests/cross_institution_probe.rs`: the typed payload is identical on both sides, so `m` is the identity. Marked `exact: true` — bit-for-bit payload preservation, no semantic loss.",
+    "urn:eigenius:institution:export_format": "urn:eigenius:symbolics:formats:ef_symb_expr",
+    "urn:eigenius:institution:transformation": "urn:eigenius:comorphisms:symbolics_to_intervals:m_id_formula_term",
+    "urn:eigenius:institution:import_format": "urn:eigenius:intervals:formats:if_intv_function",
+    "urn:eigenius:institution:exact": true
+  }
+]

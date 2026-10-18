@@ -1,0 +1,37 @@
+[
+  {
+    "@id": "urn:eigenius:example:Animal",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An animal",
+    "urn:eigenius:core:short_name": "Animal",
+    "urn:eigenius:core:requires": ["urn:eigenius:example:name"]
+  },
+  {
+    "@id": "urn:eigenius:example:Dog",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A dog",
+    "urn:eigenius:core:short_name": "Dog",
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:example:Animal"],
+    "urn:eigenius:core:requires": ["urn:eigenius:example:breed"]
+  },
+  {
+    "@id": "urn:eigenius:example:name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Name of the animal",
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:example:breed",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Breed of the dog",
+    "urn:eigenius:core:short_name": "breed",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:example:rex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:example:Dog"],
+    "urn:eigenius:example:name": "Rex",
+    "urn:eigenius:example:breed": "German Shepherd"
+  }
+]

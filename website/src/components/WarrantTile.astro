@@ -1,0 +1,135 @@
+---
+// A single tile in the four-warrant map.
+//
+// Props:
+//   - category: "observed" | "derived" | "verified" | "declared"
+//   - title: plain-English category name
+//   - warrantKind: the bold uppercase warrant kind below the title
+//   - description: one short sentence
+//   - fingerprint: short list of what the audit fingerprint contains
+//   - example: optional one-line scenario example
+
+interface Props {
+  category: "observed" | "derived" | "verified" | "declared";
+  title: string;
+  warrantKind: string;
+  description: string;
+  fingerprint: string;
+  example?: string;
+}
+
+const { category, title, warrantKind, description, fingerprint, example } =
+  Astro.props;
+---
+
+<div class={`warrant-tile warrant-${category}`}>
+  <div class="warrant-header">
+    <span class="warrant-title">{title}</span>
+    <span class="warrant-kind">{warrantKind}</span>
+  </div>
+  <p class="warrant-description">{description}</p>
+  <div class="warrant-fingerprint">
+    <span class="warrant-fingerprint-label">Audit fingerprint</span>
+    <span class="warrant-fingerprint-value">{fingerprint}</span>
+  </div>
+  {
+    example && (
+      <p class="warrant-example">
+        <em>Example:</em> {example}
+      </p>
+    )
+  }
+</div>
+
+<style>
+  .warrant-tile {
+    border: 1px solid var(--warrant-color, var(--sl-color-hairline));
+    border-radius: 0.5rem;
+    background: var(--warrant-bg, transparent);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 13rem;
+  }
+
+  .warrant-observed {
+    --warrant-color: var(--warrant-observed);
+    --warrant-bg: var(--warrant-observed-bg);
+  }
+  .warrant-derived {
+    --warrant-color: var(--warrant-derived);
+    --warrant-bg: var(--warrant-derived-bg);
+  }
+  .warrant-verified {
+    --warrant-color: var(--warrant-verified);
+    --warrant-bg: var(--warrant-verified-bg);
+  }
+  .warrant-declared {
+    --warrant-color: var(--warrant-declared);
+    --warrant-bg: var(--warrant-declared-bg);
+  }
+
+  .warrant-header {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--warrant-color);
+    padding-bottom: 0.5rem;
+    gap: 0.15rem;
+  }
+
+  .warrant-title {
+    font-weight: 700;
+    color: var(--warrant-color);
+    font-size: 1.05rem;
+  }
+
+  .warrant-kind {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--warrant-color);
+    opacity: 0.85;
+  }
+
+  .warrant-description {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--sl-color-text);
+    line-height: 1.4;
+  }
+
+  .warrant-fingerprint {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .warrant-fingerprint-label {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--warrant-color);
+    opacity: 0.7;
+  }
+
+  .warrant-fingerprint-value {
+    font-size: 0.8rem;
+    color: var(--sl-color-text);
+    font-style: italic;
+    opacity: 0.85;
+  }
+
+  .warrant-example {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--sl-color-text);
+    opacity: 0.75;
+    line-height: 1.4;
+    border-top: 1px dashed var(--warrant-color);
+    padding-top: 0.45rem;
+  }
+</style>

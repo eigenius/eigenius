@@ -1,0 +1,47 @@
+# Compose override that swaps the kernel service for the CUDA build
+# and reserves a GPU on the host via nvidia-container-toolkit.
+#
+# Usage (combine with the base compose):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Requirements on the host:
+#   - NVIDIA driver visible to Docker
+#   - nvidia-container-toolkit installed and registered as a Docker
+#     runtime (verify with `docker info | grep -i nvidia`)
+#   - Compose v2.x (Docker Engine ≥ 23)
+#
+# What this override does:
+#   - Points the `kernel` service at `Dockerfile.kernel.gpu` and tags
+#     the image `eigenius-kernel:local-gpu` so it doesn't collide
+#     with the CPU build's `eigenius-kernel:local` tag.
+#   - Reserves one GPU device on the host so the container can call
+#     `Device::new_cuda(0)`.
+#   - Mounts the host's HF Hub cache so the BGE-small model files
+#     (~130 MB) are downloaded once and reused across restarts.
+
+services:
+  kernel:
+    image: eigenius-kernel:local-gpu
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.kernel.gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # Re-declared from the base compose because Compose v2 replaces
+      # rather than merges service-level `volumes:` blocks across
+      # `-f` overrides on some Docker versions.
+      - eigenius_db:/var/lib/eigenius/db
+      # HF Hub cache: first boot downloads the BGE-small files
+      # (~130 MB) into here; subsequent boots reuse them.
+      - eigenius_hf_cache:/root/.cache/huggingface
+
+volumes:
+  eigenius_hf_cache:

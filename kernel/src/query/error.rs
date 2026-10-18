@@ -1,0 +1,175 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Structured error types for EigenQL.
+
+use std::fmt;
+
+/// A position in the source string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+/// The phase in which an error occurred.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorPhase {
+    Lexer,
+    Parser,
+    TypeCheck,
+    Stratification,
+    Evaluation,
+}
+
+/// A structured query error.
+#[derive(Debug, Clone)]
+pub struct QueryError {
+    pub position: Option<Position>,
+    pub phase: ErrorPhase,
+    pub rule: String,
+    pub message: String,
+}
+
+/// The `rule` an absent-property evaluation error carries.
+///
+/// One spelling, so nothing re-types the string and drifts. `rule` is already the
+/// discriminant this error type carries — the validation side uses a proper enum for the
+/// same job, and converting this one is a hundred-call-site refactor that does not belong
+/// in a correctness fix; `QueryError::is_absent_property` is what callers should ask
+/// rather than comparing the string themselves.
+pub const RULE_ABSENT_PROPERTY: &str = "absent_property";
+
+/// The `rule` for a dot-path that cannot be walked to a value.
+pub const RULE_UNREACHABLE_PATH: &str = "unreachable_path";
+
+impl QueryError {
+    pub fn lexer(pos: Position, message: impl Into<String>) -> Self {
+        Self {
+            position: Some(pos),
+            phase: ErrorPhase::Lexer,
+            rule: "lexer".to_string(),
+            message: message.into(),
+        }
+    }
+
+    pub fn parser(pos: Option<Position>, message: impl Into<String>) -> Self {
+        Self {
+            position: pos,
+            phase: ErrorPhase::Parser,
+            rule: "parser".to_string(),
+            message: message.into(),
+        }
+    }
+
+    pub fn type_check(rule: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::TypeCheck,
+            rule: rule.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn stratification(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Stratification,
+            rule: "stratification".to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// The resource does not carry the property the expression named.
+    ///
+    /// **Data absence, not a fault.** A `WHERE` condition over a property this resource
+    /// has no value for is simply not satisfied, and the row drops — which is what the
+    /// evaluator always did. What it also did was drop the row for every OTHER failure:
+    /// an unbound variable, a value that is not an IRI, a condition that is not boolean.
+    /// Those are the query being wrong, and a wrong query returning an empty result set
+    /// with no diagnostic is the defect. Separating them is what lets the
+    /// first stay silent and the second be reported.
+    pub fn absent_property(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Evaluation,
+            rule: RULE_ABSENT_PROPERTY.to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// Whether this is data absence rather than a fault. See [`Self::absent_property`].
+    pub fn is_absent_property(&self) -> bool {
+        self.rule == RULE_ABSENT_PROPERTY
+    }
+
+    /// A dot-path segment whose value does not resolve to a resource to walk into.
+    ///
+    /// Distinct from absence: the property IS there, and what it names is not reachable.
+    /// A condition over it is still unsatisfied, and `NOT EXISTS` still answers "no value",
+    /// but it is a chain-integrity fact rather than a data-shape one and the two read
+    /// differently in a diagnostic.
+    pub fn unreachable_path(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Evaluation,
+            rule: RULE_UNREACHABLE_PATH.to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// See [`Self::unreachable_path`].
+    pub fn is_unreachable_path(&self) -> bool {
+        self.rule == RULE_UNREACHABLE_PATH
+    }
+
+    /// **No value, for a reason that is data rather than a fault.** A dot-path that
+    /// reaches no value does so in two ways — the resource does not carry the property
+    /// ([`Self::absent_property`]), or the property's value names something the chain does
+    /// not hold ([`Self::unreachable_path`]) — and every site that decides "unsatisfied
+    /// rather than failed" answers both the same way.
+    ///
+    /// It exists because that decision is made at five sites, and the two rules were wired
+    /// into one of them: `NOT EXISTS(?d.owner.name)` answered over a dangling reference
+    /// while `?d.owner.name = "Ada"` aborted the whole query on the same row. One
+    /// predicate, named for the question it answers, so the next site cannot get half of
+    /// it.
+    ///
+    /// A path that cannot be WALKED — an intermediate segment whose value is not a
+    /// resource reference — is deliberately not here. That is the query dot-pathing
+    /// through a string, which is the query being wrong.
+    pub fn is_absence(&self) -> bool {
+        self.is_absent_property() || self.is_unreachable_path()
+    }
+
+    pub fn evaluation(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Evaluation,
+            rule: "evaluation".to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for QueryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(pos) = &self.position {
+            write!(f, "{}:{}: ", pos.line, pos.column)?;
+        }
+        write!(f, "[{:?}] {}", self.phase, self.message)
+    }
+}
+
+impl std::error::Error for QueryError {}

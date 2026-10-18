@@ -1,0 +1,12 @@
+[package]
+name = "eigenius-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Layered configuration loader for the Eigenius platform. Defaults → file → env → construction overrides; consumed by the runtime substrate, kernel, and orchestrator."
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = "1"

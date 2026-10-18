@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A new push to a PR cancels that PR's running checks, which no longer
+# describe its head. Runs on main are keyed by commit, so none is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  # CI always starts from a cold cache, so incremental compilation
+  # buys no rebuild speed-up and just inflates target/ with per-crate
+  # intermediate artifacts. Disabling it typically halves target/
+  # size on a workspace this big — relevant because we've hit the
+  # GitHub-hosted runner's disk ceiling more than once.
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  rust:
+    name: Rust checks
+    # The org's 8-core larger runner (32 GB RAM, 300 GB SSD, Ubuntu 26.04).
+    # The private repo's standard runner (2-core, 8 GB, 72 GB root) ran
+    # out of disk on a cold workspace test build and took twice as long.
+    runs-on: build-runner-rust
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      # The `eigenius-lean-worker` crate's build.rs compiles a C bridge
+      # against Lean's `lean.h` to talk to the Lean runtime. `lean.h`
+      # ships with the Lean toolchain via elan, not with system packages,
+      # so CI has to install elan + the pinned toolchain before running
+      # cargo. The toolchain version is read from
+      # `lean/runtime-worker/lean-toolchain` (the workspace's single
+      # source of truth — same file the Dockerfile composer bakes into
+      # env images). See `docs/notes/lean-toolchain-upgrade.md` for the
+      # upgrade discipline.
+      - name: Install elan + pinned Lean toolchain
+        run: |
+          set -euo pipefail
+          # Download and install elan (Lean's toolchain manager). The
+          # `--default-toolchain none` flag avoids pulling a fallback
+          # toolchain — we install the pinned version explicitly below.
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.elan/bin:$PATH"
+          # Install the toolchain pinned by the workspace's
+          # `lean-toolchain` file. `elan` would do this on first use,
+          # but doing it explicitly here keeps the install step's
+          # caching/timing surface visible.
+          TOOLCHAIN=$(cat lean/runtime-worker/lean-toolchain)
+          echo "Installing Lean toolchain: $TOOLCHAIN"
+          elan toolchain install "$TOOLCHAIN"
+          elan default "$TOOLCHAIN"
+          # Verify `lean.h` is reachable — the build.rs's discovery path.
+          PREFIX=$(lean --print-prefix)
+          echo "Lean prefix: $PREFIX"
+          test -f "$PREFIX/include/lean/lean.h"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Swatinem/rust-cache is the de-facto standard for Rust on GHA:
+      # - splits the cache into deps (keyed on Cargo.lock) and workspace
+      #   (keyed on source-only changes), so a Cargo.toml addition still
+      #   hits the closest matching cache via restore-keys.
+      # - prunes unused targets automatically; cache size stays bounded.
+      # Drop-in replacement for the previous flat actions/cache step that
+      # invalidated everything on any Cargo.toml change.
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Bump this when the cache schema changes (rare).
+          prefix-key: v1-rust
+          workspaces: |
+            .
+            orchestration/runtime-substrate-native
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  deno:
+    name: Deno checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestration
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Lint
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check
+
+      - name: Run tests
+        run: deno test --allow-net --allow-env
+
+      # The SDK is its own Deno package (`clients/eigenius-ts/deno.jsonc`) and is NOT a
+      # workspace member of `orchestration/`, so the steps above never reached it. Its tests
+      # existed and passed locally while CI ran none of them — which is how `Outcome` could
+      # have been added with its narrowing untested. Explicit steps rather than a workspace
+      # member: the two packages have different dependency sets, and merging them would make
+      # the orchestrator's lint answer for the SDK's generated code.
+      # `clients/eigenius-ts` carries a `package.json` (the notebooks SPA consumes it through
+      # npm), so Deno uses node_modules resolution and needs the directory populated. A clean
+      # checkout has none, and `nodeModulesDir: auto` did not fill it here even though it does
+      # locally — so install explicitly rather than depend on that behaviour matching across
+      # Deno patch versions.
+      - name: Install SDK deps
+        working-directory: clients/eigenius-ts
+        run: deno install
+
+      - name: Lint (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno lint
+
+      - name: Format check (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno fmt --check
+
+      - name: Run tests (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno test --allow-net --allow-env
+
+  proto:
+    name: Protobuf lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          # buf-setup resolves its download URL through the GitHub API. Unauthenticated,
+          # that shares the runner IP's rate limit and fails with "API rate limit
+          # exceeded" — an infrastructure flake on a PR that may not touch protos at all
+          # (seen on a PR that changes only .gitignore). The token raises the limit to
+          # the per-repo one; the action's own log warns when it is absent.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lint protos
+        run: buf lint

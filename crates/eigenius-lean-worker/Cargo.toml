@@ -1,0 +1,76 @@
+[package]
+name = "eigenius-lean-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Worker-side substrate protocol shim for the Lean language runtime. Exposes a C-ABI surface that the Lake-built Lean worker links against; Rust handles UDS + CBOR transport, Lean handles per-verb dispatch via @[export]-ed functions. See D26 §8.1, Phase 20a.5b."
+keywords = ["eigenius", "lean4", "ffi", "language-runtime"]
+categories = ["external-ffi-bindings", "science"]
+
+# The build.rs compiles a C bridge against Lean's `lean.h` (obtained
+# from an installed elan toolchain). docs.rs has no elan, so building
+# the crate fully would fail. Skip the build script there and let
+# rustdoc generate documentation from the source alone.
+[package.metadata.docs.rs]
+all-features = true
+no-default-features = false
+rustdoc-args = ["--cfg", "docsrs"]
+# docs.rs honours `cargo:rerun-if-env-changed=DOCS_RS` — the build.rs
+# can short-circuit when DOCS_RS is set. If it doesn't (build.rs is
+# unconditional today), revisit after the first docs.rs build attempt.
+
+[lib]
+# `cdylib` produces a shared library the Lean worker links against
+# via Lake's `extraLinkArgs`. `rlib` lets the in-crate integration
+# test exercise the protocol loop without the FFI boundary — useful
+# while Lean-side authoring is still pending.
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+# Compiles `c/lean_bridge.c` — a small C wrapper exposing lean.h's
+# `static inline` functions (lean_alloc_sarray, lean_sarray_cptr,
+# lean_io_result_mk_ok, …) as proper linkable symbols Rust can
+# extern-declare. Lean's runtime header is inline-heavy (~560 inline
+# functions in lean.h); without thunks we'd have no symbol to bind.
+cc = "1"
+
+[dependencies]
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+# `lean_export` staging decodes the `LeanProject` Eigon-CBOR resource
+# (input[0] on a DispatchMethod) into its component files
+# (lakefile + lake_manifest + source_tree) using the kernel's
+# canonical Eigon-CBOR parser. The transitive dep brings in some
+# weight; revisit if cdylib size becomes a concern (the Lean
+# worker process is short-lived and not size-sensitive in v1).
+eigenius-kernel = { path = "../../kernel" }
+# `dispatch_method_request` decodes the `MethodInvocation` carried in
+# `Request::DispatchMethod` to route between the lean_export and
+# dispatch_method Lean handlers; ciborium is the substrate's own CBOR
+# codec so the dep is consistent across both sides of the wire.
+ciborium = "0.2"
+# Base64-decode the per-file `content_base64` entries in a
+# `LeanProject.source_tree` JSON array.
+base64 = "0.22"
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# Staging tests need a temp dir to assert against. The production
+# code path doesn't allocate temp dirs in Rust — the Lean side
+# manages temp-dir lifecycle via `IO.FS` — so tempfile stays in
+# dev-deps.
+tempfile = "3"
+# `lean_worker_e2e` round-trips the worker's `lean_export` output
+# through nanoda's `check_proof` to confirm the exported bytes are
+# a valid Lean export. The verification crate is a sibling under
+# `crates/eigenius-lean/`.
+eigenius-lean = { path = "../eigenius-lean" }
+# `base64` re-encodes Lean source bytes into the `LeanProject`
+# `source_tree` JSON. Already a regular dep for `lean_project`'s
+# decoding side, but cargo's dep table doesn't auto-share between
+# `[dependencies]` and `[dev-dependencies]`; listing here keeps
+# the test deps explicit.
+base64 = "0.22"

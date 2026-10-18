@@ -1,0 +1,82 @@
+[
+  {
+    "sentence": "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome.",
+    "gloss": "a Germ-Line Mutation in the gene named MSH2 gene or in the gene named MSH6 gene or in the gene named PMS2 gene or in the gene named MLH1 gene cause Hereditary Nonpolyposis Colorectal Cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ]
+  },
+  {
+    "sentence": "MSI cancer models did not require the exonuclease activity of WRN.",
+    "gloss": "not (a Microsatellite Instability Cancer Model require the exonuclease activity of WRN protein, human)",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ]
+  },
+  {
+    "sentence": "MSI cancer models required the helicase activity of WRN.",
+    "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ]
+  },
+  {
+    "sentence": "MSI contributes to several cancers.",
+    "gloss": "some cancer, Microsatellite Instability contribute it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ]
+  },
+  {
+    "sentence": "MSI occurs in colon, gastric, endometrial and ovarian cancers.",
+    "gloss": "Microsatellite Instability occur n14247239 and Microsatellite Instability occur Malignant neoplasm of stomach and Microsatellite Instability occur n14247458 and Microsatellite Instability occur Malignant neoplasm of ovary",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ]
+  },
+  {
+    "sentence": "Many cancers exhibit an impairment of a DNA repair pathway.",
+    "gloss": "some cancer, some impairment of a DNA, A-Form repair Biochemical Pathway, it exhibit it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ]
+  },
+  {
+    "sentence": "Nucleotide repeat regions are microsatellites.",
+    "gloss": "every nucleotide Repeat Pattern region is a Short Tandem Repeat",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ]
+  },
+  {
+    "sentence": "Scientists can exploit synthetic lethality for cancer therapeutics.",
+    "gloss": "possibly, scientist exploit a Synthetic Lethality for a cancer therapeutic",
+    "kinds": [
+      "urn:eigenius:encoding:Suggestion"
+    ]
+  },
+  {
+    "sentence": "These data sets are project Achilles and project DRIVE.",
+    "gloss": "a datum from a n13925550 a01388418 n04152829 set the Entity named ni and a datum from a n13925550 a01388418 n04152829 set the Entity named ni",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ]
+  },
+  {
+    "sentence": "Thus, MSI tumours need novel therapies.",
+    "gloss": "a Microsatellite Instability tumour need a novel therapy",
+    "kinds": []
+  },
+  {
+    "sentence": "WRN encodes a RecQ DNA helicase.",
+    "gloss": "some RecQ Helicases DNA Helicases, WRN gene encode it",
+    "kinds": []
+  },
+  {
+    "sentence": "We analysed two independent cancer dependency data sets.",
+    "gloss": "some cancer dependency independent Data Set, we analyse it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ]
+  }
+]

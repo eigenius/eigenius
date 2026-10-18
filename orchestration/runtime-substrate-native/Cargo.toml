@@ -1,0 +1,30 @@
+# Standalone — napi-rs cdylib targets conflict with the parent workspace's
+# build matrix. Same posture as `orchestration/native`.
+[workspace]
+
+[package]
+name = "eigenius-orchestrator-runtime-substrate"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "napi-rs native addon hosting the Eigenius runtime substrate dispatcher inside the Deno orchestrator. Bridges CBOR-encoded ComponentRequest payloads to the substrate's LanguageRuntime trait."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8", "tokio_rt", "async"] }
+napi-derive = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
+eigenius-runtime-substrate = { path = "../../crates/runtime-substrate", features = ["test-runtime"] }
+eigenius-julia = { path = "../../crates/eigenius-julia" }
+eigenius-lean-runtime = { path = "../../crates/eigenius-lean-runtime" }
+eigenius-r = { path = "../../crates/eigenius-r" }
+eigenius-oci = { path = "../../crates/eigenius-oci" }
+eigenius-config = { path = "../../crates/eigenius-config" }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true

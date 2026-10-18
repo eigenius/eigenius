@@ -1,0 +1,102 @@
+---
+// Shared top nav for the hand-authored polished pages
+// (/, /start/, /concepts/, /examples/, /blog/). Pass `current` to
+// highlight the active item via aria-current.
+import { Image } from "astro:assets";
+import logo from "../assets/eigenius_logo_400x400.png";
+
+interface Props {
+  current?: "start" | "concepts" | "examples" | "docs" | "research" | "blog";
+}
+
+const { current } = Astro.props;
+
+const items = [
+  { href: "/start/", label: "Start", key: "start" },
+  { href: "/concepts/", label: "Concepts", key: "concepts" },
+  { href: "/examples/", label: "Examples", key: "examples" },
+  { href: "/docs/", label: "Docs", key: "docs" },
+  { href: "/research/", label: "Research", key: "research" },
+  { href: "/blog/", label: "Blog", key: "blog" },
+];
+---
+
+<nav class="topnav">
+  <a class="topnav-brand" href="/">
+    <Image
+      src={logo}
+      alt="Eigenius"
+      width={28}
+      height={28}
+      loading="eager"
+    />
+    <span>Eigenius</span>
+  </a>
+  <ul class="topnav-links">
+    {items.map((item) => (
+      <li>
+        <a
+          href={item.href}
+          aria-current={current === item.key ? "page" : undefined}
+        >
+          {item.label}
+        </a>
+      </li>
+    ))}
+    <li>
+      <a
+        href="https://github.com/eigenius/eigenius"
+        class="topnav-external"
+      >
+        GitHub <span aria-hidden="true">↗</span>
+      </a>
+    </li>
+  </ul>
+</nav>
+
+<style>
+  .topnav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(8px);
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 80%, transparent);
+    border-bottom: 1px solid var(--sl-color-hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.5rem;
+  }
+
+  .topnav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--sl-color-text);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+  }
+
+  .topnav-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    gap: 1.4rem;
+    align-items: center;
+  }
+
+  .topnav-links a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+
+  .topnav-links a:hover,
+  .topnav-links a[aria-current="page"] {
+    color: var(--sl-color-text-accent);
+  }
+</style>

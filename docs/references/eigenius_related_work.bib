@@ -1,0 +1,1030 @@
+% =============================================================================
+% eigenius_related_work.bib
+%
+% Contemporary related work in applied formal reasoning for science and
+% engineering. Companion to:
+%
+%   eigenius.bib           — actually cited by Eigenius papers/docs/guides
+%   eigenius_additional.bib — system depends on but does not yet cite
+%   eigenius_precursors.bib — philosophical / methodological lineage
+%
+% This file collects the references identified during the bibliographic
+% review of "docs/references/Formal Methods in Scientific Reasoning.md".
+% They cover ongoing efforts to apply formal ontologies, higher-order logic,
+% type theory, and knowledge graphs to scientific and engineering domains —
+% i.e. the contemporary landscape against which Eigenius positions itself.
+%
+% Where authorship or precise venue could not be determined unambiguously
+% from the source survey, entries carry a `note` field flagging the
+% provenance so a future bibliographic pass can verify them.
+%
+% Same key convention as the other three files: lowercase, descriptive,
+% short.
+% =============================================================================
+
+
+% -----------------------------------------------------------------------------
+% Foundational ontologies for science
+%
+% Eigenius's typed-layer architecture is a peer of these top-level ontology
+% efforts. Note: arp-smith-spear2015 (BFO textbook), gruber1995, and
+% obofoundry2007 are already in eigenius_additional.bib / precursors.bib.
+% -----------------------------------------------------------------------------
+
+@techreport{masolo2003dolce,
+  author      = {Masolo, Claudio and Borgo, Stefano and Gangemi, Aldo and
+                 Guarino, Nicola and Oltramari, Alessandro},
+  title       = {{WonderWeb} Deliverable {D18}: Ontology Library},
+  institution = {{Laboratory For Applied Ontology (ISTC-CNR)}},
+  year        = {2003},
+  note        = {Foundational specification of {DOLCE} (Descriptive Ontology
+                 for Linguistic and Cognitive Engineering).},
+  url         = {http://wonderweb.man.ac.uk/deliverables/D18.shtml}
+}
+
+@incollection{herre2010gfo,
+  author    = {Herre, Heinrich},
+  title     = {General Formal Ontology ({GFO}): A foundational ontology for
+               conceptual modelling},
+  booktitle = {Theory and Applications of Ontology: Computer Applications},
+  editor    = {Poli, Roberto and Healy, Michael and Kameas, Achilles},
+  pages     = {297--345},
+  publisher = {Springer},
+  year      = {2010},
+  note      = {Specification of {GFO}, an integrative axiomatic top-level
+               ontology used as a peer to {BFO} and {DOLCE}.}
+}
+
+@article{borgo-mizoguchi2009,
+  author  = {Borgo, Stefano and Mizoguchi, Riichiro},
+  title   = {A formal ontological perspective on the behaviors and functions
+             of technical artifacts},
+  journal = {AI EDAM (Artificial Intelligence for Engineering Design,
+             Analysis and Manufacturing)},
+  volume  = {23},
+  number  = {1},
+  pages   = {3--21},
+  publisher = {Cambridge University Press},
+  year    = {2009},
+  doi     = {10.1017/S0890060409000079},
+  note    = {Uses {DOLCE} to give a uniform formal account of artifact
+             behavior vs. function — a long-standing source of
+             miscommunication in engineering design.}
+}
+
+@article{garbacz-engineering-functions,
+  author  = {Garbacz, Pawe{\l} and others},
+  title   = {Towards a formal ontology of engineering functions, behaviours,
+             and capabilities},
+  journal = {Semantic Web Journal},
+  note    = {Submission swj3188; surveys formalizations of engineering
+             function/behaviour/capability and proposes a unifying ontology.},
+  url     = {https://www.semantic-web-journal.net/system/files/swj3188.pdf}
+}
+
+@article{smith2012classifying-processes,
+  author  = {Smith, Barry},
+  title   = {Classifying processes: An essay in applied ontology},
+  journal = {Ratio (new series)},
+  volume  = {25},
+  number  = {4},
+  pages   = {463--488},
+  year    = {2012},
+  doi     = {10.1111/j.1467-9329.2012.00557.x},
+  note    = {Articulates the {BFO} treatment of occurrents (processes) and
+             their classification.}
+}
+
+@article{ontology-of-physics-for-biology,
+  author  = {Cook, Daniel L. and Bookstein, Fred L. and Gennari, John H.},
+  title   = {Physical properties of biological entities: An introduction
+             to the {Ontology} of {Physics} for {Biology}},
+  journal = {PLOS ONE},
+  volume  = {6},
+  number  = {12},
+  year    = {2011},
+  pages   = {e28708},
+  doi     = {10.1371/journal.pone.0028708},
+  note    = {Specification of {OPB}, which extends {BFO} with energy-bearing
+             biophysical entities and quantitative dependencies.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Higher-order logic applied to the natural sciences
+%
+% Theorem-proving-based formalization of biology, physics, and synthetic
+% biology in HOL Light / HOL4. Active research line at Concordia (Hasan,
+% Tahar et al.) and collaborators.
+% -----------------------------------------------------------------------------
+
+@article{rashid-hasan-systems-biology,
+  author  = {Rashid, Adnan and Hasan, Osman and Siddique, Umair and
+             Tahar, Sofi{\`e}ne},
+  title   = {Formal reasoning about systems biology using theorem proving},
+  journal = {PLOS ONE},
+  volume  = {12},
+  number  = {7},
+  pages   = {e0180179},
+  year    = {2017},
+  doi     = {10.1371/journal.pone.0180179},
+  note    = {Formalizes Zsyntax in {HOL4} / {HOL Light} for the verification
+             of molecular pathways and biological networks.}
+}
+
+@inproceedings{khan-afshar-complex-vectors,
+  author    = {Khan-Afshar, Sanaz and Siddique, Umair and
+               Mahmoud, Muhammad Yasir and Hasan, Osman and
+               Tahar, Sofi{\`e}ne},
+  title     = {Formalization of complex vectors in higher-order logic},
+  booktitle = {CICM 2014: International Conference on Intelligent
+               Computer Mathematics},
+  series    = {Lecture Notes in Artificial Intelligence},
+  volume    = {8543},
+  pages     = {123--137},
+  publisher = {Springer},
+  year      = {2014},
+  note      = {{HOL Light} formalization of complex vector analysis used
+               to verify foundational laws of electromagnetism.}
+}
+
+@phdthesis{siddique2015thesis,
+  author = {Siddique, Umair},
+  title  = {Formal Analysis of Fractional Order Systems in Higher-Order Logic},
+  school = {Concordia University},
+  year   = {2015},
+  note   = {Develops a {HOL Light} library for fractional-order systems and
+            applies it to engineering analysis.}
+}
+
+@article{rashid-laplace-fourier,
+  author  = {Rashid, Adnan and Hasan, Osman},
+  title   = {Formalization of {Laplace} and {Fourier} transforms in
+             higher-order logic for the analysis of synthetic biology
+             genetic circuits},
+  journal = {Theoretical Computer Science (or related)},
+  note    = {Frequency-domain analysis of synthetic genetic circuits
+             carried out in {HOL Light}; exact venue should be confirmed.
+             Source: cited by the survey at PMC5495343.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Quantum logic — historical foundation
+% -----------------------------------------------------------------------------
+
+@article{birkhoff-vonneumann1936,
+  author  = {Birkhoff, Garrett and von Neumann, John},
+  title   = {The logic of quantum mechanics},
+  journal = {Annals of Mathematics},
+  volume  = {37},
+  number  = {4},
+  pages   = {823--843},
+  year    = {1936},
+  doi     = {10.2307/1968621},
+  note    = {Founding paper of quantum logic; introduces the orthomodular
+             lattice structure of quantum events as an alternative to
+             classical Boolean algebra.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Knowledge graphs and formal reasoning in chemistry
+% -----------------------------------------------------------------------------
+
+@article{zhou2023marie-bert,
+  author  = {Zhou, Xiaochi and Zhang, Shaocong and Agarwal, Mehal and
+             Akroyd, Jethro and Mosbach, Sebastian and Kraft, Markus},
+  title   = {{Marie} and {BERT}---{A} knowledge graph embedding based question
+             answering system for chemistry},
+  journal = {ACS Omega},
+  volume  = {8},
+  number  = {36},
+  pages   = {33039--33057},
+  year    = {2023},
+  doi     = {10.1021/acsomega.3c05114},
+  note    = {Combines hybrid knowledge graph embeddings with {BERT}-based
+             entity linking to answer multihop chemistry questions over
+             {OntoSpecies} / {OntoMOPs}.}
+}
+
+@inproceedings{fca-process-ontologies,
+  author    = {Tutcher, Jonathan},
+  title     = {A {Formal Concept Analysis}-based method for developing
+               process ontologies, applied to chemical engineering},
+  booktitle = {Proceedings of an industrial-ontology workshop},
+  year      = {2014},
+  note      = {Uses {FCA} to derive class hierarchies for chemical engineering
+               processes and integrates them with {ISO 15926} / {SUMO}.
+               Exact venue per ResearchGate publication 271505148.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Engineering ontologies and Product Lifecycle Management
+% -----------------------------------------------------------------------------
+
+@techreport{psrl-nist,
+  author      = {Patil, Lalit and Dutta, Debasish and Sriram, Ram D.},
+  title       = {Ontology Formalization of Product Semantics for Product
+                 Lifecycle Management},
+  institution = {{National Institute of Standards and Technology}},
+  number      = {NISTIR 7274},
+  year        = {2005},
+  url         = {https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir7274.pdf},
+  note        = {Defines the {Product Semantic Representation Language}
+                 ({PSRL}), a description-logic-based formalism for
+                 application-independent product semantics in {PLM}.}
+}
+
+@article{ontology-based-plm-polimi,
+  author  = {{Polimi authors}},
+  title   = {Ontology-based product lifecycle management: Insights from a
+             proof-of-concept implementation},
+  journal = {IEEE Access},
+  year    = {2025},
+  note    = {Demonstrates ontology-driven {PLM} in an Engineer-to-Order
+             setting; combines linked-data infrastructure with
+             description-logic reasoning. Authorship per Polimi
+             repository entry; exact attribution should be verified.}
+}
+
+@misc{model-management-syseng-kg,
+  author       = {Anonymous},
+  title        = {Model management to support systems engineering workflows
+                  using ontology-based knowledge graphs},
+  year         = {2025},
+  eprint       = {2512.09596},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.SE},
+  url          = {https://arxiv.org/abs/2512.09596},
+  note         = {Uses the Ontology Modelling Language ({OML}) to relate
+                  systems engineering processes to artifacts via a
+                  knowledge graph; supports versioning and reasoning.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Homotopy Type Theory and its directed / dynamic extensions
+%
+% Note: hottbook2013 is in eigenius_precursors.bib.
+% -----------------------------------------------------------------------------
+
+@article{awodey-warren2009,
+  author  = {Awodey, Steve and Warren, Michael A.},
+  title   = {Homotopy theoretic models of identity types},
+  journal = {Mathematical Proceedings of the Cambridge Philosophical Society},
+  volume  = {146},
+  number  = {1},
+  pages   = {45--55},
+  year    = {2009},
+  doi     = {10.1017/S0305004108001783},
+  note    = {Establishes the homotopy-theoretic interpretation of
+             Martin-L{\"o}f identity types — a precursor to the univalent
+             foundations program.}
+}
+
+@misc{voevodsky2014univalent,
+  author       = {Voevodsky, Vladimir},
+  title        = {The Origins and Motivations of Univalent Foundations},
+  year         = {2014},
+  howpublished = {The Institute Letter, {Institute for Advanced Study}},
+  url          = {https://www.ias.edu/ideas/2014/voevodsky-origins},
+  note         = {Voevodsky's own account of the genesis of univalent
+                  foundations and the univalence axiom.}
+}
+
+@misc{poernomo2025dhott,
+  author        = {Poernomo, Iman},
+  title         = {{DHoTT}: A Temporal Extension of Homotopy Type Theory
+                   for Semantic Drift},
+  year          = {2025},
+  eprint        = {2506.09671},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/2506.09671},
+  note          = {Indexes types by a context-time parameter so they may
+                   deform, rupture, and reassemble — supports formal
+                   reasoning about semantic evolution and discontinuity.}
+}
+
+@phdthesis{weaver-bicubical-dtt,
+  author = {Weaver, Matthew Z.},
+  title  = {Bicubical Directed Type Theory},
+  school = {Princeton University},
+  year   = {2024},
+  url    = {https://dataspace.princeton.edu/handle/88435/dsp017s75dg778},
+  note   = {Generalizes groupoid-style {HoTT} to a directed setting with
+            morphisms — a foundation for type-theoretic reasoning over
+            directed processes.}
+}
+
+@article{genetic-code-hott,
+  author  = {Anonymous},
+  title   = {Exploring the genetic code: A Homotopy Type Theory approach to
+             uncovering embedded information},
+  journal = {Preprint},
+  year    = {2024},
+  note    = {Analyzes codon relationships and nucleotide permutations in a
+             3D lattice model under {HoTT}; surfaces structure suggestive
+             of layered molecular language. ResearchGate publication
+             380075492; authorship to be verified.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Type-theoretic semantics — natural-language meaning built on (record) types
+%
+% The "meaning as types, not possible worlds" tradition. Cooper's TTR is
+% records-first: a record type (labelled fields of types) is exactly the
+% Class-as-record-signature Eigenius uses (requires/recommends as fields; a
+% Resource is a record = a witness). A mature semantics natively on the substrate
+% Eigenius already is. (Carpenter and Luo now in this section; Ranta / GF still to
+% join in a later prior-art pass.)
+% -----------------------------------------------------------------------------
+
+@book{cooper2023perception,
+  author    = {Cooper, Robin},
+  title     = {From Perception to Communication: A Theory of Types for Action
+               and Meaning},
+  publisher = {Oxford University Press},
+  series    = {Oxford Studies in Semantics and Pragmatics},
+  number    = {16},
+  year      = {2023},
+  isbn      = {978-0-19-287131-2},
+  doi       = {10.1093/oso/9780192871312.001.0001},
+  note      = {TTR (Type Theory with Records). Records = labelled fields of
+               objects; record types = labelled fields of types; a record is a
+               witness for a record type iff the fields match; a proposition is a
+               type, true iff witnessed. Intensional, types-not-possible-worlds
+               (Ch. 6); first-class types + reflection. Records-first --- the same
+               record-type / Sigma-type structure as an Eigenius Class
+               (requires/recommends as fields; Resource = record = witness): the
+               closest external substrate match. Open access (CC BY-NC-ND 4.0).
+               Primary-read (intro + TOC); local copy sha256
+               4ac02f9d1e555ee22f1a3490afd2d822215d39633cd45e8693b240e0b233f3f9.}
+}
+
+@book{chatzikyriakidis-luo-2020,
+  author    = {Chatzikyriakidis, Stergios and Luo, Zhaohui},
+  title     = {Formal Semantics in Modern Type Theories},
+  publisher = {ISTE Ltd / John Wiley \& Sons},
+  year      = {2020},
+  isbn      = {9781786301284},
+  doi       = {10.1002/9781119489252},
+  note      = {MTT-semantics: natural-language meaning in Modern Type Theories
+               (dependent types; coercive subtyping; an impredicative universe
+               Prop --- cf. Eigenius's Prop universe, D46). Argues MTT-semantics
+               is BOTH model-theoretic AND proof-theoretic --- a dual nature not
+               available before MTTs, i.e. a framework-level resolution of the
+               model-vs-proof tension. Includes Coq verification of NL semantics
+               (the proof-assistant precedent for the engine's check; cf.
+               D28/D30) and dependent event types. The comprehensive reference for
+               the Luo / D18 anchor. Main chapters paywalled; front matter +
+               appendices (the formal system LF-Delta, impredicative Prop, Coq
+               codes) are open access. Also: the impredicative MTTs are UTT
+               (Luo 1994) / pCIC; lineage from Ranta's application of MTT to
+               semantics (1994; Grammatical Framework); CNs-as-types and
+               CNs-as-setoids (types with a criterion of identity); and Ch.7.3
+               develops dependent categorial grammars (DCGs) --- dependent Lambek
+               categories AS MTT semantic types, unifying categorial composition
+               with the type substrate. Characterized from the abstract + preface
+               + TOC + free appendices (main case-study chapters paywalled).}
+}
+
+% Z. Luo's focused 2012 primaries — the D18 anchor that Chatzikyriakidis & Luo
+% (2020) above is the comprehensive reference for. Together they are the warrant
+% for honoring core:subclass_of as subsumption in the checker (D62 §8.6).
+@inproceedings{luo2012cnt,
+  author    = {Luo, Zhaohui},
+  title     = {Common Nouns as Types},
+  booktitle = {Logical Aspects of Computational Linguistics (LACL 2012)},
+  editor    = {B{\'e}chet, Denis and Dikovsky, Alexandre},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {7351},
+  pages     = {173--185},
+  publisher = {Springer},
+  year      = {2012},
+  doi       = {10.1007/978-3-642-31262-5_12},
+  note      = {CNs-as-types: a common noun denotes a TYPE, not a predicate over
+               entities --- so a Class IS a type, the exact move Eigenius makes
+               (EigonClass : Set; "cell line" -> the type CellLine, D62 §8.6).
+               This is what makes cat_np(T) type-indexing well-founded. Subsumption
+               between CNs is coercive subtyping (Gene <= Entity), so a general
+               predicate typed at a supertype applies to specific-typed arguments
+               without re-typing: the primary warrant for reflecting
+               core:subclass_of as the EigonClass subtype rule (the
+               inclusion-coercion fragment). Author copy (open):
+               cs.rhul.ac.uk/home/zhaohui/LACL12.pdf. DOI verified via dblp +
+               Springer (LACL 2012 = LNCS 7351, pp. 173--185).}
+}
+
+@article{luo2012coercive,
+  author  = {Luo, Zhaohui},
+  title   = {Formal Semantics in Modern Type Theories with Coercive Subtyping},
+  journal = {Linguistics and Philosophy},
+  volume  = {35},
+  number  = {6},
+  pages   = {491--513},
+  year    = {2012},
+  doi     = {10.1007/s10988-013-9126-4},
+  note    = {The focused primary for coercive subtyping as the MTT-semantics
+               device for selectional restrictions, copredication, and multiple
+               categorization: an argument slot at type A admits a value of type B
+               via a coherent coercion B -> A; the inclusion case B <= A is
+               subsumption. This is the mechanism behind "depends on : Entity ->
+               Entity -> Prop" admitting Gene / CellLine arguments because Gene,
+               CellLine <= Entity --- i.e. behind making the kernel's EigonClass
+               subtype check consult core:subclass_of (D62 §8.6). Companion to the
+               comprehensive Chatzikyriakidis & Luo (2020). Author copy (open):
+               cs.rhul.ac.uk/~zhaohui/LP12final3.pdf. DOI verified via Springer +
+               PhilPapers (LUOFSI); Ling.&Phil. 35(6):491--513, 2012.}
+}
+
+% Parsing algorithm for the D62 engine's composition / parsing front-end.
+@inproceedings{mclean-horspool-1996-earley,
+  author    = {McLean, Philippe and Horspool, R. Nigel},
+  title     = {A Faster {Earley} Parser},
+  booktitle = {Compiler Construction (CC)},
+  series    = {Lecture Notes in Computer Science},
+  year      = {1996},
+  note      = {LRE(k): a hybrid of Earley parsing and LR(k). Precomputed LR(k)
+               item-sets make Earley ~10-15x faster with <half the storage, while
+               still parsing arbitrary (incl. ambiguous) CFGs. The chart-parsing
+               backbone for the D62 engine's composition / parsing front-end:
+               ambiguity-tolerant (parse forest), incremental (cf. Cooper's TTR
+               "chart type"), and friendly to attaching semantic actions (build
+               the typed term during the parse). Lifted to the type-logical / DCG
+               composition via "parsing as deduction" (Pereira & Warren).
+               Venue/pages (CC'96, LNCS 1060?) to verify --- not shown in the
+               dropped PDF.}
+}
+
+% ─────────────────────────────────────────────────────────────────────────────
+% Parsing scale & pruning (D63/D62 parser front-end). The DCG chart parser's
+% blow-up is LEXICAL (WordNet sense polysemy = CCG lexical-category ambiguity),
+% so the literature's answer is supertagging / adaptive lexical pruning; and our
+% typed kernel affords EXACT (unification/type-failure) pruning, unlike the
+% inexact probabilistic beams below. All identifiers verified (ACL Anthology /
+% DOI) — see docs/notes/d63-parsing-scale-and-pruning.md.
+% ─────────────────────────────────────────────────────────────────────────────
+
+@article{bangalore-joshi-1999-supertagging,
+  author  = {Bangalore, Srinivas and Joshi, Aravind K.},
+  title   = {Supertagging: An Approach to Almost Parsing},
+  journal = {Computational Linguistics},
+  volume  = {25}, number = {2}, pages = {237--265}, year = {1999},
+  note    = {Origin of SUPERTAGGING ("almost parsing"): assign the most-probable
+             rich lexical descriptor per word BEFORE parsing, collapsing the
+             lexical-ambiguity search space. The direct analog of our problem —
+             WordNet sense-polysemy seeding many items per token. ACL J99-2004.}
+}
+
+@inproceedings{clark-curran-2004-supertagging,
+  author    = {Clark, Stephen and Curran, James R.},
+  title     = {The Importance of Supertagging for Wide-Coverage {CCG} Parsing},
+  booktitle = {COLING 2004},
+  pages     = {282--288}, year = {2004},
+  note      = {The precise source of ADAPTIVE (beta-level) supertagging: start
+             with a tight per-word category beam, widen only when the parse
+             fails. The "start tight, widen on failure" policy we adopt for
+             D65 sense_rank-driven seed pruning. ACL C04-1041.}
+}
+
+@article{clark-curran-2007-ccg,
+  author  = {Clark, Stephen and Curran, James R.},
+  title   = {Wide-Coverage Efficient Statistical Parsing with {CCG} and Log-Linear Models},
+  journal = {Computational Linguistics},
+  volume  = {33}, number = {4}, pages = {493--552}, year = {2007},
+  doi     = {10.1162/coli.2007.33.4.493},
+  note    = {The canonical wide-coverage CCG parser; supertagger as a parser
+             front-end filter + the full adaptive-supertagging loop. ACL J07-4004.}
+}
+
+@inproceedings{xu-auli-clark-2015-rnn-supertag,
+  author    = {Xu, Wenduan and Auli, Michael and Clark, Stephen},
+  title     = {{CCG} Supertagging with a Recurrent Neural Network},
+  booktitle = {ACL-IJCNLP 2015 (Short Papers)},
+  pages     = {250--255}, year = {2015},
+  note      = {Neural supertagger conditioning on full-sentence context → tighter,
+             more accurate per-word category beams. Grounds "sense_rank as a
+             learned supertag prior" for our adaptive seed pruning. ACL P15-2041.}
+}
+
+@inproceedings{klein-manning-2003-astar,
+  author    = {Klein, Dan and Manning, Christopher D.},
+  title     = {A* Parsing: Fast Exact {Viterbi} Parse Selection},
+  booktitle = {HLT-NAACL 2003},
+  pages     = {119--126}, year = {2003},
+  note    = {EXACT best-first parsing via an ADMISSIBLE outside heuristic — no
+             search errors, <3% of exhaustive edges. The "exactness via a sound
+             filter" principle our typed felicity oracle affords. ACL N03-1016.}
+}
+
+@article{caraballo-charniak-1998-fom,
+  author  = {Caraballo, Sharon A. and Charniak, Eugene},
+  title   = {New Figures of Merit for Best-First Probabilistic Chart Parsing},
+  journal = {Computational Linguistics},
+  volume  = {24}, number = {2}, pages = {275--298}, year = {1998},
+  note    = {Figure-of-merit (inside x outside estimate) agenda prioritization for
+             best-first chart parsing — the inexact heuristic-ordering family. ACL J98-2004.}
+}
+
+@inproceedings{charniak-etal-2006-coarse-to-fine,
+  author    = {Charniak, Eugene and Johnson, Mark and Elsner, Micha and others},
+  title     = {Multilevel Coarse-to-Fine {PCFG} Parsing},
+  booktitle = {HLT-NAACL 2006},
+  pages     = {168--175}, year = {2006},
+  note    = {COARSE-TO-FINE: parse with a coarse grammar to prune the chart for the
+             finer pass. Cf. a categorial-skeleton-first then type-refine pass. ACL N06-1022.}
+}
+
+@inproceedings{charniak-2000-maxent-parser,
+  author    = {Charniak, Eugene},
+  title     = {A Maximum-Entropy-Inspired Parser},
+  booktitle = {NAACL 2000},
+  pages     = {132--139}, year = {2000},
+  note    = {Canonical source for beam / overparsing-style (inexact) pruning in
+             lexicalized statistical parsing. ACL A00-2018.}
+}
+
+@inproceedings{tomita-1987-glr,
+  author    = {Tomita, Masaru},
+  title     = {An Efficient Augmented-Context-Free Parsing Algorithm},
+  journal   = {Computational Linguistics},
+  volume    = {13}, number = {1-2}, pages = {31--46}, year = {1987},
+  note    = {Generalized LR (GLR) + the SHARED PACKED PARSE FOREST (SPPF): share
+             common sub-derivations so an exponential ambiguity set is stored
+             compactly. The "cheaper items via sharing" lever (vs. our current
+             Box-owned, unshared term trees). ACL J87-1004.}
+}
+
+@inproceedings{billot-lang-1989-shared-forests,
+  author    = {Billot, Sylvie and Lang, Bernard},
+  title     = {The Structure of Shared Forests in Ambiguous Parsing},
+  booktitle = {ACL 1989}, pages = {143--151}, year = {1989},
+  doi       = {10.3115/981623.981641},
+  note    = {Formal account of the cubic-size shared parse forest — sub-derivation
+             sharing as a grammar in its own right. ACL P89-1018.}
+}
+
+@inproceedings{oepen-carroll-2000-ambiguity-packing,
+  author    = {Oepen, Stephan and Carroll, John},
+  title     = {Ambiguity Packing in Constraint-based Parsing --- Practical Results},
+  booktitle = {NAACL 2000}, pages = {162--169}, year = {2000},
+  note    = {LOCAL AMBIGUITY PACKING in a (unification/HPSG) chart: subsumption-
+             and equivalence-based packing of feature structures — the closest
+             prior art to packing + exact type-filtering in a typed chart. ACL A00-2022.}
+}
+
+% Packed-forest LAZY SEMANTICS + CUBE PRUNING — the D63 packed-forest blueprint
+% (docs/notes/d63-packed-forest-parsing-blueprint.md). The 7.6M-lexicon sense-product
+% blow-up is a same-category OR-ambiguity: pack by (cat_shape, ENF-prov), materialize
+% the differing semantics LAZILY, extract k-best per signature by cube pruning. All
+% identifiers verified (ACL Anthology / arXiv / DOI) via deep-research wf_0cabeba8-96c.
+% ─────────────────────────────────────────────────────────────────────────────
+
+@article{harper-1994-logical-form-forest,
+  author  = {Harper, Mary P.},
+  title   = {Storing Logical Form in a Shared-Packed Forest},
+  journal = {Computational Linguistics},
+  volume  = {20}, number = {4}, year = {1994},
+  note    = {THE direct model for our design ("Method 3"): store a DEFERRED PROCEDURE
+             CALL at each packed forest node and build the logical form ON DEMAND, so
+             the LF-bearing forest has the SAME node count as the bare syntactic forest
+             (9,658 B vs 1,477,644 B eager at 132 parses). Also states the sharing
+             PITFALL: a packed child's semantics may not be affected by the parent's
+             LF construction, else copy-and-modify (= our cat_group carve-out). ACL
+             J94-4006.}
+}
+
+@inproceedings{dorre-1997-underspecified-packing,
+  author    = {D\"orre, Jochen},
+  title     = {Efficient Construction of Underspecified Semantics under Massive Ambiguity},
+  booktitle = {35th ACL / 8th EACL (ACL 1997)}, pages = {386--393}, year = {1997},
+  archivePrefix = {arXiv}, eprint = {cmp-lg/9706028},
+  note    = {Builds ONE packed underspecified semantics (packed UDRS) off the parse
+             forest instead of enumerating readings; an OR-node's semantics is the
+             disjunction of its children under one shared variable. Establishes that
+             UNDERSPECIFIED holes (scope/referent) are COMPATIBLE with packing — grounds
+             our deferred $quant$/$anaphor$ holes riding the packed stream. ACL P97-1050.}
+}
+
+@inproceedings{huang-chiang-2005-kbest,
+  author    = {Huang, Liang and Chiang, David},
+  title     = {Better k-best Parsing},
+  booktitle = {IWPT 2005 (9th Int. Workshop on Parsing Technologies)},
+  pages     = {53--64}, year = {2005},
+  note    = {k-best over a weighted hypergraph (= packed forest); k-best is bounded PER
+             VERTEX (signature), O(|V|.k), NOT globally — exactly what stops the pile
+             evicting the rare correct reading. Algorithm 3 (LazyKthBest) extracts
+             k-best top-down, materializing sub-derivations only as needed (the
+             lazy-unpack our extractor uses). ACL W05-1506.}
+}
+
+@article{chiang-2007-hierarchical,
+  author  = {Chiang, David},
+  title   = {Hierarchical Phrase-Based Translation},
+  journal = {Computational Linguistics},
+  volume  = {33}, number = {2}, pages = {201--228}, year = {2007},
+  doi     = {10.1162/coli.2007.33.2.201},
+  note    = {Origin of CUBE PRUNING: merged (recombined) items retain the multiset of
+             antecedent back-pointers; k-best lists of the antecedents form a sorted
+             cube whose cheap corner is enumerated best-first and the rest pruned. The
+             extraction algorithm for our packed forest. ACL J07-2003.}
+}
+
+@inproceedings{hopkins-langmead-2009-cube-search,
+  author    = {Hopkins, Mark and Langmead, Greg},
+  title     = {Cube Pruning as Heuristic Search},
+  booktitle = {EMNLP 2009}, pages = {62--71}, year = {2009},
+  note    = {The clean formal SEAM our design turns on: an item is keyed for combination
+             by (span, POSTCONDITION = category) while the CARRY (extra scoring info)
+             affects cost ONLY, not combinability. Maps 1:1 onto our felicity-by-category
+             (postcondition) vs. differing semantics (carry) — the licence to erase
+             type-indices from the packing signature. ACL D09-1007.}
+}
+
+% Dependent Type Semantics (DTS) + the lightblue parser — the closest existing
+% prose->Sigma-type system (D62 §4.1; verified via deep-research wea30vq2b).
+@misc{bekki-lightblue,
+  author       = {Bekki, Daisuke and others},
+  title        = {lightblue: a {CCG} parser with Dependent Type Semantics ({DTS}) representations},
+  howpublished = {\url{https://github.com/DaisukeBekki/lightblue}},
+  note         = {CCG parser whose derivation maps homomorphically (Curry-Howard) to
+                  DTS preterms --- a Martin-Lof dependent type theory over Sigma-types
+                  with proof-carrying witnesses; lexical entries are (form, CCG
+                  category, DTS preterm) triples. Built-in type-checker (Semantic
+                  Felicity Condition) + the Wani DTT theorem prover = the CHECK stage.
+                  Covers the engine's stages 2/4/5 natively. BSD-3-Clause (LICENSE
+                  file; package.yaml has a stray AllRightsReserved Cabal default).
+                  Active (2026). Japanese-strong, English less mature (the key risk).
+                  The fourth records-first / Sigma-type semantics (with TTR, MTT,
+                  Carpenter) and the only verified one shipping a parser + native
+                  check. See also Bekki et al., BriGap 2025,
+                  aclanthology.org/2025.brigap-1.1. Verified: deep-research wea30vq2b.}
+}
+
+@book{carpenter1997,
+  author    = {Carpenter, Bob},
+  title     = {Type-Logical Semantics},
+  publisher = {MIT Press},
+  series    = {Language, Speech, and Communication},
+  year      = {1997},
+  isbn      = {978-0-262-03248-3},
+  note      = {Categorial grammar built on the Lambek calculus + typed-lambda
+               semantics. The compositional mechanism Eigenius's composition
+               front-end needs spelled out: a "composition slot" is a type, and
+               a derivation is a term under the Curry-Howard correspondence ---
+               syntactic combination and semantic combination are the same
+               operation over the type substrate. The classic worked reference
+               for NL -> typed-term translation by categorial composition; the
+               Lambek-categories-as-types view is the precursor the dependent
+               categorial grammars of Chatzikyriakidis & Luo (Ch. 7.3) lift into
+               MTT. Primary-read.}
+}
+
+@misc{lai2020dependently,
+  author        = {Lai, Zhangsheng and Ng, Aik Beng and Wong, Liang Ze and
+                   See, Simon and Lin, Shaowei},
+  title         = {Dependently Typed Knowledge Graphs},
+  year          = {2020},
+  eprint        = {2003.03785},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/2003.03785},
+  note          = {Reproduces RDF + SPARQL inside the Calculus of Inductive
+                   Constructions (Coq): graph triples become typed terms, and a
+                   query is reformulated AS A TYPE whose inhabitants are the
+                   answers, each carrying a proof witness ("queries as types,
+                   answers as proof-carrying witnesses"). The direct external
+                   precedent for Eigenius's "queries-as-types" stance (D30) and
+                   for the certificate/witness shape of D39's justification:Certificate
+                   (answers that carry their own justification). Explicitly a
+                   proof-of-concept, not a production system. Primary-read.}
+}
+
+
+% -----------------------------------------------------------------------------
+% LLM ontology learning / autoformalization
+%
+% The contemporary landscape for getting typed knowledge graphs (and formal
+% statements) out of LLMs over natural-language text: ontology-conformance and
+% hallucination benchmarks (Text2KGBench), the ontology-learning task taxonomy
+% (LLMs4OL), schema-constrained extraction grounded to ontology IDs (SPIRES),
+% and the autoformalization-faithfulness literature (Herald, miniF2F-Lean
+% Revisited, ReForm) that motivates Eigenius's insistence on checking a Lean
+% translation for FAITHFULNESS, not merely type-correctness.
+% -----------------------------------------------------------------------------
+
+@misc{mihindukulasooriya2023text2kgbench,
+  author        = {Mihindukulasooriya, Nandana and Tiwari, Sanju and
+                   Enguix, Carlos F. and Lata, Kusum},
+  title         = {{Text2KGBench}: A Benchmark for Ontology-Driven Knowledge
+                   Graph Generation from Text},
+  year          = {2023},
+  eprint        = {2308.02357},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2308.02357},
+  note          = {Benchmark for generating ontology-conformant knowledge graphs
+                   from text: scores both ontology conformance (do the produced
+                   triples respect the target ontology's classes/relations) and
+                   subject / relation / object hallucination (do they introduce
+                   entities or relations absent from the source and ontology).
+                   The external precedent for D50's typed-KG-generation metrics.}
+}
+
+@inproceedings{babaeigiglou2023llms4ol,
+  author        = {Babaei Giglou, Hamed and D'Souza, Jennifer and Auer, S{\"o}ren},
+  title         = {{LLMs4OL}: Large Language Models for Ontology Learning},
+  booktitle     = {The Semantic Web --- ISWC 2023},
+  year          = {2023},
+  eprint        = {2307.16648},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2307.16648},
+  note          = {Casts ontology learning as three LLM tasks --- term typing,
+                   taxonomy (is-a) discovery, and non-taxonomic relation
+                   extraction --- and evaluates foundational LLMs across them.
+                   Finding: foundational LLMs alone are insufficient for
+                   high-reasoning ontology construction. The task taxonomy for
+                   D50's ontology-learning landscape.}
+}
+
+@article{caufield2024spires,
+  author  = {Caufield, J. Harry and Hegde, Harshad and Emonet, Vincent and
+             Harris, Nomi L. and Joachimiak, Marcin P. and Matentzoglu, Nicolas
+             and Kim, HyeongSik and Moxon, Sierra and Reese, Justin T. and
+             Haendel, Melissa A. and Robinson, Peter N. and Mungall, Christopher J.},
+  title   = {{SPIRES}: a method for populating knowledge bases using zero-shot
+             learning to extract the contents of texts},
+  journal = {Bioinformatics},
+  volume  = {40},
+  number  = {3},
+  pages   = {btae104},
+  year    = {2024},
+  doi     = {10.1093/bioinformatics/btae104},
+  note    = {Structured Prompt Interrogation and Recursive Extraction of
+             Semantics: a LinkML schema constrains the LLM extraction, which
+             recurses over the text and grounds every extracted entity to an
+             ontology ID. The schema-constrained, ontology-grounded extraction
+             precedent for D50; same shape as the "tool produces typed output
+             grounded to the ontology" boundary the pilot uses.}
+}
+
+@misc{gao2024herald,
+  author        = {Gao, Guoxiong and Wang, Yutong and Jiang, Jiedong and
+                   Gao, Qi and Qin, Zihan and Xu, Tianyi and Dong, Bin},
+  title         = {Herald: A Natural Language Annotated {Lean} 4 Dataset},
+  year          = {2024},
+  eprint        = {2410.10878},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2410.10878},
+  note          = {ICLR 2025. A natural-language <-> Lean 4 dataset built with
+                   back-translation, using an LLM-judge as the faithfulness check
+                   on the autoformalized statements. NOTE: the LLM-judge is the
+                   reported faithfulness mechanism; the much lower human-audited
+                   pass rate is a finding of Ospanov et al. (miniF2F-Lean
+                   Revisited), not a Herald claim --- see ospanov2025minif2f.}
+}
+
+@misc{ospanov2025minif2f,
+  author        = {Ospanov, Azim and Farnia, Farzan and Yousefzadeh, Roozbeh},
+  title         = {{miniF2F-Lean} Revisited: Reviewing Limitations and Charting
+                   a Path Forward},
+  year          = {2025},
+  eprint        = {2511.03108},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2511.03108},
+  note          = {NeurIPS 2025. Audits autoformalization-faithfulness claims.
+                   CORRECTION it supplies to the Herald numbers: Herald's
+                   statement formalization, reported ~97% faithful by its
+                   LLM-judge, drops to ~66% under human evaluation, with an
+                   end-to-end correct rate of ~34.8%. These figures are this
+                   paper's audit OF Herald, not Herald's own claims --- evidence
+                   that an LLM-judge faithfulness check is not a substitute for
+                   the kernel-checked faithfulness D30 requires.}
+}
+
+@misc{chen2025reform,
+  author        = {Chen, Guoxin and Wang, Jing and Xu, Tianyi and Zhang, Kai and
+                   Liu, Pengfei and Dong, Bin},
+  title         = {{ReForm}: Reflective Autoformalization with Prospective
+                   Bounded Sequence Optimization},
+  year          = {2025},
+  eprint        = {2510.24592},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2510.24592},
+  note          = {ICLR 2026. Reflective autoformalization with an LLM-judge
+                   semantic check whose ceiling is reported at 85.8%. CORRECTION
+                   on the headline error rates: the 16.4% (miniF2F) and 38.5%
+                   (ProofNet) semantic-error figures are error rates in the
+                   HUMAN-WRITTEN benchmark statements ReForm audited, not the
+                   error rate of ReForm's own autoformalizer output. Further
+                   evidence that "type-checks" is not "faithful" --- the gap D30
+                   is built to close.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Onto-axiomatic method, state formalization, and integrative methodology
+% -----------------------------------------------------------------------------
+
+@article{qiu2025state-formalization,
+  author  = {Qiu, others},
+  title   = {Research on a general state formalization method from the
+             perspective of logic},
+  journal = {Mathematics ({MDPI})},
+  volume  = {13},
+  number  = {20},
+  pages   = {3324},
+  year    = {2025},
+  doi     = {10.3390/math13203324},
+  note    = {Proposes a unified axiomatization of states as interpretations
+             of formulas across first-order, higher-order, and infinitary
+             logics. Full author list per Crossref starts with Qiu;
+             complete attribution should be filled in from the {MDPI} page
+             before any citation use.}
+}
+
+@misc{sowa-signs-processes,
+  author       = {Sowa, John F.},
+  title        = {Signs, Processes, and Language Games: Foundations for
+                  Ontology},
+  year         = {2010},
+  howpublished = {Online manuscript, jfsowa.com},
+  url          = {http://www.jfsowa.com/pubs/signproc.htm},
+  note         = {Sowa's foundational essay arguing that ontology must
+                  account for signs, processes, and language games — a
+                  framing closely related to Eigenius's typed-layer view
+                  of scientific knowledge.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Institutions applied to systems / software engineering
+%
+% The Knapp/Mossakowski/Roggenbach line at Augsburg/Magdeburg/Swansea uses
+% institutions and Grothendieck institutions to compose semantics of
+% heterogeneous UML diagram types and link them to verification backends.
+% -----------------------------------------------------------------------------
+
+@inproceedings{knapp-uml-state-machines2015,
+  author    = {Knapp, Alexander and Mossakowski, Till and
+               Roggenbach, Markus and Glauer, Martin},
+  title     = {An institution for simple {UML} state machines},
+  booktitle = {FASE 2015: Fundamental Approaches to Software Engineering},
+  editor    = {Egyed, Alexander and Schaefer, Ina},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9033},
+  pages     = {3--18},
+  publisher = {Springer},
+  year      = {2015},
+  doi       = {10.1007/978-3-662-46675-9_1}
+}
+
+@incollection{knapp-institutional-framework-uml2015,
+  author    = {Knapp, Alexander and Mossakowski, Till and Roggenbach, Markus},
+  title     = {Towards an institutional framework for heterogeneous formal
+               development in {UML} --- A position paper},
+  booktitle = {Software, Services, and Systems: Essays Dedicated to Martin
+               Wirsing on the Occasion of His Retirement from the Chair of
+               Programming and Software Engineering},
+  editor    = {De~Nicola, Rocco and Hennicker, Rolf},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {8950},
+  pages     = {215--230},
+  publisher = {Springer},
+  year      = {2015},
+  doi       = {10.1007/978-3-319-15545-6_15}
+}
+
+
+% -----------------------------------------------------------------------------
+% Institutions in physics and the philosophy of science
+%
+% The Halvorson/Glymour debate around the semantic view of theories is the
+% locus where institution-theoretic and category-theoretic accounts of
+% scientific theories meet contemporary philosophy of science. Darrigol's
+% modular-structure paper is the closest precursor on the physics side.
+% -----------------------------------------------------------------------------
+
+@article{halvorson2012,
+  author  = {Halvorson, Hans},
+  title   = {What scientific theories could not be},
+  journal = {Philosophy of Science},
+  volume  = {79},
+  number  = {2},
+  pages   = {183--206},
+  year    = {2012},
+  doi     = {10.1086/664745},
+  note    = {Critique of the strict semantic view of scientific theories;
+             starts the debate that motivates institution- and
+             category-theoretic accounts.}
+}
+
+@article{glymour2013-theoretical-equivalence,
+  author  = {Glymour, Clark},
+  title   = {Theoretical equivalence and the semantic view of theories},
+  journal = {Philosophy of Science},
+  volume  = {80},
+  number  = {2},
+  pages   = {286--297},
+  year    = {2013},
+  doi     = {10.1086/670261},
+  note    = {Response to Halvorson 2012. The user's reading list links
+             this title to an institution-theoretic treatment with quantum
+             cosmology examples; the title matches Glymour's paper exactly,
+             but Glymour's paper itself does not use institutions --- it
+             defends the semantic view via De Bouvere's criteria. The
+             institution-theoretic angle on this debate is in Halvorson
+             \& Tsementzis, "Categories of Scientific Theories" (2017).}
+}
+
+@article{darrigol2008-modular,
+  author  = {Darrigol, Olivier},
+  title   = {The modular structure of physical theories},
+  journal = {Synthese},
+  volume  = {162},
+  number  = {2},
+  pages   = {195--223},
+  year    = {2008},
+  doi     = {10.1007/s11229-007-9181-x},
+  note    = {Argues that mature physical theories decompose into modules
+             with stable interfaces --- the philosophical analogue of the
+             colimit-style composition that institutions formalize.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Institutions for ontology engineering / Information Flow Framework
+% -----------------------------------------------------------------------------
+
+@misc{kent-iff2011,
+  author        = {Kent, Robert E.},
+  title         = {The {Information Flow Framework}: A descriptive category
+                   metatheory},
+  year          = {2011},
+  eprint        = {1108.4133},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/1108.4133},
+  note          = {Structural metatheory for the {IEEE P1600.1 Standard
+                   Upper Ontology (SUO)} project; uses institutions and
+                   their morphisms as the upper-metalevel axiomatization
+                   for semantic integration of ontologies.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Epistemology of formal proof
+% -----------------------------------------------------------------------------
+
+@article{martinot2024ontological-purity,
+  author  = {Martinot, Robin},
+  title   = {Ontological purity for formal proofs},
+  journal = {The Review of Symbolic Logic},
+  volume  = {17},
+  number  = {2},
+  pages   = {395--434},
+  publisher = {Cambridge University Press},
+  year    = {2024},
+  doi     = {10.1017/S1755020323000333},
+  note    = {Develops a graded notion of ontological purity for formal
+             proofs, including a notion of "secondary purity" for proofs
+             that use surrogate content via formal interpretations.
+             Directly relevant to evaluating cross-layer reasoning in
+             Eigenius.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Grammar-based natural-language <-> formal translation
+% -----------------------------------------------------------------------------
+
+@misc{ranta2026symbolic-informalization,
+  author       = {Ranta, Aarne},
+  title        = {Symbolic Informalization: Fluent, Productive, Multilingual},
+  year         = {2026},
+  eprint       = {2606.16893},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.AI},
+  url          = {https://arxiv.org/abs/2606.16893},
+  note         = {The Informath project: symbolic (grammar-based)
+                  informalization of formal mathematics to natural language
+                  via Grammatical Framework, with Dedukti as an interlingua
+                  hub over Agda/Lean/Rocq. Two-level grammar (abstract
+                  semantics / concrete surface); type-checking disambiguates
+                  parses; the NLG side over-generates and RANKS variants by
+                  structural penalties (tree size/depth) rather than
+                  hard-cutting; reversible (parse <-> generate). Relevant to
+                  Eigenius as (i) a reliable symbolic back-translation for
+                  faithfulness checks vs. inflated LLM back-translation,
+                  (ii) a model for soft structural ranking over hard
+                  normal-form cuts, and (iii) type-checked lexical symbol
+                  tables as a category-consistency gate.}
+}

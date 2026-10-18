@@ -1,0 +1,219 @@
+# Eigenius Orchestration Layer — Deno runtime + bundled notebook SPA
+#
+# Multi-stage build:
+#   1. notebook-builder   — Node 22 + npm, builds the notebooks SPA via `vite build`
+#   2. substrate-builder  — Rust + napi-rs CLI, builds the runtime substrate
+#                           native addon (eigenius-orchestrator-runtime-substrate)
+#                           with Julia language runtime support linked in.
+#   3. final              — Deno runtime serving the orchestrator's RPC surface,
+#                           the static notebook bundle from /notebooks/*, and
+#                           hosting the substrate addon for RunRuntimeScript /
+#                           CallRuntimeMethod / DispatchExternal.
+
+# --- Stage 1: build the notebooks SPA -----------------------------------------
+FROM node:22-alpine AS notebook-builder
+
+WORKDIR /build
+
+# npm defaults to 15 parallel sockets, which the WSL2/Docker NAT path resets
+# part-way through a large fetch: the 3-dep SDK tree below installs in ~3s while
+# the 34-dep notebooks tree dies at ~40s with ECONNRESET on the same mount and
+# registry. Cap concurrency and widen the retry window so a reset is survivable
+# rather than fatal.
+ENV NPM_CONFIG_MAXSOCKETS=4 \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+
+# The SDK is a `file:` dependency of notebooks/, so npm needs both trees to
+# resolve the workspace symlink.
+COPY clients/eigenius-ts/ clients/eigenius-ts/
+COPY notebooks/ notebooks/
+
+# Install the SDK's own deps first so the workspace symlink in
+# notebooks/node_modules/@eigenius/client → clients/eigenius-ts has a
+# resolvable node_modules tree. Without this, tsc -b inside the SPA
+# build follows imports into the SDK source and can't find
+# @bufbuild/protobuf / @connectrpc/connect-web (no hoisted node_modules
+# is reachable by walking up from clients/eigenius-ts/src/).
+WORKDIR /build/clients/eigenius-ts
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+
+WORKDIR /build/notebooks
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+RUN npm run build
+# Output: /build/notebooks/dist/
+
+# --- Stage 2: build the runtime substrate napi addon --------------------------
+FROM rust:1.97-bookworm AS substrate-builder
+
+# Node 22 from NodeSource — Debian bookworm ships Node 18 which is too
+# old for napi-rs CLI v3 (uses `node:util.styleText`, added in Node 20).
+RUN apt-get update && apt-get install -y \
+        protobuf-compiler \
+        libclang-dev \
+        curl \
+        ca-certificates \
+        gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the workspace bits the napi crate transitively pulls in. Order
+# matches Cargo's lookup — workspace manifest at the root, then each
+# member crate the addon depends on (runtime-substrate + eigenius-julia
+# + their workspace siblings reachable through path deps).
+COPY Cargo.toml Cargo.lock ./
+# The root workspace `[patch.crates-io]` points `tonic-web` at
+# `patches/tonic-web`; the `eigenius-r-worker` cdylib build below uses the
+# root workspace, so the patched source must be in the build context.
+COPY patches/ patches/
+COPY kernel/ kernel/
+COPY crates/ crates/
+COPY storage/ storage/
+COPY cli/ cli/
+COPY proto/ proto/
+COPY ontologies/ ontologies/
+COPY orchestration/runtime-substrate-native/ orchestration/runtime-substrate-native/
+# eigenius-julia `include_str!`s files from julia/common/EigeniusJuliaCommon/
+# at compile time, so the directory must exist in the build context even
+# though the addon itself only uses Rust crates.
+COPY julia/ julia/
+# eigenius-lean-runtime's build.rs reads `lean/runtime-worker/lean-toolchain`
+# (the workspace's single source of truth for the Lean toolchain version,
+# propagated to the Rust side via the `EIGENIUS_LEAN_TOOLCHAIN_VERSION`
+# cfg-env). Mirror of the julia/ requirement above — this addon links
+# the authoring-side Lean runtime so the orchestrator can drive Lean
+# image builds (Phase 20a.5 wiring).
+COPY lean/ lean/
+
+WORKDIR /build/orchestration/runtime-substrate-native
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/orchestration/runtime-substrate-native/target \
+    ./node_modules/.bin/napi build --platform --release \
+    && cp *.node /tmp/ \
+    && cp index.js index.d.ts package.json /tmp/
+# `napi build` puts the generated index.js / index.d.ts / *.node files
+# next to package.json. We stage them under /tmp/ so the cache-mounted
+# target/ directory doesn't shadow the artifacts on the way out.
+
+# Build the R worker cdylib the substrate's RLanguageRuntime loads into
+# the spawned R container (D55 / D56). It's a root-workspace member
+# (`crates/eigenius-r-worker`); libR symbols resolve at `dyn.load` in the
+# worker image, so building the `.so` here needs no R toolchain. Staged
+# under /tmp/ alongside the driver for the runtime stage to copy in.
+WORKDIR /build
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build -p eigenius-r-worker --release \
+    && cp target/release/libeigenius_r_worker.so /tmp/
+
+# D60: the schema.org worker for the generic `oci` tool runtime — a plain Rust
+# binary (no FFI). The OciToolRuntime bakes it into a pinned image at env-build
+# time; staged under /tmp/ for the runtime stage to copy in.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build -p eigenius-schemaorg-worker --release \
+    && cp target/release/eigenius-schemaorg-worker /tmp/
+
+# --- Stage 3: orchestrator runtime --------------------------------------------
+FROM denoland/deno:latest
+
+# OCI image labels for registry consumers.
+LABEL org.opencontainers.image.title="eigenius-orchestrator"
+LABEL org.opencontainers.image.description="Eigenius orchestrator — Deno service hosting the notebook SPA, runtime-substrate workers, and the kernel-facing gRPC client."
+LABEL org.opencontainers.image.source="https://github.com/eigenius/eigenius"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="Eigenius"
+LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigenius/tree/main/docs"
+
+WORKDIR /app
+
+# Install the prebuilt `oxen` CLI (D53 §2 / §9). The substrate shells out to
+# it to fetch `oxen://` PinnedExternalFile inputs into the depot cache — we use
+# the prebuilt binary rather than the `liboxen` crate (its ~160 transitive deps
+# are wrong for our build + TCB). Oxen's release workflow publishes per-arch
+# Debian packages `oxen-linux-x86_64.deb` / `oxen-linux-arm64.deb` (see the
+# Oxen RELEASING runbook). Pin the version per release; confirm the latest at
+# https://github.com/Oxen-AI/Oxen/releases.
+ARG OXEN_VERSION=0.50.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) oxen_arch=x86_64 ;; \
+         arm64) oxen_arch=arm64 ;; \
+         *) echo "unsupported arch for oxen CLI: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/oxen.deb \
+         "https://github.com/Oxen-AI/Oxen/releases/download/v${OXEN_VERSION}/oxen-linux-${oxen_arch}.deb" \
+    && apt-get install -y --no-install-recommends /tmp/oxen.deb \
+    && rm -f /tmp/oxen.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && oxen --version
+
+# Cache Deno deps from the source layout.
+COPY orchestration/deno.json ./
+COPY orchestration/src/ src/
+RUN deno cache src/main.ts
+
+# Bundle the notebook SPA into the image. The static-file route (D22 §6.10)
+# reads EIGENIUS_NOTEBOOK_STATIC at runtime and serves /notebooks/* from it.
+COPY --from=notebook-builder /build/notebooks/dist/ /app/notebooks/
+
+# Drop the substrate addon next to the orchestrator source. The TS
+# loader (`src/runtime/loadAddon.ts`) resolves the addon via
+# `../../runtime-substrate-native/index.js` from `src/runtime/`, so
+# the addon directory must live at `/app/runtime-substrate-native/`.
+COPY --from=substrate-builder /tmp/index.js \
+                              /tmp/index.d.ts \
+                              /tmp/package.json \
+                              /app/runtime-substrate-native/
+COPY --from=substrate-builder /tmp/*.node /app/runtime-substrate-native/
+
+# Bake the Julia worker source (Project.toml / Manifest.toml /
+# src/JuliaWorker.jl) into the image. The substrate's
+# `JuliaLanguageRuntime` reads these to compute the manifest hash that
+# anchors the cross-check provenance trace and to compose the worker's
+# Dockerfile when an env image is built lazily.
+COPY julia/runtime-worker/ /opt/eigenius/julia-runtime-worker/
+
+# Bake the R worker assets (D55 / D56): the driver the spawned R
+# container runs + the cdylib it `dyn.load`s. `RLanguageRuntime` reads
+# these host paths to compute the cross-check manifest hash; they must
+# match the recipe that built the R worker image.
+COPY crates/eigenius-r-worker/r/EigeniusRWorker.R /opt/eigenius/r-runtime-worker/EigeniusRWorker.R
+COPY --from=substrate-builder /tmp/libeigenius_r_worker.so /opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
+
+# D60: the schema.org worker binary for the `oci` tool runtime. OciToolRuntime
+# bakes it into a pinned image + computes the cross-check manifest hash from it.
+COPY --from=substrate-builder /tmp/eigenius-schemaorg-worker /opt/eigenius/oci-runtime-worker/eigenius-schemaorg-worker
+
+ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
+ENV EIGENIUS_NOTEBOOK_STATIC=/app/notebooks
+ENV EIGENIUS_JULIA_WORKER_PROJECT_DIR=/opt/eigenius/julia-runtime-worker
+ENV EIGENIUS_JULIA_BASE_IMAGE_REF=docker.io/library/julia:1.12-bookworm
+ENV EIGENIUS_JULIA_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+ENV EIGENIUS_R_DRIVER_PATH=/opt/eigenius/r-runtime-worker/EigeniusRWorker.R
+ENV EIGENIUS_R_CDYLIB_PATH=/opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
+ENV EIGENIUS_R_BASE_IMAGE_REF=docker.io/bioconductor/bioconductor_docker:RELEASE_3_18
+ENV EIGENIUS_R_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+# D60: register the generic `oci` tool runtime (the schema.org generator lift).
+ENV EIGENIUS_OCI_WORKER_BINARY_PATH=/opt/eigenius/oci-runtime-worker/eigenius-schemaorg-worker
+ENV EIGENIUS_OCI_BASE_IMAGE_REF=docker.io/library/debian:bookworm-slim
+ENV EIGENIUS_OCI_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+# Oxen auth (D53 §10): the `oxen` CLI reads `auth_config.toml` from
+# $OXEN_CONFIG_DIR. The deployment mounts the per-host bearer token here from
+# its secret store (the credential is substrate-side only; it never enters a
+# worker image). Self-hosted http servers also set EIGENIUS_OXEN_SCHEME=http.
+ENV OXEN_CONFIG_DIR=/var/lib/eigenius/oxen-config
+
+EXPOSE 8080
+
+# Run via `deno task start` so Deno permission flags + unstable
+# features stay in `deno.json` rather than scattered across deploy
+# manifests.
+CMD ["deno", "task", "start"]

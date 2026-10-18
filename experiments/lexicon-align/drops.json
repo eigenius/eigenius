@@ -1,0 +1,2384 @@
+[
+  {
+    "cui": "C0009668",
+    "form": "Confidential Information",
+    "surface": "confidential information",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0050063",
+    "form": "cAMP",
+    "surface": "camp",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205123",
+    "form": "Coronal",
+    "surface": "coronal",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C0205123",
+    "form": "Frontal",
+    "surface": "frontal",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0205123",
+    "form": "coronal",
+    "surface": "coronal",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C0205123",
+    "form": "frontal",
+    "surface": "frontal",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0205125",
+    "form": "Deep",
+    "surface": "deep",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C0205154",
+    "form": "edge",
+    "surface": "edge",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C0205154",
+    "form": "edges",
+    "surface": "edges",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C0205173",
+    "form": "duplicate",
+    "surface": "duplicate",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0205173",
+    "form": "duplicates",
+    "surface": "duplicates",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0205173",
+    "form": "twin",
+    "surface": "twin",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205214",
+    "form": "Common",
+    "surface": "common",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205214",
+    "form": "common",
+    "surface": "common",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205232",
+    "form": "Fine",
+    "surface": "fine",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205232",
+    "form": "fine",
+    "surface": "fine",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0205369",
+    "form": "Specific",
+    "surface": "specific",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0205369",
+    "form": "specific",
+    "surface": "specific",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0205375",
+    "form": "Uniform",
+    "surface": "uniform",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0205375",
+    "form": "uniform",
+    "surface": "uniform",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0205375",
+    "form": "uniforms",
+    "surface": "uniforms",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0205430",
+    "form": "Mix",
+    "surface": "mix",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0205430",
+    "form": "mix",
+    "surface": "mix",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0205430",
+    "form": "mixing",
+    "surface": "mixing",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0205554",
+    "form": "Automatic",
+    "surface": "automatic",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0205554",
+    "form": "automatic",
+    "surface": "automatic",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0332177",
+    "form": "Month",
+    "surface": "month",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0332177",
+    "form": "Monthly",
+    "surface": "monthly",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0332177",
+    "form": "monthly",
+    "surface": "monthly",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0332296",
+    "form": "free",
+    "surface": "free",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0332514",
+    "form": "Asymmetry",
+    "surface": "asymmetry",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0332514",
+    "form": "asymmetry",
+    "surface": "asymmetry",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0337094",
+    "form": "exit",
+    "surface": "exit",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0392366",
+    "form": "test",
+    "surface": "test",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0392366",
+    "form": "tests",
+    "surface": "tests",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439158",
+    "form": "Colonies",
+    "surface": "colonies",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439158",
+    "form": "colonies",
+    "surface": "colonies",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439158",
+    "form": "colony",
+    "surface": "colony",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439531",
+    "form": "period",
+    "surface": "period",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0439539",
+    "form": "Heavy",
+    "surface": "heavy",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439539",
+    "form": "heavy",
+    "surface": "heavy",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439658",
+    "form": "classic",
+    "surface": "classic",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0439658",
+    "form": "classics",
+    "surface": "classics",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0439661",
+    "form": "acquiring",
+    "surface": "acquiring",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0439806",
+    "form": "Gross",
+    "surface": "gross",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439806",
+    "form": "gross",
+    "surface": "gross",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0439807",
+    "form": "Radical",
+    "surface": "radical",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0439807",
+    "form": "radical",
+    "surface": "radical",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0439841",
+    "form": "ambulatory",
+    "surface": "ambulatory",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0439844",
+    "form": "covering",
+    "surface": "covering",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0441704",
+    "form": "typing",
+    "surface": "typing",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0441704",
+    "form": "typings",
+    "surface": "typings",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0441712",
+    "form": "Mechanism",
+    "surface": "mechanism",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0441712",
+    "form": "mechanism",
+    "surface": "mechanism",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0441712",
+    "form": "mechanisms",
+    "surface": "mechanisms",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0441835",
+    "form": "group a",
+    "surface": "group a",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0443192",
+    "form": "Continent",
+    "surface": "continent",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0443192",
+    "form": "continent",
+    "surface": "continent",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0443199",
+    "form": "Differential",
+    "surface": "differential",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0443199",
+    "form": "differential",
+    "surface": "differential",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0444916",
+    "form": "duplex",
+    "surface": "duplex",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0549183",
+    "form": "median",
+    "surface": "median",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0549183",
+    "form": "medians",
+    "surface": "medians",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0549183",
+    "form": "middle",
+    "surface": "middle",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C0678640",
+    "form": "exchange",
+    "surface": "exchange",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0678640",
+    "form": "exchanges",
+    "surface": "exchanges",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0684246",
+    "form": "COAT",
+    "surface": "coat",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C0699756",
+    "form": "Intimate",
+    "surface": "intimate",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0699756",
+    "form": "intimate",
+    "surface": "intimate",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0805701",
+    "form": "Code",
+    "surface": "code",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C0805701",
+    "form": "Coding System",
+    "surface": "coding system",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C0870705",
+    "form": "information",
+    "surface": "information",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C0919279",
+    "form": "code",
+    "surface": "code",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C0919279",
+    "form": "codes",
+    "surface": "codes",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1264693",
+    "form": "Arb",
+    "surface": "arb",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1282914",
+    "form": "Peri",
+    "surface": "peri",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1282914",
+    "form": "surrounds",
+    "surface": "surrounds",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1299003",
+    "form": "Ocular",
+    "surface": "ocular",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1306898",
+    "form": "mU",
+    "surface": "mu",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1433158",
+    "form": "hICK",
+    "surface": "hick",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1442989",
+    "form": "Standard",
+    "surface": "standard",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1510755",
+    "form": "Accession",
+    "surface": "accession",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1510802",
+    "form": "Adherence",
+    "surface": "adherence",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1512348",
+    "form": "HINTS",
+    "surface": "hints",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1521746",
+    "form": "Protein",
+    "surface": "protein",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1522390",
+    "form": "Person",
+    "surface": "person",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1522664",
+    "form": "Filter",
+    "surface": "filter",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546424",
+    "form": "Adjustment",
+    "surface": "adjustment",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546426",
+    "form": "Charge",
+    "surface": "charge",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546428",
+    "form": "Payment",
+    "surface": "payment",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546456",
+    "form": "Demographics",
+    "surface": "demographics",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1546459",
+    "form": "Goals",
+    "surface": "goals",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546465",
+    "form": "Order",
+    "surface": "order",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546467",
+    "form": "Procedure",
+    "surface": "procedure",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546467",
+    "form": "procedure",
+    "surface": "procedure",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546471",
+    "form": "Result",
+    "surface": "result",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546481",
+    "form": "Status",
+    "surface": "status",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546533",
+    "form": "Abscess",
+    "surface": "abscess",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546537",
+    "form": "Allograft",
+    "surface": "allograft",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546538",
+    "form": "Amniotic fluid",
+    "surface": "amniotic fluid",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546539",
+    "form": "Amputation",
+    "surface": "amputation",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546543",
+    "form": "Aspirate",
+    "surface": "aspirate",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546546",
+    "form": "Autopsy",
+    "surface": "autopsy",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546551",
+    "form": "Bite",
+    "surface": "bite",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546552",
+    "form": "Whole blood",
+    "surface": "whole blood",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546555",
+    "form": "Cord blood",
+    "surface": "cord blood",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546558",
+    "form": "Blister",
+    "surface": "blister",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546559",
+    "form": "Boil",
+    "surface": "boil",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546560",
+    "form": "Bone",
+    "surface": "bone",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546562",
+    "form": "Basophils",
+    "surface": "basophils",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546564",
+    "form": "Burn",
+    "surface": "burn",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546566",
+    "form": "Brush",
+    "surface": "brush",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546566",
+    "form": "Brushing",
+    "surface": "brushing",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546567",
+    "form": "Bubo",
+    "surface": "bubo",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546569",
+    "form": "Biopsy",
+    "surface": "biopsy",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546571",
+    "form": "Carbuncle",
+    "surface": "carbuncle",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546572",
+    "form": "Catheter",
+    "surface": "catheter",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546574",
+    "form": "Cardiac muscle",
+    "surface": "cardiac muscle",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546576",
+    "form": "Conjunctiva",
+    "surface": "conjunctiva",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546577",
+    "form": "Cannula",
+    "surface": "cannula",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546578",
+    "form": "Colostrum",
+    "surface": "colostrum",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546588",
+    "form": "Curettage",
+    "surface": "curettage",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546592",
+    "form": "Cervix",
+    "surface": "cervix",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546594",
+    "form": "Cyst",
+    "surface": "cyst",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546601",
+    "form": "Discharge",
+    "surface": "discharge",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546602",
+    "form": "Diverticulum",
+    "surface": "diverticulum",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546604",
+    "form": "Drain",
+    "surface": "drain",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546608",
+    "form": "Ear",
+    "surface": "ear",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546613",
+    "form": "Effusion",
+    "surface": "effusion",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1546616",
+    "form": "Electrode",
+    "surface": "electrode",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546617",
+    "form": "Endocardium",
+    "surface": "endocardium",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546618",
+    "form": "Endometrium",
+    "surface": "endometrium",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546620",
+    "form": "Eosinophils",
+    "surface": "eosinophils",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546629",
+    "form": "Exudate",
+    "surface": "exudate",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546630",
+    "form": "Eye",
+    "surface": "eye",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546634",
+    "form": "Fibroblasts",
+    "surface": "fibroblasts",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546635",
+    "form": "Fistula",
+    "surface": "fistula",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546637",
+    "form": "Filter",
+    "surface": "filter",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1546638",
+    "form": "Fluid",
+    "surface": "fluid",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546642",
+    "form": "Furuncle",
+    "surface": "furuncle",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546643",
+    "form": "Gas",
+    "surface": "gas",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546653",
+    "form": "Graft",
+    "surface": "graft",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546654",
+    "form": "Granuloma",
+    "surface": "granuloma",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546660",
+    "form": "Hair",
+    "surface": "hair",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546678",
+    "form": "Insect",
+    "surface": "insect",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546682",
+    "form": "Intrauterine Device",
+    "surface": "intrauterine device",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546689",
+    "form": "Lavage",
+    "surface": "lavage",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546691",
+    "form": "Lamella",
+    "surface": "lamella",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546696",
+    "form": "Contact Lens",
+    "surface": "contact lens",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546698",
+    "form": "Lesion",
+    "surface": "lesion",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546701",
+    "form": "Line",
+    "surface": "line",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546705",
+    "form": "Lymphocytes",
+    "surface": "lymphocytes",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546706",
+    "form": "Macrophages",
+    "surface": "macrophages",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546708",
+    "form": "Marrow",
+    "surface": "marrow",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546709",
+    "form": "Mass",
+    "surface": "mass",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546710",
+    "form": "Menstrual blood",
+    "surface": "menstrual blood",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546711",
+    "form": "Meconium",
+    "surface": "meconium",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546713",
+    "form": "Milk",
+    "surface": "milk",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546714",
+    "form": "Mucus",
+    "surface": "mucus",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1546715",
+    "form": "Nail",
+    "surface": "nail",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546717",
+    "form": "Needle",
+    "surface": "needle",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1546728",
+    "form": "Pacemaker",
+    "surface": "pacemaker",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546739",
+    "form": "Plant Material",
+    "surface": "plant material",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546740",
+    "form": "Plasma",
+    "surface": "plasma",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1546742",
+    "form": "Placenta",
+    "surface": "placenta",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546747",
+    "form": "Polyps",
+    "surface": "polyps",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546758",
+    "form": "Pus",
+    "surface": "pus",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1546761",
+    "form": "Erythrocytes",
+    "surface": "erythrocytes",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546774",
+    "form": "Serum",
+    "surface": "serum",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546777",
+    "form": "Shunt",
+    "surface": "shunt",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546778",
+    "form": "Site",
+    "surface": "site",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1546780",
+    "form": "Skeletal muscle",
+    "surface": "skeletal muscle",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546781",
+    "form": "Skin",
+    "surface": "skin",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1546783",
+    "form": "Seminal fluid",
+    "surface": "seminal fluid",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546785",
+    "form": "Spermatozoa",
+    "surface": "spermatozoa",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546789",
+    "form": "Sputum",
+    "surface": "sputum",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546803",
+    "form": "Suture",
+    "surface": "suture",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1546835",
+    "form": "Family Planning",
+    "surface": "family planning",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546837",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546841",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1546844",
+    "form": "Emergency",
+    "surface": "emergency",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1546846",
+    "form": "Elective",
+    "surface": "elective",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1547010",
+    "form": "Appearance",
+    "surface": "appearance",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547013",
+    "form": "Class",
+    "surface": "class",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547017",
+    "form": "Consistency",
+    "surface": "consistency",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547019",
+    "form": "Device",
+    "surface": "device",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547032",
+    "form": "Morphology",
+    "surface": "morphology",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547043",
+    "form": "Shape",
+    "surface": "shape",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1547044",
+    "form": "Smell",
+    "surface": "smell",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547046",
+    "form": "Taste",
+    "surface": "taste",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547139",
+    "form": "Ambulatory",
+    "surface": "ambulatory",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547140",
+    "form": "Cancer",
+    "surface": "cancer",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547144",
+    "form": "Emergency",
+    "surface": "emergency",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1547179",
+    "form": "Fragmentation",
+    "surface": "fragmentation",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547197",
+    "form": "Home",
+    "surface": "home",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547198",
+    "form": "Office",
+    "surface": "office",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547218",
+    "form": "Malignant neoplasm",
+    "surface": "malignant neoplasm",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547226",
+    "form": "Moderate",
+    "surface": "moderate",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547229",
+    "form": "Acute",
+    "surface": "acute",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1547283",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547285",
+    "form": "Car",
+    "surface": "car",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547286",
+    "form": "Helicopter",
+    "surface": "helicopter",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547288",
+    "form": "Alcohol",
+    "surface": "alcohol",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547290",
+    "form": "Kava",
+    "surface": "kava",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547291",
+    "form": "Marijuana",
+    "surface": "marijuana",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547294",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547295",
+    "form": "Acute",
+    "surface": "acute",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547302",
+    "form": "Deaf",
+    "surface": "deaf",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547305",
+    "form": "Paraplegic",
+    "surface": "paraplegic",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547306",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547310",
+    "form": "Poor",
+    "surface": "poor",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547311",
+    "form": "Stable",
+    "surface": "stable",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547312",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547317",
+    "form": "Intolerance",
+    "surface": "intolerance",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1547327",
+    "form": "Address",
+    "surface": "address",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547503",
+    "form": "Dental procedures",
+    "surface": "dental procedures",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547537",
+    "form": "Department",
+    "surface": "department",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1547565",
+    "form": "Mail",
+    "surface": "mail",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547567",
+    "form": "Phone",
+    "surface": "phone",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1547570",
+    "form": "Voice",
+    "surface": "voice",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547579",
+    "form": "Callback",
+    "surface": "callback",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1547582",
+    "form": "Routine",
+    "surface": "routine",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547922",
+    "form": "Sweat",
+    "surface": "sweat",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547924",
+    "form": "Tears",
+    "surface": "tears",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547926",
+    "form": "Throat",
+    "surface": "throat",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547928",
+    "form": "Tissue",
+    "surface": "tissue",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547937",
+    "form": "Tubes",
+    "surface": "tubes",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547959",
+    "form": "Wash",
+    "surface": "wash",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547961",
+    "form": "Water",
+    "surface": "water",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547962",
+    "form": "Leukocytes",
+    "surface": "leukocytes",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1547963",
+    "form": "Wen",
+    "surface": "wen",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547964",
+    "form": "Wick",
+    "surface": "wick",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547965",
+    "form": "Wound",
+    "surface": "wound",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547969",
+    "form": "Worm",
+    "surface": "worm",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1547970",
+    "form": "Wart",
+    "surface": "wart",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1547985",
+    "form": "Hematology",
+    "surface": "hematology",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1547987",
+    "form": "Immunology",
+    "surface": "immunology",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1547989",
+    "form": "Nuclear Magnetic Resonance",
+    "surface": "nuclear magnetic resonance",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1547993",
+    "form": "Occupational Therapy",
+    "surface": "occupational therapy",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1547997",
+    "form": "Pharmacy",
+    "surface": "pharmacy",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1547999",
+    "form": "Physical Therapy",
+    "surface": "physical therapy",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1548003",
+    "form": "Radiograph",
+    "surface": "radiograph",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1548005",
+    "form": "Serology",
+    "surface": "serology",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548006",
+    "form": "Toxicology",
+    "surface": "toxicology",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548007",
+    "form": "Virology",
+    "surface": "virology",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548170",
+    "form": "No",
+    "surface": "no",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1548171",
+    "form": "Yes",
+    "surface": "yes",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548280",
+    "form": "Charge",
+    "surface": "charge",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548281",
+    "form": "Contract",
+    "surface": "contract",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1548281",
+    "form": "contract",
+    "surface": "contract",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1548284",
+    "form": "Grant",
+    "surface": "grant",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548286",
+    "form": "Professional",
+    "surface": "professional",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548287",
+    "form": "Research",
+    "surface": "research",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548309",
+    "form": "Date",
+    "surface": "date",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1548318",
+    "form": "Time",
+    "surface": "time",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548327",
+    "form": "Characters",
+    "surface": "characters",
+    "confidence": 0.93
+  },
+  {
+    "cui": "C1548330",
+    "form": "Records",
+    "surface": "records",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1548341",
+    "form": "Home",
+    "surface": "home",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1548343",
+    "form": "Phone",
+    "surface": "phone",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548344",
+    "form": "Teaching",
+    "surface": "teaching",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548353",
+    "form": "Family planning",
+    "surface": "family planning",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548354",
+    "form": "Intensive care",
+    "surface": "intensive care",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548355",
+    "form": "Isolation",
+    "surface": "isolation",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548358",
+    "form": "Observation",
+    "surface": "observation",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548443",
+    "form": "ADD",
+    "surface": "add",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1548446",
+    "form": "LINK",
+    "surface": "link",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1548449",
+    "form": "UPDATE",
+    "surface": "update",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548543",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548550",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1548567",
+    "form": "Update",
+    "surface": "update",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548604",
+    "form": "Guarantor",
+    "surface": "guarantor",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548761",
+    "form": "Biohazard",
+    "surface": "biohazard",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1548763",
+    "form": "Corrosive",
+    "surface": "corrosive",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1548765",
+    "form": "Explosive",
+    "surface": "explosive",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1549062",
+    "form": "No",
+    "surface": "no",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1549064",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1549065",
+    "form": "Yes",
+    "surface": "yes",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1549081",
+    "form": "Termination",
+    "surface": "termination",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1549113",
+    "form": "Single",
+    "surface": "single",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1549115",
+    "form": "Unknown",
+    "surface": "unknown",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1549435",
+    "form": "Nurse Practitioner",
+    "surface": "nurse practitioner",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1549438",
+    "form": "Radiologist",
+    "surface": "radiologist",
+    "confidence": 0.88
+  },
+  {
+    "cui": "C1549439",
+    "form": "Resident",
+    "surface": "resident",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1549478",
+    "form": "Differential",
+    "surface": "differential",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1549513",
+    "form": "Preference",
+    "surface": "preference",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1549514",
+    "form": "Supplement",
+    "surface": "supplement",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1549756",
+    "form": "VISA",
+    "surface": "visa",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1549773",
+    "form": "Update",
+    "surface": "update",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1550112",
+    "form": "Body temperature",
+    "surface": "body temperature",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1550118",
+    "form": "Dry",
+    "surface": "dry",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1550121",
+    "form": "Liquid nitrogen",
+    "surface": "liquid nitrogen",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1550127",
+    "form": "Upright",
+    "surface": "upright",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1550616",
+    "form": "Bone",
+    "surface": "bone",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1550622",
+    "form": "Cannula",
+    "surface": "cannula",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1550631",
+    "form": "Electrode",
+    "surface": "electrode",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1550638",
+    "form": "Filter",
+    "surface": "filter",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1550639",
+    "form": "Fistula",
+    "surface": "fistula",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1550655",
+    "form": "Patient",
+    "surface": "patient",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1550663",
+    "form": "Throat",
+    "surface": "throat",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1550680",
+    "form": "Wound",
+    "surface": "wound",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1551336",
+    "form": "act",
+    "surface": "act",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1551341",
+    "form": "Section",
+    "surface": "section",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1552020",
+    "form": "part",
+    "surface": "part",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1552617",
+    "form": "Review",
+    "surface": "review",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1552617",
+    "form": "review",
+    "surface": "review",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1552652",
+    "form": "Set",
+    "surface": "set",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1552654",
+    "form": "Interval",
+    "surface": "interval",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1552822",
+    "form": "left",
+    "surface": "left",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1552823",
+    "form": "right",
+    "surface": "right",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1552826",
+    "form": "middle",
+    "surface": "middle",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1552827",
+    "form": "top",
+    "surface": "top",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1553384",
+    "form": "registration",
+    "surface": "registration",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1553411",
+    "form": "Characters",
+    "surface": "characters",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1553414",
+    "form": "Records",
+    "surface": "records",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1554100",
+    "form": "Code",
+    "surface": "code",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1554105",
+    "form": "Indicator",
+    "surface": "indicator",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1554112",
+    "form": "Value",
+    "surface": "value",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1554161",
+    "form": "Training",
+    "surface": "training",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1554162",
+    "form": "Archive",
+    "surface": "archive",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1554204",
+    "form": "access",
+    "surface": "access",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1555308",
+    "form": "accession",
+    "surface": "accession",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1555580",
+    "form": "mask",
+    "surface": "mask",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1555587",
+    "form": "provider",
+    "surface": "provider",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1555588",
+    "form": "location",
+    "surface": "location",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1555685",
+    "form": "payee",
+    "surface": "payee",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1555710",
+    "form": "composition",
+    "surface": "composition",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1561444",
+    "form": "Racing",
+    "surface": "racing",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1561495",
+    "form": "specimen",
+    "surface": "specimen",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1561514",
+    "form": "Mucosa",
+    "surface": "mucosa",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1561527",
+    "form": "Information",
+    "surface": "information",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1561528",
+    "form": "Information",
+    "surface": "information",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561538",
+    "form": "day",
+    "surface": "day",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C1561540",
+    "form": "week",
+    "surface": "week",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1561543",
+    "form": "year",
+    "surface": "year",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561547",
+    "form": "Medium",
+    "surface": "medium",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561552",
+    "form": "elective",
+    "surface": "elective",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1561583",
+    "form": "Emergency",
+    "surface": "emergency",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561603",
+    "form": "CLIP",
+    "surface": "clip",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561606",
+    "form": "Blind",
+    "surface": "blind",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1561609",
+    "form": "taboo",
+    "surface": "taboo",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1561958",
+    "form": "High",
+    "surface": "high",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1561960",
+    "form": "period",
+    "surface": "period",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1563337",
+    "form": "document",
+    "surface": "document",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1570167",
+    "form": "hAM",
+    "surface": "ham",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1571737",
+    "form": "Laboratory",
+    "surface": "laboratory",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1578485",
+    "form": "Patient",
+    "surface": "patient",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1578486",
+    "form": "Patient",
+    "surface": "patient",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1578499",
+    "form": "Radiation Therapy",
+    "surface": "radiation therapy",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1578706",
+    "form": "Tumor",
+    "surface": "tumor",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C1610034",
+    "form": "Quality Control",
+    "surface": "quality control",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1610547",
+    "form": "Pleasure",
+    "surface": "pleasure",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1704339",
+    "form": "instrumentation",
+    "surface": "instrumentation",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1705811",
+    "form": "Role",
+    "surface": "role",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1705912",
+    "form": "Property",
+    "surface": "property",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1706427",
+    "form": "Concept",
+    "surface": "concept",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C1707070",
+    "form": "caM",
+    "surface": "cam",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1709941",
+    "form": "Reviewer",
+    "surface": "reviewer",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C1830036",
+    "form": "OASIS",
+    "surface": "oasis",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1880497",
+    "form": "Empty",
+    "surface": "empty",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1880497",
+    "form": "Free",
+    "surface": "free",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1881376",
+    "form": "Light",
+    "surface": "light",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1948059",
+    "form": "Constant",
+    "surface": "constant",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C1961129",
+    "form": "uV",
+    "surface": "uv",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C2347818",
+    "form": "Coding system",
+    "surface": "coding system",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C2347818",
+    "form": "coding system",
+    "surface": "coding system",
+    "confidence": 0.9
+  },
+  {
+    "cui": "C2349948",
+    "form": "Lingual",
+    "surface": "lingual",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C2911689",
+    "form": "Fair",
+    "surface": "fair",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C2937276",
+    "form": "Slight",
+    "surface": "slight",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C2937276",
+    "form": "slight",
+    "surface": "slight",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C2939193",
+    "form": "Median",
+    "surface": "median",
+    "confidence": 0.85
+  },
+  {
+    "cui": "C2945608",
+    "form": "boring",
+    "surface": "boring",
+    "confidence": 0.92
+  },
+  {
+    "cui": "C3244299",
+    "form": "transfer",
+    "surface": "transfer",
+    "confidence": 0.95
+  },
+  {
+    "cui": "C3715043",
+    "form": "ARIA",
+    "surface": "aria",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C3887624",
+    "form": "cALLa",
+    "surface": "calla",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C3889432",
+    "form": "iCE",
+    "surface": "ice",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C3889585",
+    "form": "Mood",
+    "surface": "mood",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C4050019",
+    "form": "cPR",
+    "surface": "cpr",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4281780",
+    "form": "Attention",
+    "surface": "attention",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4281800",
+    "form": "Voice",
+    "surface": "voice",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4282129",
+    "form": "Memory",
+    "surface": "memory",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4285072",
+    "form": "mN",
+    "surface": "mn",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4321287",
+    "form": "gB",
+    "surface": "gb",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4552849",
+    "form": "haNK",
+    "surface": "hank",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C4723852",
+    "form": "hICK",
+    "surface": "hick",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4724445",
+    "form": "sLE",
+    "surface": "sle",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4724727",
+    "form": "GRID",
+    "surface": "grid",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5445266",
+    "form": "mS",
+    "surface": "ms",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5552694",
+    "form": "ID",
+    "surface": "id",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5555460",
+    "form": "recAP",
+    "surface": "recap",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5575684",
+    "form": "GENIE",
+    "surface": "genie",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5706871",
+    "form": "ORCHESTRA",
+    "surface": "orchestra",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5849123",
+    "form": "gENE",
+    "surface": "gene",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5959043",
+    "form": "IIS",
+    "surface": "iis",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5966192",
+    "form": "treats",
+    "surface": "treats",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C5979896",
+    "form": "Patent",
+    "surface": "patent",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5980117",
+    "form": "Generic",
+    "surface": "generic",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5981545",
+    "form": "Exclusive",
+    "surface": "exclusive",
+    "confidence": 0.97
+  }
+]

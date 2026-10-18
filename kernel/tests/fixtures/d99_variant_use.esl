@@ -1,0 +1,29 @@
+// D99 §3 — using claim 6. One layer above `d99_variant.esl`, so the claim's Declared witness is
+// in a committed parent.
+
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace core          = "urn:eigenius:core";
+namespace variant       = "urn:eigenius:variant";
+namespace syn           = "urn:eigenius:test:syngene";
+
+// Instantiating the existential's `R` at a proposition — `instantiate` is typed `T : Type 1`, and
+// whether it admits `T = Prop` is what this pins (D99 §3).
+resource syn:claim_6_at_pro : justification:Conclusion {
+    core:description = "Claim 6 with R := Responsive(p.Leu44Pro).";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(instantiate(
+                   (syn:Responsive(syn:p_Leu44Pro) : Prop),
+                   declared(
+                       "urn:eigenius:test:syngene:claim_6",
+                       forall (R : Prop) =>
+                           (forall (q : exists q : variant:ProteinAllele => variant:At(q, syn:Leu44)) =>
+                               syn:Responsive(eigentt:fst(q)) -> R)
+                           -> R,
+                       ()))),
+               type_expr(justification:Grounds(
+                   (forall (q : exists q : variant:ProteinAllele => variant:At(q, syn:Leu44)) =>
+                       syn:Responsive(eigentt:fst(q)) -> syn:Responsive(syn:p_Leu44Pro))
+                   -> syn:Responsive(syn:p_Leu44Pro))) );
+}

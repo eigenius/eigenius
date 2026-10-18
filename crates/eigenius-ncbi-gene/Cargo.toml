@@ -1,0 +1,15 @@
+[package]
+name = "eigenius-ncbi-gene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import NCBI Gene (Entrez) into Eigenius: a faithful typed mirror of gene_info (ncbi:Gene witnesses, anchored to WordNet gene.n.01 + lexicon:Entity) plus a derived domain lexicon (symbol + synonyms → named-entity NP entries, tagged lexicon:ncbi_gene). Deterministic; no LLM (D65 §5)."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "ncbi-gene-import"
+path = "src/bin/ncbi_gene_import.rs"

@@ -1,0 +1,460 @@
+[
+  {
+    "@id": "urn:eigenius:institution:Institution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A registered domain institution that provides fiber reasoning over the shared Eigon signature category.",
+    "urn:eigenius:core:short_name": "Institution",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:institution_iri",
+      "urn:eigenius:institution:institution_name"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:implementation",
+      "urn:eigenius:institution:wasm_binary",
+      "urn:eigenius:institution:wasm_binary_ref",
+      "urn:eigenius:institution:fuel_limit",
+      "urn:eigenius:institution:memory_limit_pages"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:implementation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Implementation type: 'builtin' for native Rust institutions, 'wasm' for WASM extensions.",
+    "urn:eigenius:core:short_name": "implementation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:wasm_binary",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Inline WASM Component Model binary (base64-encoded bytes) for a wasm institution.",
+    "urn:eigenius:core:short_name": "wasm_binary",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:wasm_binary_ref",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the WASM binary in blob storage for a wasm institution.",
+    "urn:eigenius:core:short_name": "wasm_binary_ref",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:fuel_limit",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum Wasmtime fuel units per invocation. Default 10,000,000.",
+    "urn:eigenius:core:short_name": "fuel_limit",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:memory_limit_pages",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum linear memory size in 64KB pages per instance. Default 1024 = 64 MB.",
+    "urn:eigenius:core:short_name": "memory_limit_pages",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:institution_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The IRI identifying this institution.",
+    "urn:eigenius:core:short_name": "institution_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:institution_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Human-readable name of the institution.",
+    "urn:eigenius:core:short_name": "institution_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:institution_ref",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Reference to the institution that owns this morphism or query type.",
+    "urn:eigenius:core:short_name": "institution_ref",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:verdict_subject",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Resource the Verdict was rendered for — the gated subject for an AutoOnLoad firing, or the reified resource for a post-translation verdict (D31 §6.3).",
+    "urn:eigenius:core:short_name": "verdict_subject",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:verdict_query_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "QueryClass that produced this Verdict. Lifted onto the Verdict so audit queries (`all Verdicts for QueryClass X`) are property-based without re-resolving the dispatch path.",
+    "urn:eigenius:core:short_name": "verdict_query_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:runtime_invocation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "RuntimeInvocation that produced this Verdict. Set when the dispatching institution was external-runtime (D31 §6.3); absent for in-process / WASM dispatches whose provenance is program-trace-only.",
+    "urn:eigenius:core:short_name": "runtime_invocation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:diagnostic",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional language-side diagnostic message attached to a Fails Verdict (D31 §6.3) — surfaces the institution's reason-for-rejection without forcing it into the Verdict's typed shape.",
+    "urn:eigenius:core:short_name": "diagnostic",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+
+  {
+    "@id": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Verdict",
+    "urn:eigenius:core:description": "Tri-state outcome of an institution-bound predicate query (D14 §6.1). `Holds` reduces a NativeDecide to `Refl(v)` or accepts a Load; `Fails` produces a failing neutral or rejects a Load; `Undecidable` leaves the constraint as a passthrough or accepts on Load with no domain commitment. Requires the two halves every committed Verdict already carries — which constructor it is, and what it was rendered for — because a Verdict missing either is not readable as a verdict at all. Recommends the audit slots. This is also the base of the D90 result contract: a QueryClass's `result_class` is checked at the boundary against what the institution returned, so what THIS class and its subclasses declare is the whole of what an institution may send back.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:ctor_name",
+      "urn:eigenius:institution:verdict_subject"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:verdict_query_class",
+      "urn:eigenius:institution:runtime_invocation",
+      "urn:eigenius:institution:diagnostic"
+    ],
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Holds"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Fails"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Undecidable"
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:RuntimeKind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Marker class for the runtime kind by which the kernel reaches an Institution: WASM-hosted, external service, or in-process Rust.",
+    "urn:eigenius:core:short_name": "RuntimeKind"
+  },
+  {
+    "@id": "urn:eigenius:institution:runtimes:wasm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:RuntimeKind"],
+    "urn:eigenius:core:short_name": "wasm",
+    "urn:eigenius:core:description": "WASM Component Model binary hosted in the kernel via Wasmtime."
+  },
+  {
+    "@id": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:RuntimeKind"],
+    "urn:eigenius:core:short_name": "external",
+    "urn:eigenius:core:description": "External service reached via gRPC, LSP, or another network protocol (e.g. a Lean 4 server)."
+  },
+  {
+    "@id": "urn:eigenius:institution:runtimes:in_process",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:RuntimeKind"],
+    "urn:eigenius:core:short_name": "in_process",
+    "urn:eigenius:core:description": "In-process Rust trait object linked into the kernel binary."
+  },
+
+  {
+    "@id": "urn:eigenius:institution:DispatchRole",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Marker class for the operational profile of a QueryClass: explicit invocation (OnDemand), automatic firing on Load (AutoOnLoad), or referenced from Exp::NativeDecide (Decidable).",
+    "urn:eigenius:core:short_name": "DispatchRole"
+  },
+  {
+    "@id": "urn:eigenius:institution:dispatch_roles:on_demand",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:DispatchRole"],
+    "urn:eigenius:core:short_name": "on_demand",
+    "urn:eigenius:core:description": "Fired on explicit invocation: EigenQL FIBER clause (D2 v2 §3.5)."
+  },
+  {
+    "@id": "urn:eigenius:institution:dispatch_roles:auto_on_load",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:DispatchRole"],
+    "urn:eigenius:core:short_name": "auto_on_load",
+    "urn:eigenius:core:description": "Fired automatically when a resource of the bound query_class enters the layer chain via Load. Result_class must be Verdict; Fails aborts the Load."
+  },
+  {
+    "@id": "urn:eigenius:institution:dispatch_roles:decidable",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:DispatchRole"],
+    "urn:eigenius:core:short_name": "decidable",
+    "urn:eigenius:core:description": "Referenced from Exp::NativeDecide(Constraint::Institution {..}) and fired during type-check reduction. Result_class must be Verdict."
+  },
+
+  {
+    "@id": "urn:eigenius:institution:ExportFormat",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A typed outbound view that an institution publishes for one of its resource classes (D14 §4.2). Pairs a from_class with a EigenTT payload type and the institution's extract_typed procedure.",
+    "urn:eigenius:core:short_name": "ExportFormat",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:from_class",
+      "urn:eigenius:institution:payload_type",
+      "urn:eigenius:institution:institution_ref",
+      "urn:eigenius:institution:procedure"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:from_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The resource class an ExportFormat extracts from.",
+    "urn:eigenius:core:short_name": "from_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:ExportFormat"]
+  },
+  {
+    "@id": "urn:eigenius:institution:to_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The resource class an ImportFormat constructs.",
+    "urn:eigenius:core:short_name": "to_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:ImportFormat"]
+  },
+  {
+    "@id": "urn:eigenius:institution:payload_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The EigenTT type of the typed payload an ExportFormat produces or an ImportFormat consumes. May reference a primitive type (e.g. `core:float`), an InductiveType (e.g. `Verdict`), or a CodataType.",
+    "urn:eigenius:core:short_name": "payload_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:institution:ExportFormat",
+      "urn:eigenius:institution:ImportFormat"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:procedure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI dispatched to the institution's runtime handler for this format. Identifies the boundary procedure the institution must implement (extract_typed for an ExportFormat, reify for an ImportFormat).",
+    "urn:eigenius:core:short_name": "procedure",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:institution:ExportFormat",
+      "urn:eigenius:institution:ImportFormat"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:ImportFormat",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A typed inbound constructor that an institution publishes for one of its resource classes (D14 §4.3). Pairs a to_class with a EigenTT payload type and the institution's reify procedure.",
+    "urn:eigenius:core:short_name": "ImportFormat",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:to_class",
+      "urn:eigenius:institution:payload_type",
+      "urn:eigenius:institution:institution_ref",
+      "urn:eigenius:institution:procedure"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:QueryClass",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A typed function in the institution's fibre — input class to output class — with one or more dispatch roles (D14 §4.4, §6). Subsumes the former validate_morphism / decide / discover_morphisms primitives; the difference between them is the dispatch_role, not the primitive. INBOUND, the kernel guarantees that a subject reaching the handler has already been through the validation rules and the retroactive cascade: dispatch runs after both in the commit pipeline, and a test pins that order rather than leaving it to be discovered when someone moves a phase. An institution therefore never has to re-check that its input is well formed against its declared query_class. OUTBOUND, the institution states what it returns — `result_class` plus `result_properties` for the properties, `permitted_verdicts` for the constructors — and the kernel checks the output against that declaration at the boundary (D90).",
+    "urn:eigenius:core:short_name": "QueryClass",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:query_class",
+      "urn:eigenius:institution:result_class",
+      "urn:eigenius:institution:dispatch_role",
+      "urn:eigenius:institution:query_handler",
+      "urn:eigenius:institution:institution_ref"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:result_properties",
+      "urn:eigenius:institution:permitted_verdicts"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:query_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The class of input resources this QueryClass takes. Dispatch keys on this class IRI.",
+    "urn:eigenius:core:short_name": "query_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:result_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The class of result resources this QueryClass produces. Must be Verdict when dispatch_role contains AutoOnLoad or Decidable; Verdict is an InductiveType, so this property accepts both Class and InductiveType references.",
+    "urn:eigenius:core:short_name": "result_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:dispatch_role",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "One or more dispatch roles for this QueryClass: on_demand (explicit invocation), auto_on_load (fires on every Load of a query_class instance), decidable (consumed by Exp::NativeDecide). A single QueryClass may declare multiple roles; the kernel routes each accordingly.",
+    "urn:eigenius:core:short_name": "dispatch_role",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:DispatchRole"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:institution:dispatch_roles:on_demand",
+      "urn:eigenius:institution:dispatch_roles:auto_on_load",
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:result_properties",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The properties this QueryClass's verdict may carry BEYOND what its result_class declares. This is where an institution says what it sends back (D90). The contract is closed by default: at the dispatch boundary, a property the institution set on its verdict must be declared by the result class or listed here, or the dispatch is refused. It lives on the QueryClass rather than on a Verdict subclass because Rule 25 closes an inductive — `institution:Verdict` is one, so no later layer may subclass it — and because two QueryClasses of one institution legitimately return different property sets. Each entry must resolve to a declared core:Property, so the range that property declares is what Rule 21 then checks the value against at commit.",
+    "urn:eigenius:core:short_name": "result_properties",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:permitted_verdicts",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The verdict constructors this QueryClass may return. Absent means all three, which is what every QueryClass meant before D90. Declared because a governance institution's refusal is not a rejection: below a commitment threshold means DO NOT COMMIT to the proposition, not THIS CHAIN IS INVALID, so such a QueryClass must return Holds or Undecidable and never Fails. Checked at the dispatch boundary against what the institution actually returned. The entries are the constructor classes D85 §6.1 materialises per `core:ctors` entry, which is what `allows_only` can range over.",
+    "urn:eigenius:core:short_name": "permitted_verdicts",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:institution:Verdict-Holds",
+      "urn:eigenius:institution:Verdict-Fails",
+      "urn:eigenius:institution:Verdict-Undecidable"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:query_handler",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the query implementation. Either a kernel-registered Component (the kernel handles the call entirely via extract → component → reify) or an institution-runtime procedure dispatched to the institution's `query` handler.",
+    "urn:eigenius:core:short_name": "query_handler",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:Comorphism",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A cross-institution translation realised as the triple (s, m, t) — an ExportFormat from the source institution, a EigenTT Component as the typed middle, and an ImportFormat from the target institution (D14 §5). Owned by no single institution; aggregates contributions from source, EigenTT, and target. The kernel statically type-checks the Component's signature against the export and import payload types at commit time.",
+    "urn:eigenius:core:short_name": "Comorphism",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:export_format",
+      "urn:eigenius:institution:transformation",
+      "urn:eigenius:institution:import_format"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:exact"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:export_format",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The ExportFormat by which the source institution exposes its source-class resources as a typed payload.",
+    "urn:eigenius:core:short_name": "export_format",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:transformation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Reference to the EigenTT expression (typed term) implementing the comorphism's typed middle m: S → T. **Not an opaque Component IRI — a typed term.** The natural shape is `program:Lambda` whose body is a typed expression: pure transformations (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius) bottom at composed primitive expression forms; institution-runtime transformations bottom at a `program:Component` reference (an expression form, dispatched into the institution's worker). The kernel verifies at commit time that the term's type equals (payload_type(export_format)) → (payload_type(import_format)).",
+    "urn:eigenius:core:short_name": "transformation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:program:Lambda",
+      "urn:eigenius:program:Apply",
+      "urn:eigenius:program:Component",
+      "urn:eigenius:program:Let",
+      "urn:eigenius:program:Var",
+      "urn:eigenius:program:Case",
+      "urn:eigenius:program:Pair",
+      "urn:eigenius:program:Construct",
+      "urn:eigenius:program:Project",
+      "urn:eigenius:program:Map",
+      "urn:eigenius:program:Reduce",
+      "urn:eigenius:program:Literal"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:import_format",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The ImportFormat by which the target institution constructs target-class resources from a typed payload.",
+    "urn:eigenius:core:short_name": "import_format",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:exact",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Whether this comorphism preserves model amalgamation in the sense of Diaconescu (2025, Thm. 14.15 + Prop. 14.14). Absent or false is the safe default; only an explicit true is an exactness claim. Inexact comorphisms (e.g. IC50 ≈ exp(-ΔG/RT) ignoring entropic / solvent effects) are useful and intentional, but cross-institution query results that traverse them carry provenance recording the loss of amalgamation guarantees.",
+    "urn:eigenius:core:short_name": "exact",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:runtime",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the runtime kind by which the kernel reaches this Institution. Determines dispatch policy: WASM-hosted (Wasmtime), external service (gRPC / LSP), or in-process Rust.",
+    "urn:eigenius:core:short_name": "runtime",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:RuntimeKind"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:institution:runtimes:wasm",
+      "urn:eigenius:institution:runtimes:external",
+      "urn:eigenius:institution:runtimes:in_process"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:EmittedDerivation",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries institution:from_subject (the gated subject), institution:runtime_invocation (the producing invocation) and eigentt:proposition (what it computed).",
+    "urn:eigenius:core:short_name": "InstitutionEmittedDerivation",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:from_subject"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:runtime_invocation",
+      "urn:eigenius:eigentt:proposition"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:from_subject",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The gated subject (analysis spec, claim, etc.) the institution ran against to produce this derivation. Lets the per-derivation resource be navigated back to the resource that triggered its emission.",
+    "urn:eigenius:core:short_name": "from_subject",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:runtime_invocation",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "Back-pointer to the producing `runtime:RuntimeInvocation` on an InstitutionEmittedDerivation. The RuntimeInvocation in turn carries `runtime:output` pointing at this derivation, completing the bidirectional provenance link.",
+    "urn:eigenius:core:short_name": "runtime_invocation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  }
+]

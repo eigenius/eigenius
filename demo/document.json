@@ -1,0 +1,23 @@
+[
+  {
+    "@id": "urn:eigenius:demo:Document",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A text document for analysis.",
+    "urn:eigenius:core:short_name": "Document",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:text"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:text",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The text content of a document.",
+    "urn:eigenius:core:short_name": "text",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:demo:doc-001",
+    "urn:eigenius:core:is_a": ["urn:eigenius:demo:Document"],
+    "urn:eigenius:demo:text": "Eigenius is a typed knowledge graph platform designed for AI-driven science and engineering. It combines dependent type theory with a four-level epistemic model (declared, observed, derived, verified) to track the provenance and certainty of every piece of knowledge. Programs are typed expressions that compose pure computations with IO components like LLM calls, and every execution produces a tree-structured reasoning trace that serves as both a memoization cache and a complete audit trail."
+  }
+]

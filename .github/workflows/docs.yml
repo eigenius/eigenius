@@ -1,0 +1,58 @@
+name: Deploy website
+
+# Builds the Astro + Starlight site at `website/` and deploys it to
+# GitHub Pages. The previous MkDocs-based workflow has been
+# superseded by this; the source content lives in
+# `website/src/content/docs/` and the landing page in
+# `website/src/pages/index.astro`.
+
+on:
+  push:
+    branches:
+      - main
+  # Allow manual re-deploys from the Actions tab without a new commit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Don't queue concurrent deploys; the last commit on `main` wins.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Build Astro site
+        working-directory: website
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

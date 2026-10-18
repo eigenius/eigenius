@@ -1,0 +1,85 @@
+---
+// The "Writing" module on the landing page. Renders whatever
+// `getFeaturedEntry()` returns: a series is presented as a series and
+// entered at Part I; a standalone post is presented as itself.
+//
+// Renders nothing when the blog is empty, so the landing page never
+// shows an empty section.
+import PostCard from "./PostCard.astro";
+import {
+  getFeaturedEntry,
+  entryEntryPoint,
+  formatDate,
+  formatPart,
+  spellCount,
+  isoDate,
+} from "../lib/posts";
+
+const entry = await getFeaturedEntry();
+const lead = entry ? entryEntryPoint(entry) : null;
+---
+
+{
+  entry && lead && (
+    <section class="section section-writing">
+      <div class="section-inner">
+        <span class="section-eyebrow">Writing</span>
+
+        {entry.kind === "series" ? (
+          <>
+            <h2 class="section-title">
+              {entry.name} — a {spellCount(entry.posts.length)}-part introduction.
+            </h2>
+            <p class="section-prose">{lead.data.description}</p>
+
+            <ol class="featured-parts">
+              {entry.posts.map((post) => (
+                <li class="featured-part">
+                  <a class="featured-part-link" href={`/blog/${post.id}/`}>
+                    <span class="featured-part-number">
+                      Part {formatPart(post.data.series!.part)}
+                    </span>
+                    <span class="featured-part-title">{post.data.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+
+            <p class="hero-actions">
+              <a class="cta cta-primary" href={`/blog/${lead.id}/`}>
+                Start with Part {formatPart(lead.data.series!.part)}
+              </a>
+              <a class="cta cta-secondary" href="/blog/">
+                All writing
+              </a>
+            </p>
+          </>
+        ) : (
+          <>
+            <h2 class="section-title">Latest from the blog.</h2>
+            <div class="featured-post">
+              <PostCard post={lead} />
+            </div>
+            <p class="hero-actions">
+              <a class="cta cta-primary" href={`/blog/${lead.id}/`}>
+                Read it
+              </a>
+              <a class="cta cta-secondary" href="/blog/">
+                All writing
+              </a>
+            </p>
+          </>
+        )}
+
+        <p class="featured-updated">
+          Last updated{" "}
+          <time datetime={isoDate(entry.sortDate)}>
+            {formatDate(entry.sortDate)}
+          </time>
+          {" · "}
+          <a href="/rss.xml">RSS</a>
+        </p>
+      </div>
+    </section>
+  )
+}

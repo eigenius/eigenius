@@ -1,0 +1,231 @@
+[
+  {
+    "@id": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OptimisationProblem",
+    "urn:eigenius:core:description": "A mathematical-programming problem `min/max f(x) s.t. g_i(x) ⋄ b_i, l ≤ x ≤ u` lifted onto the chain. The objective and each constraint LHS are `formulas:FormulaTerm`-typed expressions over the variable names; the relation discriminator on each constraint (`LE | GE | EQ`) is a chain-typed inductive (`ConstraintRelation`); per-variable bounds are an optional list of `VariableBound` resources. The institution rebuilds a `JuMP.Model` at dispatch time by walking each FormulaTerm under a JuMP-expression interpreter (`+` / `*` / `^` over `JuMP.VariableRef` produces `AffExpr` / `QuadExpr`; integer-valued `LitFloat` exponents on `pow` unroll to repeated multiplication so HiGHS sees `QuadExpr` rather than `NonlinearExpr`). Not a claim — no AutoOnLoad gate fires on commit; only `OptimisesTo` claims about a problem trigger validation. See D27 §4.2.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:jump:variable_names",
+      "urn:eigenius:jump:objective",
+      "urn:eigenius:jump:sense"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:jump:variable_bounds",
+      "urn:eigenius:jump:constraints"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:jump:variable_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_names",
+    "urn:eigenius:core:description": "Decision-variable names in canonical positional order. Free `Var(name)` references in `objective` and any `constraints[*].lhs` must appear in this list (or be the trivial-numeric case where no variables are referenced). Length determines the problem's variable count; per-variable bounds attach by name via `variable_bounds`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisationProblem"]
+  },
+  {
+    "@id": "urn:eigenius:jump:variable_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_bounds",
+    "urn:eigenius:core:description": "Per-variable box constraints. Each `VariableBound` carries a `variable_name` (must appear in the enclosing `OptimisationProblem.variable_names`) plus optional `lower` / `upper` floats. Variables not mentioned in this list are unbounded. Bounds are strictly preferred over `Constraint(LE, x, k)`-style hand-rolled constraints — JuMP applies them at variable construction time, which produces tighter solver behaviour for LP/QP.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:VariableBound"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisationProblem"]
+  },
+  {
+    "@id": "urn:eigenius:jump:objective",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective",
+    "urn:eigenius:core:description": "The objective FormulaTerm. Free vars are the variable names from the enclosing `OptimisationProblem.variable_names`; operators are the chain-committed catalog at `urn:eigenius:formulas:ops:*`. Multi-arg operators are curried via left-spined `App`s (D32 §4.1). The institution's smart-pow walker recognises `pow(x, LitFloat(2.0))` and unrolls it to `x*x` so the JuMP type check produces `QuadExpr` rather than `NonlinearExpr` — the difference between HiGHS solving the problem and HiGHS rejecting it.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisationProblem"]
+  },
+  {
+    "@id": "urn:eigenius:jump:sense",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "sense",
+    "urn:eigenius:core:description": "Optimisation sense — `Min` or `Max`. Maps directly to JuMP's `MIN_SENSE` / `MAX_SENSE` enum at `@objective(model, sense, expr)` time. `Min` is the canonical convention (any maximisation rewrites to minimisation by negating the objective), but carrying the sense explicitly avoids forcing a global rewrite on every chain-author who writes a maximisation problem.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisationProblem"]
+  },
+  {
+    "@id": "urn:eigenius:jump:constraints",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "constraints",
+    "urn:eigenius:core:description": "Ordered list of `Constraint` wrappers, each carrying a FormulaTerm LHS, a `ConstraintRelation` discriminator (`LE | GE | EQ`), and a Float64 RHS. The institution walks each LHS under the same JuMP-expression interpreter as the objective and dispatches `@constraint(model, lhs ⋄ rhs)` accordingly. May be empty (an unconstrained problem with only variable bounds is well-posed).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:Constraint"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisationProblem"]
+  },
+
+  {
+    "@id": "urn:eigenius:jump:VariableBound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "VariableBound",
+    "urn:eigenius:core:description": "Per-variable box-constraint declaration. Attached to an `OptimisationProblem` via its `variable_bounds` list. At least one of `lower` / `upper` should be set (a bound resource with neither is structurally legal but operationally vacuous — JuMP would build the variable as fully unbounded). Bound resources whose `variable_name` doesn't appear in the enclosing problem's `variable_names` are reported as `Fails` at the institution's gate.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:jump:variable_name"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:jump:lower",
+      "urn:eigenius:jump:upper"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:jump:variable_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_name",
+    "urn:eigenius:core:description": "The bounded variable's name, matching one entry in the enclosing `OptimisationProblem.variable_names`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:VariableBound"]
+  },
+  {
+    "@id": "urn:eigenius:jump:lower",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lower",
+    "urn:eigenius:core:description": "Lower bound `l_i` on the named variable. Forwarded to JuMP's `set_lower_bound(x, l)` (or the `@variable(model, l <= x)` macro).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:VariableBound"]
+  },
+  {
+    "@id": "urn:eigenius:jump:upper",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "upper",
+    "urn:eigenius:core:description": "Upper bound `u_i` on the named variable. Forwarded to JuMP's `set_upper_bound(x, u)` (or the `@variable(model, x <= u)` macro).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:VariableBound"]
+  },
+
+  {
+    "@id": "urn:eigenius:jump:Constraint",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Constraint",
+    "urn:eigenius:core:description": "One algebraic constraint of the form `g(x) ⋄ b` where `g` is a FormulaTerm over the variables, `⋄` is one of `LE | GE | EQ` (chain-typed `ConstraintRelation` inductive), and `b` is a Float64 RHS. A Constraint resource is a wrapper class — its three required fields are the constraint's content. The institution dispatches `@constraint(model, lhs_jump ⋄ rhs)` after walking `lhs` to a JuMP expression.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:jump:lhs",
+      "urn:eigenius:jump:relation",
+      "urn:eigenius:jump:rhs"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:jump:lhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lhs",
+    "urn:eigenius:core:description": "Constraint left-hand-side as a FormulaTerm over the enclosing problem's variable names. Operators are the chain-committed catalog at `urn:eigenius:formulas:ops:*`. The smart-pow walker rule applies here too — a `pow(x, 2.0)` on a constraint LHS unrolls to `x*x` so a quadratic constraint stays in `QuadExpr` territory rather than promoting to `NonlinearExpr`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:Constraint"]
+  },
+  {
+    "@id": "urn:eigenius:jump:relation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "relation",
+    "urn:eigenius:core:description": "Constraint relation discriminator: `LE` for `lhs ≤ rhs`, `GE` for `lhs ≥ rhs`, `EQ` for `lhs == rhs`. A chain-typed inductive (`ConstraintRelation`) rather than a string field — the validator type-checks the value against the inductive's ctor schema and rejects malformed payloads at commit, which a string field would let slide. Strict inequalities are deliberately not in v1: numerical solvers don't distinguish strict vs. non-strict (the strict version is approximated by `lhs ≤ rhs - ε`); committing to the discrete enum keeps the chain shape honest about what the runtime can actually verify.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:ConstraintRelation"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:Constraint"]
+  },
+  {
+    "@id": "urn:eigenius:jump:rhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "rhs",
+    "urn:eigenius:core:description": "Constraint right-hand-side as a Float64 scalar. A FormulaTerm RHS is deliberately not in v1 — JuMP's macros want one expression on each side and JuMP itself will collapse `lhs - rhs ⋄ 0` automatically when the user writes a more-general algebraic relation, so the chain shape stays simpler if the RHS is a pure number and any non-trivial RHS folds into the LHS.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:Constraint"]
+  },
+
+  {
+    "@id": "urn:eigenius:jump:ConstraintRelation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "ConstraintRelation",
+    "urn:eigenius:core:description": "Three-valued discriminator naming the relation between a constraint's LHS and RHS — `LE | GE | EQ`. Same shape as `Verdict` (Holds | Fails | Undecidable): a closed set of nullary ctors. Strict inequalities are out of scope (see `relation` property docstring).",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LE"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "GE"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "EQ"
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:jump:OptimisesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OptimisesTo",
+    "urn:eigenius:core:description": "A claim that the institution can solve the referenced `OptimisationProblem` and reach the claimed `objective_value` at the claimed `variable_values`, with the claimed JuMP `termination_status`. AutoOnLoad fires `validate_optimum`, which rebuilds the JuMP model (compiling each FormulaTerm under the JuMP-expression walker), calls `optimize!`, checks `termination_status(model) == claim.termination_status`, and compares the re-solved objective to the claim within tolerance: `|claim - actual| ≤ max(abstol, reltol * |actual|)`. `Holds` on a successful re-solve that matches; `Fails` on a status mismatch, an objective-value mismatch beyond tolerance, or a solver error when success was claimed; `Undecidable` on indeterminate solver states (`ITERATION_LIMIT`, `TIME_LIMIT`, `NUMERICAL_ERROR`, `SLOW_PROGRESS`). Claimed `variable_values` are recorded for completeness but not compared during validation — degenerate LPs admit multiple optima at the same objective value, and the re-solver may land at a different vertex.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:jump:problem",
+      "urn:eigenius:jump:termination_status",
+      "urn:eigenius:jump:objective_value",
+      "urn:eigenius:jump:variable_values",
+      "urn:eigenius:jump:abstol",
+      "urn:eigenius:jump:reltol"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:jump:problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "problem",
+    "urn:eigenius:core:description": "The OptimisationProblem the optimum is claimed against. The validator dereferences this resource to read the variable list, objective, constraints, and bounds before re-solving.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:OptimisationProblem"],
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:jump:termination_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "termination_status",
+    "urn:eigenius:core:description": "JuMP / MathOptInterface termination status string. v1 accepts whatever the solver emits and string-compares against the re-solve. Common values: `OPTIMAL`, `INFEASIBLE`, `LOCALLY_SOLVED`, `LOCALLY_INFEASIBLE`, `DUAL_INFEASIBLE`, `INFEASIBLE_OR_UNBOUNDED`, `ITERATION_LIMIT`, `TIME_LIMIT`, `NUMERICAL_ERROR`. The first three (and a few near-equivalents) are the ones a successful claim names; the rest map to `Fails` or `Undecidable` per the verdict policy in the institution docstring.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:jump:objective_value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective_value",
+    "urn:eigenius:core:description": "Claimed value of the objective at the optimum. The AutoOnLoad gate compares `objective_value(model)` after re-solving against this claim within `max(abstol, reltol * |actual|)`. The single load-bearing scalar in an OptimisesTo claim — degeneracy on the variable side is real and unavoidable in LP, but the optimal objective value is unique under feasibility + boundedness.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:jump:variable_values",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_values",
+    "urn:eigenius:core:description": "Claimed solution vector — the Nth element is the claimed optimal value of the Nth variable in `problem.variable_names`. Recorded for downstream consumers (FIBER queries reading the optimum) but not validated against the re-solve in v1: degenerate LPs can have many optimal vertices with the same objective value, and re-solving may legitimately land at a different one. Length must equal `length(problem.variable_names)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:jump:abstol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "abstol",
+    "urn:eigenius:core:description": "Absolute tolerance on the objective-value tolerance check.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0.0,
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  },
+  {
+    "@id": "urn:eigenius:jump:reltol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "reltol",
+    "urn:eigenius:core:description": "Relative tolerance on the objective-value tolerance check. The verdict gate uses `|claim - actual| ≤ max(abstol, reltol * |actual|)`, mirroring the integrator-error-control convention OdeSolution uses.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0.0,
+    "urn:eigenius:core:domain": ["urn:eigenius:jump:OptimisesTo"]
+  }
+]

@@ -1,0 +1,656 @@
+// WRN Phase-1 recompute — CONCLUSIONS layer (consumers).
+// The concl_*_recomputed ReasoningSentences. Each AutoOnLoad-gates on
+// qc_validate_justification, citing the IsDerivedAs/IsDeclaredAs witnesses
+// committed by wrn-phase1-recompute-plans.esl — load that FIRST.
+//
+// (Was wrn-phase1-recompute.esl; split for live two-phase loading.)
+// WRN Phase-1 — institution-recomputed statistical warrants.
+//
+// The kernel-recomputed layer of the WRN Phase-1 chain: the statistics
+// institution RECOMPUTES every headline statistic from chain-resident
+// data (the pinned public-data snapshot, inlined as SampleSets) and emits
+// StatisticalAnalysisResults whose IsDerivedAs the reasoning certificates
+// consume. Declared statistical→domain bridges lift each statistical claim
+// to its domain conclusion. This replaces the recorded bench:ToolArtifacts
+// (agent-attested) of the narrative layer (wrn-phase1.esl, which stacks on
+// top of this one) for the institution-recomputable tier (D50 §2.2):
+//
+//   C-WRN     SelectivelyEssential(WRN, MSI)                — Wilcoxon (37 vs 91)
+//   D-REFINE  DependencyCorrelatesWithMutatorLoad(WRN, MSI) — Spearman (51 pairs)
+//   D-RECQ    OnlyMSISelectiveInFamily(WRN, RecQ_helicases) — Wilcoxon (32 vs 413)
+//                                                             + declared uniqueness
+//   D-BIOM    StrongBiomarker(MSI, WRN_dependency)          — PPV/sensitivity classifier
+//
+// Only the limma moderated-t differential-dependency (D-DIFF) stays a
+// linked-external bench:ToolArtifact in the narrative layer (Phase 2.5).
+//
+// Two institutions compose through the shared chain (the stats-and-
+// reasoning.json pattern): statistics writes the IsDerivedAs witness;
+// reasoning reads it. The result resource is emitted by the statistics
+// institution at commit and added to the chain by the test
+// (crates/eigenius-reasoning/tests/wrn_phase1_recompute.rs).
+//
+// Directionality: the SampleSet places MSI first (group_a), so
+// mean_diff_of(s) = mean(MSI) − mean(MSS); the OneSidedWitnessed test
+// (licensed by the synthetic-lethal directionality witness below) yields
+// stats:lt(mean_diff_of(s), 0) — MSI strictly more WRN-dependent.
+
+namespace core          = "urn:eigenius:core";
+namespace stats         = "urn:eigenius:measurements";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
+
+// ─── Directionality witness (D52 §7.1) ───────────────────────────────
+// Licenses the one-sided test: the synthetic-lethal hypothesis is
+// specifically that MSI cells are MORE WRN-dependent; the inverse
+// direction (MSS more dependent) is not the biological claim under test.
+
+
+
+// ─── C-WRN (recomputed): SelectivelyEssential(WRN, MSI) ──────────────
+// Justified by the bridge applied to the institution-recomputed result.
+
+resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_msi_selective",
+            RESULT = "urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            SE     = onco:SelectivelyEssential("WRN", "MSI")
+        in
+        app(declared(BRIDGE, STAT -> SE),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_msi_selective",
+            RESULT = "urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            SE     = onco:SelectivelyEssential("WRN", "MSI")
+        in
+        justification:Grounds(
+                   onco:SelectivelyEssential("WRN", "MSI") )) );
+
+
+}
+
+resource wrn:concl_refine_recomputed : justification:Conclusion {
+
+    // P4 shape: the statistic is no longer a `DerivedEvidence` leaf citing the
+    // institution's result by IRI. It is the APPLICATION of a declared plan to
+    // an observed sample set — `App(Declared(plan), Observed(input))` — which is
+    // what a computed conclusion actually rests on.
+    //
+    // The declaration is bound to THIS hash-pinned sample set, not universally
+    // quantified over sample sets. A universal would have the team asserting
+    // that any recorded set yields a negative rho, which is false; what is
+    // assertable, and what reproducibility means for immutable data, is that
+    // this exact input yields this result.
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
+            CLAIM  = "urn:eigenius:pub:wrn:wrn_corr_plan_yields_main_effect",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
+
+            OBS    = core:Asserts(SS),
+            STAT   = stats:lt(stats:spearman_rho(SS), 0.0),
+            DC     = onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI"),
+
+            cs     = app(declared(CLAIM, OBS -> STAT), observed(SS, OBS))
+        in
+        app(declared(BRIDGE, STAT -> DC), cs)),
+               type_expr(alias
+            SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
+            CLAIM  = "urn:eigenius:pub:wrn:wrn_corr_plan_yields_main_effect",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
+
+            OBS    = core:Asserts(SS),
+            STAT   = stats:lt(stats:spearman_rho(SS), 0.0),
+            DC     = onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI"),
+
+            cs     = app(declared(CLAIM, OBS -> STAT), observed(SS, OBS))
+        in
+        justification:Grounds(
+                   DC )) );
+}
+
+
+// ─── D-LINEAGE (recomputed, ED Fig 2b): common MSI lineages carry a higher
+// mutator load than uncommon ones — the basis for the biomarker's lineage
+// restriction. Two-sample Wilcoxon (mean_diff_of, group A uncommon below
+// group B common), lifted through bridge_lineage_mutator.
+resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:mutator_load_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mutator_load_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:mutator_load_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_lineage_mutator",
+            RESULT = "urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            EM     = onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
+        in
+        app(declared(BRIDGE, STAT -> EM),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:mutator_load_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mutator_load_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:mutator_load_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_lineage_mutator",
+            RESULT = "urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            EM     = onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
+        in
+        justification:Grounds(
+                   onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon") )) );
+
+
+}
+
+// ─── C-LOC (recomputed, ED Fig 8d): WRN delocalized from the nucleolus in MSI.
+resource wrn:concl_coloc_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:coloc_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:coloc_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:coloc_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_coloc",
+            RESULT = "urn:eigenius:pub:wrn:coloc_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RC     = onco:ReducedNucleolarColocalization("WRN", "MSI")
+        in
+        app(declared(BRIDGE, STAT -> RC),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:coloc_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:coloc_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:coloc_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_coloc",
+            RESULT = "urn:eigenius:pub:wrn:coloc_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RC     = onco:ReducedNucleolarColocalization("WRN", "MSI")
+        in
+        justification:Grounds(
+                   onco:ReducedNucleolarColocalization("WRN", "MSI") )) );
+
+
+}
+
+// ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis confirmed via shRNA.
+resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apop_shrna",
+            RESULT = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            CA     = onco:CausesApoptosis("WRN", "MSI")
+        in
+        app(declared(BRIDGE, STAT -> CA),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apop_shrna",
+            RESULT = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            CA     = onco:CausesApoptosis("WRN", "MSI")
+        in
+        justification:Grounds(
+                   onco:CausesApoptosis("WRN", "MSI") )) );
+
+
+}
+
+// ─── C-MMR-FN (recomputed, ED Fig 10a): MMR restoration restores repair.
+resource wrn:concl_hcr_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:hcr_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:hcr_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:hcr_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_hcr",
+            RESULT = "urn:eigenius:pub:wrn:hcr_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MR     = onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
+        in
+        app(declared(BRIDGE, STAT -> MR),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:hcr_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:hcr_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:hcr_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_hcr",
+            RESULT = "urn:eigenius:pub:wrn:hcr_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MR     = onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
+        in
+        justification:Grounds(
+                   onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5") )) );
+
+
+}
+
+resource wrn:concl_recq_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_recq_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:wrn_recq_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:wrn_recq_sampleset",
+            RULE   = "urn:eigenius:pub:wrn:recq_uniqueness_rule",
+            RESULT = "urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            OM     = onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
+        in
+        app(declared(RULE, STAT -> OM),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_recq_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:wrn_recq_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:wrn_recq_sampleset",
+            RULE   = "urn:eigenius:pub:wrn:recq_uniqueness_rule",
+            RESULT = "urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            OM     = onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
+        in
+        justification:Grounds(
+                   onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases") )) );
+
+
+}
+
+resource wrn:concl_biomarker_recomputed : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:biomarker_plan_yields_ppv",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:biomarker_plan_yields_sensitivity",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_1)),
+            SS      = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE  = "urn:eigenius:pub:wrn:bridge_biomarker",
+            R_PPV   = "urn:eigenius:pub:wrn:biomarker_plan:result:ppv",
+            R_SENS  = "urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity",
+            PPVP    = stats:ge(stats:ppv(SS), 0.7),
+            SENSP   = stats:ge(stats:sensitivity(SS), 0.9),
+            SB      = onco:StrongBiomarker("MSI", "WRN_dependency"),
+            bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
+            cert1 = app(bridge_cert, cs_0)
+        in
+        app(cert1, cs_1)),
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:biomarker_plan_yields_ppv",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:biomarker_plan_yields_sensitivity",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)), observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_1)),
+            SS      = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE  = "urn:eigenius:pub:wrn:bridge_biomarker",
+            R_PPV   = "urn:eigenius:pub:wrn:biomarker_plan:result:ppv",
+            R_SENS  = "urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity",
+            PPVP    = stats:ge(stats:ppv(SS), 0.7),
+            SENSP   = stats:ge(stats:sensitivity(SS), 0.9),
+            SB      = onco:StrongBiomarker("MSI", "WRN_dependency"),
+            bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
+            cert1 = app(bridge_cert, cs_0)
+        in
+        justification:Grounds(
+                   onco:StrongBiomarker("MSI", "WRN_dependency") )) );
+
+
+}
+
+resource wrn:concl_p53_modulates : justification:Conclusion {
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:p53_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:p53_dep_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:p53_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_p53_modulates",
+            RESULT = "urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MD     = onco:ModulatesDependence("TP53", "WRN")
+        in
+        app(declared(BRIDGE, STAT -> MD),
+                   cs
+               )),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:p53_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:p53_dep_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:p53_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_p53_modulates",
+            RESULT = "urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MD     = onco:ModulatesDependence("TP53", "WRN")
+        in
+        justification:Grounds(
+                   onco:ModulatesDependence("TP53", "WRN") )) );
+
+
+}
+
+resource wrn:concl_val_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:viab_OVK18_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset", OBSP_1)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
+            R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
+            R_OVK  = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
+            SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            cert1 = app(declared(BRIDGE, K -> O -> SVD), cs_0)
+        in
+        app(cert1, cs_1)),
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:viab_OVK18_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset", OBSP_1)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
+            R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
+            R_OVK  = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
+            SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            cert1 = app(declared(BRIDGE, K -> O -> SVD), cs_0)
+        in
+        justification:Grounds(
+                   onco:SelectiveViabilityDependence("WRN", "MSI") )) );
+}
+
+resource wrn:concl_cellcycle_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        app(cert2, cs_2)),
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        justification:Grounds(
+                   onco:CausesCellCycleArrest("WRN", "MSI") )) );
+}
+
+resource wrn:concl_apoptosis_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            CA = onco:CausesApoptosis("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        app(cert2, cs_2)),
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            CA = onco:CausesApoptosis("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        justification:Grounds(
+                   onco:CausesApoptosis("WRN", "MSI") )) );
+}
+
+resource wrn:concl_mmr_restoration_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            RULE_P = K -> S -> O -> RP,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        app(cert2, cs_2)),
+               type_expr(alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            cs_0    = app(declared(CLAIM_0, OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            cs_1    = app(declared(CLAIM_1, OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            cs_2    = app(declared(CLAIM_2, OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", OBSP_2)),
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            RULE_P = K -> S -> O -> RP,
+            cert1 = app(declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(cert1, cs_1)
+        in
+        justification:Grounds(
+                   onco:RestorationPartiallyRescues("dMMR", "WRN") )) );
+}
+resource wrn:concl_rescue_wt_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+        in
+        app(declared(BRIDGE, STAT -> RD), cs)),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+        in
+        justification:Grounds(
+                   onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ") )) );
+}
+resource wrn:concl_rescue_e84a_recomputed : justification:Conclusion {
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+        in
+        app(declared(BRIDGE, STAT -> RD), cs)),
+               type_expr(alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            cs    = app(declared(CLAIM, OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", OBSP)),
+            SS     = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+        in
+        justification:Grounds(
+                   onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ") )) );
+}

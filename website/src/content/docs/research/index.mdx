@@ -1,0 +1,121 @@
+---
+title: Research
+description: Papers, citations, and the academic angle on Eigenius. The framework's grounding in dependent type theory, justification logic, and the institution-theoretic dispatch model.
+---
+
+import PaperCard from "../../../components/PaperCard.astro";
+
+Eigenius sits at the intersection of three traditions. The
+typed-knowledge-graph machinery descends from the dependently-typed
+calculi pioneered by Coq, Lean, and Agda; the four-warrant
+taxonomy is a chain-instantiated form of Artemov's justification
+logic; the modular dispatch architecture borrows from
+Goguen-Burstall institution theory. This section collects the
+papers that present the framework academically, along with the
+citation anchors and the recommended reading order for someone
+coming from each tradition.
+
+## Papers
+
+<div class="paper-grid">
+
+<PaperCard
+  venue="arXiv"
+  title="Eigenius: A Typed Knowledge-Graph DBMS with Epistemic Stratification and Institution-Mediated Reasoning"
+  abstract="A typed knowledge-graph DBMS that makes provenance a structural invariant rather than something reconstructed across subsystems: epistemic status is a commit-time check, institutions are strongly typed integration boundaries, and cross-system translations materialize into the graph as first-class resources. Recomputing a published Nature study end to end, all 52 derived conclusions hold from pinned data — surfacing four machine-checked discrepancies in the original."
+  href="/research/papers/typed-knowledge-graph-dbms/"
+  downloadHref="https://arxiv.org/pdf/2608.04457"
+  status="Preprint · cs.DB"
+/>
+
+<PaperCard
+  venue="BIO"
+  title="Auditing the Conclusion: Making the Reasoning Behind a Scientific Claim Chain-Resident, Machine-Checkable, and Reproducible"
+  href="/research/papers/science-audit-closure/"
+  comingSoon
+/>
+
+</div>
+
+> **The systems paper is on arXiv** as of 5 August 2026
+> ([2608.04457](https://arxiv.org/abs/2608.04457)). The Science paper
+> is still in active preparation; its abstract and manuscript will be
+> posted here when it lands. In the interim, the [worked
+> examples](/examples/) and the [concepts](/concepts/) cover the same
+> material in narrative form.
+
+## How to cite
+
+For the architecture, the type discipline, or the recomputation
+result, cite the preprint:
+
+```bibtex
+@misc{will2026eigenius,
+  author        = {Will, Hans-Martin and Brown, Jr., Allen L. and Fuchs, Matthew},
+  title         = {Eigenius: A Typed Knowledge-Graph {DBMS} with Epistemic
+                   Stratification and Institution-Mediated Reasoning},
+  year          = {2026},
+  eprint        = {2608.04457},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB},
+  doi           = {10.48550/arXiv.2608.04457},
+  url           = {https://arxiv.org/abs/2608.04457},
+}
+```
+
+For a specific result you have re-run, cite the repository with the
+commit hash — or, better, the content-addressed chain state, which
+pins the exact inputs rather than a repository snapshot:
+
+```bibtex
+@misc{eigenius2026,
+  author       = {The Eigenius Authors},
+  title        = {Eigenius: a typed knowledge graph for
+                  auditable scientific reasoning},
+  year         = {2026},
+  howpublished = {\url{https://github.com/eigenius/eigenius}},
+}
+```
+
+## Reading order, by background
+
+The [preprint](https://arxiv.org/abs/2608.04457) is the single
+document that covers the architecture end to end; this site and the
+repository go deeper on any one piece of it. By tradition:
+
+**From type theory** (Coq, Lean, Agda, dependent types):
+start with the [Concepts overview](/concepts/) for the
+chain-instantiation framing; then dip into the design notes in
+the repository under `docs/design/` for the specific extensions
+to standard dependent type theory that the chain requires
+(proof-irrelevance in the propositional universe,
+content-addressed type expressions, the parent-pointer layer
+chain). The [ESL chapter §6 — Resources, types, and the
+layer](/docs/esl/06-resources-types-and-the-layer/) is the bridge
+between the resource graph and the type system.
+
+**From justification logic** (Artemov, modal calculi):
+the [Justification logic page](/concepts/justification-logic/)
+is the bridge from Artemov's calculus to the chain-resident
+form. The four-warrant taxonomy is the chain instantiation; each
+`JustifiedBy` constructor in the reasoning institution's
+inductive type maps to one of Artemov's evidence-bearing
+modalities.
+
+**From provenance and FAIR / ALCOA+**:
+the [Drug-screening example](/examples/drug-screening/) is the
+canonical end-to-end illustration. The chain delivers most of
+the ALCOA+ enumeration structurally; the verifier closes the
+*accurate* principle by deterministic re-execution rather than
+by author attestation. The Science paper, when it lands, will
+include the full ALCOA+ alignment table.
+
+**From AI / ML systems**:
+the [Concepts overview](/concepts/) frames the chain as the
+substrate for inspectable AI reasoning. The kernel is "a
+compiler for AI thought" — agents must produce typed proof terms
+the type-checker admits; hallucinations either fail to commit or
+land visibly as `Declared` artifacts with the agent on record.
+The [Domain bridges page](/concepts/domain-bridges/) is the most
+direct illustration of how the type discipline blocks the most
+common AI failure mode (unjustified cross-vocabulary leaps).

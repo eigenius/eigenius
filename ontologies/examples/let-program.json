@@ -1,0 +1,24 @@
+{
+  "@id": "urn:eigenius:example:let-program",
+  "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+  "urn:eigenius:core:description": "A program that binds input to a variable and returns it",
+  "urn:eigenius:program:input_type": "urn:eigenius:example:Dog",
+  "urn:eigenius:program:output_type": "urn:eigenius:example:Dog",
+  "urn:eigenius:program:body": {
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Let"],
+    "urn:eigenius:program:name": "dog",
+    "urn:eigenius:program:type": "urn:eigenius:example:Dog",
+    "urn:eigenius:program:value": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:Identity",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      }
+    },
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+      "urn:eigenius:program:name": "dog"
+    }
+  }
+}

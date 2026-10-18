@@ -1,0 +1,55 @@
+// C-0011's conjunction, attempted. The inference is sound; a premise failed.
+//
+// D100 rung 2's result. `c0011-limbs.esl` declares the conjunction bridge and grounds limb A. This
+// file applies the bridge to both limbs, which is what the claim asserts — and the application is
+// refused, for a reason that is neither "the rule is wrong" nor "the claim is ill-typed".
+//
+//     app( app(both_limbs_rule, bounded_holds), <ground for limb B> )
+//
+// The bridge is declared, witnessed and correctly applied. `Grounds(RiskBounded)` exists. What does
+// not exist is `Grounds(LikelyTolerated)`: C-0100 was rejected — "gnomAD cannot establish health" —
+// and C-0024 blocked on «ever», so nothing declares limb B and the kernel synthesizes no witness
+// for it. The citation below names a declaration that was never made, and the kernel says so.
+//
+// THAT is the collaborator's missing verdict, as a type. His procedure recorded it in a
+// `premise_failure` field because its vocabulary had nowhere else to put it: a verdict is a
+// property of a claim, and "sound inference, failed premise" is a property of the claim's
+// JUSTIFICATION TERM — the shape of the tree, not the status of the conclusion. Here the tree is
+// well-formed up to the missing leaf, and the leaf is what is reported.
+//
+// Note also what is NOT refused: limb A. `concl_bounded` commits in the same layer. The certificate
+// said "two limbs, and they fail differently", and the two conclusions say exactly that without a
+// field to carry it.
+
+namespace core          = "urn:eigenius:core";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace logic         = "urn:eigenius:logic";
+namespace xiap          = "urn:eigenius:uab:xiap";
+
+resource xiap:concl_both_limbs : justification:Conclusion {
+    core:description = "And(RiskBounded, LikelyTolerated)(p.Ile380Thr) — the claim as C-0011 states it, both limbs at once. Refused: limb B has no ground, because its premises were rejected and blocked. This resource exists to be refused.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   app(
+                       declared(
+                           "urn:eigenius:uab:xiap:both_limbs_rule",
+                           xiap:RiskBounded(xiap:p_Ile380Thr) ->
+                               xiap:LikelyTolerated(xiap:p_Ile380Thr) ->
+                                   logic:And( xiap:RiskBounded(xiap:p_Ile380Thr),
+                                              xiap:LikelyTolerated(xiap:p_Ile380Thr) ),
+                           ()),
+                       declared(
+                           "urn:eigenius:uab:xiap:bounded_holds",
+                           xiap:RiskBounded(xiap:p_Ile380Thr),
+                           ())),
+                   declared(
+                       "urn:eigenius:uab:xiap:tolerated_holds",
+                       xiap:LikelyTolerated(xiap:p_Ile380Thr),
+                       ()))),
+               type_expr(justification:Grounds(
+                   logic:And( xiap:RiskBounded(xiap:p_Ile380Thr),
+                              xiap:LikelyTolerated(xiap:p_Ile380Thr) ))) );
+}

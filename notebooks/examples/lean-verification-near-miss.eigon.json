@@ -1,0 +1,9 @@
+{
+  "@id": "urn:eigenius:demo:lean:proof_term_near_miss",
+  "urn:eigenius:core:is_a": [
+    "urn:eigenius:lean:LeanProofTerm"
+  ],
+  "urn:eigenius:lean:claim_iri": "urn:eigenius:demo:lean:claim_patient_2_healthy",
+  "urn:eigenius:lean:proof_payload": "urn:eigenius:demo:lean:proof_payload",
+  "urn:eigenius:lean:target_name": "healthy_patient_1"
+}

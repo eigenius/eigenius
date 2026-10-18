@@ -1,0 +1,149 @@
+// D99 §1–§3 — SYNGENE's alleles at three resolutions, on `ontologies/variant/variant.esl`.
+//
+// Synthetic: SYNGENE, NM_000010.7 and the survey are UAB experiment 02's invented case SYN-26-002.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace logic         = "urn:eigenius:logic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace variant       = "urn:eigenius:variant";
+namespace syn           = "urn:eigenius:test:syngene";
+
+resource syn:author : prov:Organization {
+    core:description = "The author of this fixture's claims.";
+    core:short_name = "author";
+}
+
+resource syn:SYNGENE : lexicon:Entity {
+    core:description = "A synthetic X-linked gene (UAB experiment 02, SYN-26-002).";
+}
+
+resource syn:NM_000010_7 : variant:Transcript {
+    core:description = "SYNGENE's transcript, NM_000010.7.";
+    variant:accession = "NM_000010.7";
+    variant:gene = syn:SYNGENE;
+}
+
+resource syn:protein : variant:ProteinProduct {
+    core:description = "SYNGENE's protein product, isoform unspecified.";
+    variant:accession = "HGNC:000010:p";
+    variant:gene = syn:SYNGENE;
+}
+
+resource syn:c_130C_T : variant:NucleotideAllele {
+    variant:reference = "NM_000010.7";
+    variant:start = 130;
+    variant:end = 130;
+    variant:ref_state = "C";
+    variant:alt = "T";
+    variant:hgvs = "NM_000010.7:c.130C>T";
+}
+
+resource syn:c_131T_C : variant:NucleotideAllele {
+    variant:reference = "NM_000010.7";
+    variant:start = 131;
+    variant:end = 131;
+    variant:ref_state = "T";
+    variant:alt = "C";
+    variant:hgvs = "NM_000010.7:c.131T>C";
+}
+
+resource syn:p_Leu44Phe : variant:ProteinAllele {
+    variant:reference = "HGNC:000010:p";
+    variant:start = 44;
+    variant:end = 44;
+    variant:ref_state = "Leu";
+    variant:alt = "Phe";
+    variant:hgvs = "p.Leu44Phe";
+}
+
+resource syn:p_Leu44Pro : variant:ProteinAllele {
+    variant:reference = "HGNC:000010:p";
+    variant:start = 44;
+    variant:end = 44;
+    variant:ref_state = "Leu";
+    variant:alt = "Pro";
+    variant:hgvs = "p.Leu44Pro";
+}
+
+resource syn:Leu44 : variant:Location {
+    core:description = "Leucine 44 of SYNGENE's protein product.";
+    variant:reference = "HGNC:000010:p";
+    variant:start = 44;
+    variant:end = 44;
+    variant:ref_state = "Leu";
+}
+
+resource syn:Leu45 : variant:Location {
+    core:description = "Position 45 of SYNGENE's protein product — a location p.Leu44Pro is not at.";
+    variant:reference = "HGNC:000010:p";
+    variant:start = 45;
+    variant:end = 45;
+}
+
+data syn:Responsive : variant:ProteinAllele -> Prop {
+    description = "Carriers of the protein allele respond to the first-line agent (fixture predicate).";
+}
+
+resource syn:translates_131 : justification:Declaration {
+    core:description = "c.131T>C translates to p.Leu44Pro — declared: the reference has no sequence here.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(variant:TranslatesTo(syn:c_131T_C, syn:p_Leu44Pro));
+}
+
+// REFUSED — TranslatesTo runs from a nucleotide allele to a protein allele.
+resource syn:translates_backwards : justification:Declaration {
+    core:description = "p.Leu44Pro translates to c.131T>C — ill-typed.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(variant:TranslatesTo(syn:p_Leu44Pro, syn:c_131T_C));
+}
+
+// `At` is computed from the fields, so it is PROVED, not declared.
+resource syn:pro_at_leu44 : justification:Declaration {
+    core:description = "p.Leu44Pro is at Leu44: same reference, same interval.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(variant:At(syn:p_Leu44Pro, syn:Leu44));
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(logic:conj(
+                   eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:reference)),
+                   logic:conj(
+                       eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:start)),
+                       eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:end))))),
+               type_expr(variant:At(syn:p_Leu44Pro, syn:Leu44)) );
+}
+
+// REFUSED — p.Leu44Pro starts at 44, Leu45 at 45: `refl` does not prove Id(44, 45).
+resource syn:pro_at_leu45 : justification:Declaration {
+    core:description = "p.Leu44Pro is at position 45 — not provable.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(variant:At(syn:p_Leu44Pro, syn:Leu45));
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(logic:conj(
+                   eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:reference)),
+                   logic:conj(
+                       eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:start)),
+                       eigentt:refl(eigentt:field(syn:p_Leu44Pro, variant:end))))),
+               type_expr(variant:At(syn:p_Leu44Pro, syn:Leu45)) );
+}
+
+// Claim 6 (D99 §3), in the parser's existential encoding: some responsive protein allele is at
+// Leu44. Declared by the survey's authors in the experiment; by the fixture author here.
+resource syn:claim_6 : justification:Declaration {
+    core:description = "A nationwide survey reports Leu44 as a responsive genotype.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(
+        forall (R : Prop) =>
+            (forall (q : exists q : variant:ProteinAllele => variant:At(q, syn:Leu44)) =>
+                syn:Responsive(eigentt:fst(q)) -> R)
+            -> R);
+}
+
+resource syn:claim_6_trace : prov:DeclarationTrace {
+    prov:resource = syn:claim_6;
+    prov:was_attributed_to = syn:author;
+    prov:timestamp = "2026-10-02T00:00:00Z";
+}

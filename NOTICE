@@ -1,0 +1,31 @@
+Eigenius
+Copyright 2026 The Eigenius Authors
+
+This product is licensed under the Apache License, Version 2.0
+(see the LICENSE file at the root of this repository).
+
+──────────────────────────────────────────────────────────────────
+Third-party algorithmic references
+──────────────────────────────────────────────────────────────────
+
+`kernel/src/query/vector/hnsw_core.rs` — fresh implementation of the
+Hierarchical Navigable Small World algorithm.
+
+  - Algorithm originally described in:
+        Malkov, Yu. A., and Yashunin, D. A.
+        "Efficient and robust approximate nearest neighbor search
+        using Hierarchical Navigable Small World graphs."
+        arXiv:1603.09320, 2016.
+
+  - Structural patterns (per-layer adjacency representation, the
+    entry-point promotion check, the bidirectional-connection
+    pruning loop) were cross-checked against:
+        hnsw_rs by Jean-Pierre Both (<jeanpierre.both@gmail.com>)
+        Dual-licensed Apache-2.0 / MIT.
+        https://crates.io/crates/hnsw_rs
+
+    Eigenius does not vendor or redistribute hnsw_rs source code.
+    `hnsw_core.rs` is a fresh implementation written against the
+    paper, with hnsw_rs used as a reference for naming and
+    corner-case interpretation. We acknowledge the prior art under
+    the Apache-2.0 attribution requirements.

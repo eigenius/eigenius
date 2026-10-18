@@ -1,0 +1,126 @@
+[
+  {
+    "@id": "urn:eigenius:catalyst:ReactionNetwork",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ReactionNetwork",
+    "urn:eigenius:core:description": "A `Catalyst.jl` `ReactionSystem` lifted onto the chain. Carries the `@reaction_network` macro source as a string, plus the canonical species and parameter orderings the institution uses to align coefficient vectors and parameter maps with the underlying Julia object. The institution rebuilds the ReactionSystem at dispatch time by evaluating `network_source` in a context where Catalyst is imported. v1 keeps the network as source rather than as a typed Reaction-list payload — the typed lift waits until a downstream consumer (DiffEq, IntervalArithmetic) needs structural access to individual reactions. See D27 §4.4.1.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:catalyst:network_source",
+      "urn:eigenius:catalyst:species_declared",
+      "urn:eigenius:catalyst:parameters_declared"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:network_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "network_source",
+    "urn:eigenius:core:description": "Julia source for the `@reaction_network begin ... end` macro invocation, e.g. `\"@reaction_network begin\\n  k_on, E + S --> ES\\n  k_off, ES --> E + S\\nend\"`. The institution evaluates this with `Core.eval` in a module where `Catalyst` is imported; the macro expands to a fully constructed `ReactionSystem`. Bounded length (16k) keeps the chain shape from absorbing arbitrary Julia programs — institution handlers should refuse to evaluate sources containing constructs outside the `@reaction_network` DSL.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:ReactionNetwork"]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:species_declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "species_declared",
+    "urn:eigenius:core:description": "Species names in the canonical order Catalyst's `species(rn)` returns — first-appearance ordering across the reactions. Used to align `ConservationLaw.coefficients` indices and (in v2) `SteadyState.concentrations_kv` keys with the network's actual species set. Authoring discipline: institution clients populate this from `species(rn)` after constructing the ReactionSystem; manual ordering is rejected at the AutoOnLoad gate.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:ReactionNetwork"]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:parameters_declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameters_declared",
+    "urn:eigenius:core:description": "Rate-parameter names in the canonical order `Catalyst.parameters(rn)` returns. Reserved for downstream consumers (SteadyState, DiffEq comorphism); not consumed by the conservation-law gate.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:ReactionNetwork"]
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:ConservationLaw",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ConservationLaw",
+    "urn:eigenius:core:description": "A linear invariant `coefficients · species_concentrations = constant` claimed to be preserved by the network's dynamics. Coefficients are integer-valued and align positionally with `network.species_declared` (so the Nth coefficient multiplies the Nth species). AutoOnLoad fires `validate_conservation_law`, which re-runs `Catalyst.conservationlaws(rn)` (returns `Matrix{Int64}` whose rows span the network's left-nullspace) and checks the claimed coefficient vector lies in the row span. `Holds` when the claim is verified; `Fails` when refuted (this is a structural check, not a heuristic — `Fails` is meaningful). See D27 §4.4.1.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:catalyst:network",
+      "urn:eigenius:catalyst:coefficients"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:network",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "network",
+    "urn:eigenius:core:description": "The ReactionNetwork the resource is about. For `ConservationLaw` it's the network the law is claimed against; for `CatalystToOdeInput` it's the network being compiled. The institution dereferences this to read `network_source` (for the @reaction_network re-eval) plus `species_declared` / `parameters_declared` (for positional alignment of coefficient / initial-condition / parameter vectors).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:catalyst:ReactionNetwork"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:catalyst:ConservationLaw",
+      "urn:eigenius:catalyst:CatalystToOdeInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:coefficients",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "coefficients",
+    "urn:eigenius:core:description": "Integer coefficient vector. The Nth entry is the multiplier for the Nth species in `network.species_declared`. Length must equal `length(network.species_declared)`; mismatch is reported as a `Fails` verdict by the AutoOnLoad gate (it's a structural error the author can fix). Example: for `E + S --> ES; ES --> E + S; ES --> E + P` (species E, S, ES, P), the enzyme-conservation law `[E] + [ES] = E_total` has coefficients `[1, 0, 1, 0]`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:ConservationLaw"]
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:CatalystToOdeInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "CatalystToOdeInput",
+    "urn:eigenius:core:description": "Composite OnDemand input class for `qc_cat_to_ode` and source side of the `Catalyst → DiffEq` comorphism. Pairs a `ReactionNetwork` with the species initial conditions, parameter values, and time span needed to compile to an `OdeProblem`. The institution computes the FormulaTerm-typed RHS components by walking `Catalyst.netstoichmat(rn) * Catalyst.oderatelaw.(reactions(rn))` and translating each Symbolics expression to FormulaTerm via `num_to_formula`. The resulting `OdeProblem` is a chain-typed handoff to the DiffEq institution — the comorphism's identity transformation works because both sides speak the same OdeProblem shape, with FormulaTerm RHS as the load-bearing typed payload.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:catalyst:network",
+      "urn:eigenius:catalyst:initial_conditions",
+      "urn:eigenius:catalyst:parameter_values",
+      "urn:eigenius:catalyst:time_span_start",
+      "urn:eigenius:catalyst:time_span_end"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:initial_conditions",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "initial_conditions",
+    "urn:eigenius:core:description": "Initial state vector for the network's species. Indexed positionally with `network.species_declared` — the Nth entry is the initial concentration of the Nth species. Length must equal `length(network.species_declared)`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:CatalystToOdeInput"]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:parameter_values",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameter_values",
+    "urn:eigenius:core:description": "Parameter value vector for the network. Indexed positionally with `network.parameters_declared` — the Nth entry is the value of the Nth parameter. Length must equal `length(network.parameters_declared)`. Named `parameter_values` rather than `parameters` to avoid IRI clash with diffeq's `parameters` property; the *names* still come from the network.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:CatalystToOdeInput"]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:time_span_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "time_span_start",
+    "urn:eigenius:core:description": "Initial time `t_start` for the integration the comorphism is preparing.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:CatalystToOdeInput"]
+  },
+  {
+    "@id": "urn:eigenius:catalyst:time_span_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "time_span_end",
+    "urn:eigenius:core:description": "Final time `t_end` for the integration. Forwarded onto the resulting OdeProblem's `time_span_end`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:catalyst:CatalystToOdeInput"]
+  }
+]

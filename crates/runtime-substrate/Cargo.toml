@@ -1,0 +1,74 @@
+[package]
+name = "eigenius-runtime-substrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. See D26."
+
+[features]
+# Enables the bash-c test runtime — a long-lived worker binary speaking
+# the substrate's CBOR RPC, used as the smoke-test fixture for the
+# substrate skeleton without dragging in a real interpreter. Default-on
+# so `cargo test` from a fresh checkout exercises it; production builds
+# can opt out via `--no-default-features`.
+default = ["test-runtime"]
+test-runtime = []
+# Enables `DockerSpawner` (Phase 18c.3): Bollard-backed
+# Docker-outside-of-Docker worker spawner. Pulls in `bollard` + a Tokio
+# runtime — gated so non-container deployments don't pay the dependency
+# weight. See [D26 §8.2](../../docs/design/d26-runtime-substrate.md).
+docker-spawner = ["dep:bollard", "dep:tokio", "dep:futures-util"]
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+eigenius-config = { path = "../eigenius-config" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_bytes = "0.11"
+ciborium = "0.2"
+# RFC3339 formatting for `started_at` / `completed_at` on
+# `RuntimeInvocation`. Tiny purpose-built crate (~30KB) — chrono and
+# `time` are heavier than warranted for this single formatter use.
+humantime = "2"
+# SHA-256 of the worker binary bytes — used by the Docker test runtime
+# (Phase 18c.6) as the manifest-hash anchor stamped into both the
+# built image's `/etc/eigenius-runtime-env/manifest-hash` and the
+# spawn-side `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` env var so the
+# bootstrap cross-check matches deterministically.
+sha2 = "0.10"
+# Docker-spawner backend (gated). Bollard exposes `default = [http, pipe]`
+# where `pipe` is the Unix-socket / named-pipe transport — needed for the
+# DooD `/var/run/docker.sock` access pattern (D26 §9.5).
+bollard = { version = "0.21", optional = true }
+# Local Tokio runtime — narrower features than the workspace-wide
+# `tokio = "full"` since DockerSpawner only needs a multi-thread runtime
+# for blocking on Bollard's async API plus timers + UDS for cross-check
+# polling.
+tokio = { version = "1", optional = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+] }
+# Stream extensions (`StreamExt::next`) for draining Bollard's
+# event-stream APIs. Already pulled transitively by Bollard; lifted to
+# a direct dep so the compiler sees the trait without leaning on
+# transitive feature unification.
+futures-util = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+] }
+
+[[bin]]
+name = "eigenius-test-worker"
+path = "src/bin/eigenius-test-worker.rs"
+required-features = ["test-runtime"]
+
+[dev-dependencies]
+# Phase 19a.1: the 18d Julia capstone integration test now exercises
+# the production `eigenius-julia` crate's `JuliaLanguageRuntime`,
+# while `src/test_runtime_julia.rs` is a thin deprecated re-export
+# during the transition. Once the test fully migrates to the new
+# name, the re-export module can drop.
+eigenius-julia = { path = "../eigenius-julia" }

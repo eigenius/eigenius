@@ -1,0 +1,180 @@
+[
+  {
+    "@id": "urn:eigenius:julia:intervals",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:institution_name": "IntervalArithmetic",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:description": "The IntervalArithmetic institution — D27 §4.3. Wraps `IntervalArithmetic.jl` to expose rigorous numerical bounds as typed claims. Dispatched into a substrate-hosted Julia worker via the eigenius-julia-intervals crate."
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:ef_bounded_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_bounded_by",
+    "urn:eigenius:core:description": "Export a BoundedBy resource as its CBOR-encoded shape — the payload type is the BoundedBy class itself, so extract_typed is structurally identity. The Julia-side handler decodes into IntervalArithmetic.jl's `Interval{Float64}` value plus the bound subject.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:intervals:proc:extract_bounded_by"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:ef_proves_bound_on",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_proves_bound_on",
+    "urn:eigenius:core:description": "Export a ProvesBoundOn resource for re-running the institution's interval extension on the stated function and domain.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:intervals:proc:extract_proves_bound_on"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:if_bounded_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_bounded_by",
+    "urn:eigenius:core:description": "Construct a BoundedBy resource from a (value, interval) payload produced by the worker.",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:intervals:proc:reify_bounded_by"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:if_proves_bound_on",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_proves_bound_on",
+    "urn:eigenius:core:description": "Construct a ProvesBoundOn resource from a (function, domain, image) payload produced by the worker's interval extension.",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:intervals:proc:reify_proves_bound_on"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:if_contains_root",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_contains_root",
+    "urn:eigenius:core:description": "Construct a ContainsRoot resource from a (function, domain, witness) payload produced by the worker's interval-Newton step.",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:intervals:ContainsRoot",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:intervals:ContainsRoot",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:intervals:proc:reify_contains_root"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_validate_bounded_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_bounded_by",
+    "urn:eigenius:core:description": "AutoOnLoad + Decidable validation of a BoundedBy claim. AutoOnLoad fires whenever a BoundedBy resource is loaded into the chain — verdict Holds iff lower <= value <= upper and the interval is well-formed; Fails rejects the Load. The Decidable role lets Exp::NativeDecide(BoundedBy(v, i), _) reduce to Refl in user programs once the predicate is in the chain.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load",
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:validate_bounded_by",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_validate_proves_bound_on",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_proves_bound_on",
+    "urn:eigenius:core:description": "AutoOnLoad validation of a ProvesBoundOn claim. The institution re-runs the interval extension of `function_source` on `domain` and checks the claimed `interval` is at least as tight as the institution computes. Verdict::Fails if the institution computes a tighter interval than claimed (i.e. the claim asserts a tighter bound than the library's extension proves) or if the interval extension produces something outside the claim. Verdict::Undecidable if the function source can't be parsed or the extension diverges within the wall-clock cap.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:validate_proves_bound_on",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_validate_contains_root",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_contains_root",
+    "urn:eigenius:core:description": "AutoOnLoad validation of a ContainsRoot claim. Replays the witness through the institution's interval-Newton implementation.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:ContainsRoot",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:validate_contains_root",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:IntvComputeBoundsInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "IntvComputeBoundsInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_compute_bounds: a function source and a domain interval. The institution returns a ProvesBoundOn resource carrying the computed interval extension.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:function_source",
+      "urn:eigenius:julia:intervals:domain"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_compute_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_compute_bounds",
+    "urn:eigenius:core:description": "OnDemand: given a function source and a domain interval, produce a ProvesBoundOn carrying the institution's interval extension as `interval`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:IntvComputeBoundsInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:compute_bounds",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_verify_bound",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_verify_bound",
+    "urn:eigenius:core:description": "OnDemand: convenience wrapper for 'is this BoundedBy claim at least as tight as what the institution proves?'. Identical effective semantics to qc_validate_bounded_by but explicitly user-invocable rather than implicit on Load — useful when authoring a notebook that wants to check a bound without committing it.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:verify_bound",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:IntvFindRootsInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "IntvFindRootsInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_find_roots: a function source and a domain interval to search.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:function_source",
+      "urn:eigenius:julia:intervals:domain"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:IntvRootList",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "IntvRootList",
+    "urn:eigenius:core:description": "OnDemand result of qc_find_roots: a list of ContainsRoot witnesses partitioning the search domain into root-bracketing sub-intervals.",
+    "urn:eigenius:core:requires": ["urn:eigenius:julia:intervals:roots"]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:roots",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "roots",
+    "urn:eigenius:core:description": "Embedded ContainsRoot witnesses for each isolated root in the search domain.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:intervals:ContainsRoot"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:intervals:IntvRootList"]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:qc_find_roots",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_find_roots",
+    "urn:eigenius:core:description": "OnDemand: search the domain for isolated roots of the function via interval-Newton iteration; return an IntvRootList.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:intervals:IntvFindRootsInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:intervals:IntvRootList",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:intervals:proc:find_roots",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:intervals"
+  }
+]

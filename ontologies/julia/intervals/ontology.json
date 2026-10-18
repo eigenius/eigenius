@@ -1,0 +1,116 @@
+[
+  {
+    "@id": "urn:eigenius:julia:intervals:Interval",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Interval",
+    "urn:eigenius:core:description": "A closed real interval [inf, sup] with inf <= sup. Embedded structural value, typically used as a sub-resource of BoundedBy / ProvesBoundOn / ContainsRoot. Property names follow IntervalArithmetic.jl's accessor idiom (`inf(x)`/`sup(x)`); construction-side, the worker uses the lowercase `interval(lo, hi)` constructor — the validated form post-IA-1.0. v1 deliberately does NOT carry the library's decoration (`com`/`dac`/`def`/`trv`/`ill`/`_NG` Not-Guaranteed); the institution uses common-decoration intervals exclusively in v1.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:inf",
+      "urn:eigenius:julia:intervals:sup"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:inf",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "inf",
+    "urn:eigenius:core:description": "Lower endpoint of the interval (inclusive). Matches IntervalArithmetic.jl's `inf(x::Interval)` accessor.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:intervals:Interval"]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:sup",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "sup",
+    "urn:eigenius:core:description": "Upper endpoint of the interval (inclusive). Matches IntervalArithmetic.jl's `sup(x::Interval)` accessor.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:intervals:Interval"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:BoundedBy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "BoundedBy",
+    "urn:eigenius:core:description": "Claims that a numeric value lies within an interval. The institution's AutoOnLoad QueryClass validates that `inf <= value <= sup`; the Decidable role lets `Exp::NativeDecide(BoundedBy(v, i), _)` reduce in user programs (D27 §4.3). The basic v1 shape — a sanity/typing claim about a known number. Real interval-arithmetic over expressions is in ProvesBoundOn.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:value",
+      "urn:eigenius:julia:intervals:interval"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "value",
+    "urn:eigenius:core:description": "The numeric value being bounded.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:intervals:BoundedBy"]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:interval",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "interval",
+    "urn:eigenius:core:description": "The interval claimed to bound `value`. Embedded Interval resource.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:intervals:Interval"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:intervals:BoundedBy",
+      "urn:eigenius:julia:intervals:ProvesBoundOn",
+      "urn:eigenius:julia:intervals:ContainsRoot"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:ProvesBoundOn",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ProvesBoundOn",
+    "urn:eigenius:core:description": "Claims that the interval extension of a function on a stated domain is bounded by an interval. AutoOnLoad-validated by re-running the institution's interval extension and checking the claimed bound is at least as tight as what the institution computes (D27 §4.3.3). The function is currently carried as a `function_source` string (Julia source of a single-argument scalar function); when the Symbolics institution lands (Phase 19d), `function_source` will be supplemented or replaced by a typed `function` reference to a SymbolicExpression.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:function_source",
+      "urn:eigenius:julia:intervals:domain",
+      "urn:eigenius:julia:intervals:interval"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:function_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "function_source",
+    "urn:eigenius:core:description": "Julia source of a single-argument scalar function suitable for interval extension via IntervalArithmetic.jl. Concrete form: `x -> <expression in x>` (anonymous function literal). The institution refuses sources that reference free variables, perform IO, or call non-pure builtins. v1 placeholder — supplemented by a typed SymbolicExpression reference once 19d (Symbolics) lands.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 4096,
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:intervals:ProvesBoundOn",
+      "urn:eigenius:julia:intervals:ContainsRoot"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:domain",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "domain",
+    "urn:eigenius:core:description": "Domain interval over which the function is being bounded (or a root is being witnessed).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:intervals:Interval"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:intervals:ProvesBoundOn",
+      "urn:eigenius:julia:intervals:ContainsRoot"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:intervals:ContainsRoot",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ContainsRoot",
+    "urn:eigenius:core:description": "Claims that the function has at least one root in the stated domain, with an interval-Newton-style witness. AutoOnLoad-validated by replaying the witness through the institution. The witness payload is opaque JSON in v1 (a serialised IntervalArithmetic.jl Krawczyk / interval-Newton step record); the institution interprets it.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:intervals:function_source",
+      "urn:eigenius:julia:intervals:domain",
+      "urn:eigenius:julia:intervals:witness"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:intervals:witness",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "witness",
+    "urn:eigenius:core:description": "Opaque JSON payload carrying the interval-Newton-style witness. Institution-interpreted.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:intervals:ContainsRoot"]
+  }
+]

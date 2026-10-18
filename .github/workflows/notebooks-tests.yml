@@ -1,0 +1,135 @@
+name: Notebooks E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "notebooks/**"
+      - "clients/eigenius-ts/**"
+      - "orchestration/**"
+      - "kernel/**"
+      - "proto/**"
+      - "ontologies/**"
+      - "deploy/Dockerfile.kernel"
+      - "deploy/Dockerfile.orchestration"
+      - "docker-compose.yml"
+      - ".github/workflows/notebooks-tests.yml"
+  push:
+    branches: [main]
+
+# A new push to a PR cancels that PR's running checks, which no longer
+# describe its head. Runs on main are keyed by commit, so none is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    name: Playwright golden flow
+    # The org's 8-core larger runner. On the private repo's 2-core standard
+    # runner the kernel image alone took 22m37s of the 25-minute budget.
+    runs-on: build-runner-rust
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: notebooks/package-lock.json
+
+      - name: Install notebook dependencies
+        working-directory: notebooks
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: notebooks
+        run: npx playwright install --with-deps chromium
+
+      # Build the kernel + orchestrator images via buildx with GHA cache.
+      # Each cache scope is per-image so the kernel build and orchestration
+      # build don't fight over a single cache. mode=max also caches
+      # intermediate layers (not just the final manifest), which matters for
+      # the Rust dep build that dominates compile time.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build kernel image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.kernel
+          # Tag must match the `image:` directive in docker-compose.yml.
+          tags: eigenius-kernel:local
+          load: true
+          # `ci` profile skips LTO and ups codegen-units to 256 — ~3-5x
+          # faster than `release` for a functionally identical binary.
+          # See [profile.ci] in Cargo.toml.
+          build-args: |
+            CARGO_PROFILE=ci
+          cache-from: type=gha,scope=eigenius-kernel
+          cache-to: type=gha,scope=eigenius-kernel,mode=max
+
+      - name: Build orchestrator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.orchestration
+          tags: eigenius-orchestrator:local
+          load: true
+          cache-from: type=gha,scope=eigenius-orchestrator
+          cache-to: type=gha,scope=eigenius-orchestrator,mode=max
+
+      # Bring the stack up with the notebook SPA bundled into the
+      # orchestrator image. `--no-build` makes compose use the
+      # locally-loaded images we just built via buildx (which
+      # docker-compose.yml's `image:` directive references), instead of
+      # running `docker build` again.
+      - name: Start docker stack
+        run: |
+          docker compose up -d --no-build kernel orchestrator
+          # Wait for the orchestrator to be healthy + serving notebook SPA.
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/health >/dev/null \
+              && curl -sf http://localhost:8080/notebooks/ >/dev/null; then
+              echo "stack ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8080/health || (docker compose logs && exit 1)
+
+      - name: Run Playwright e2e
+        working-directory: notebooks
+        env:
+          E2E_BASE_URL: http://localhost:8080
+          CI: "true"
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: notebooks/playwright-report/
+          retention-days: 7
+
+      - name: Upload docker logs on failure
+        if: failure()
+        run: docker compose logs --no-color > docker-logs.txt && true
+        continue-on-error: true
+
+      - name: Upload docker logs artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: docker-logs.txt
+          retention-days: 7
+
+      - name: Stop docker stack
+        if: always()
+        run: docker compose down -v

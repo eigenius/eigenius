@@ -1,0 +1,31 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:screening_lp",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:jump:OptimisationProblem"],
+    "urn:eigenius:core:short_name": "screening_lp",
+    "urn:eigenius:core:description": "Kinase-screening resource-allocation LP (worked example for the JuMP-HiGHS institution). A lab has 4 hours of plate-reader access and 6 hours of compound-handling capacity per shift. Each Kinase-Glo run consumes 1 plate-hour and 1 handling-hour and yields 3 information-units; each ADP-Glo run consumes 1 plate-hour and 2 handling-hours and yields 5 information-units. Maximise total information output. (LP relaxation; in practice the run counts would also be constrained to integers — that's a MIP variant.) Solution: n_kg = 2, n_ag = 2, objective = 16. Mirrors the LP probe in api-survey.md so the example doubles as a regression check.",
+    "urn:eigenius:julia:jump:model_source": "function build_model(optimizer)\n    m = JuMP.Model(optimizer)\n    JuMP.set_silent(m)\n    JuMP.@variable(m, n_kg >= 0)\n    JuMP.@variable(m, n_ag >= 0)\n    JuMP.@constraint(m, plate_hours, n_kg + n_ag <= 4)\n    JuMP.@constraint(m, handling_hours, n_kg + 2 * n_ag <= 6)\n    JuMP.@objective(m, Max, 3 * n_kg + 5 * n_ag)\n    return m\nend\n",
+    "urn:eigenius:julia:jump:variables_declared": ["n_kg", "n_ag"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:screening_lp_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:jump:StatusBlock"],
+    "urn:eigenius:core:short_name": "screening_lp_status",
+    "urn:eigenius:julia:jump:termination_status": "OPTIMAL",
+    "urn:eigenius:julia:jump:primal_status": "FEASIBLE_POINT",
+    "urn:eigenius:julia:jump:dual_status": "FEASIBLE_POINT"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:screening_lp_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:jump:OptimisesTo"],
+    "urn:eigenius:core:short_name": "screening_lp_solution",
+    "urn:eigenius:core:description": "The OPTIMAL outcome: n_kg = 2, n_ag = 2, total information value = 16. Dual values report the marginal cost of each binding constraint (plate-hours and handling-hours both bind here). AutoOnLoad re-runs the LP via HiGHS and confirms.",
+    "urn:eigenius:julia:jump:problem": "urn:eigenius:demo:assay:screening_lp",
+    "urn:eigenius:julia:jump:objective_value": 16.0,
+    "urn:eigenius:julia:jump:primal_solution_kv": {"n_kg": 2.0, "n_ag": 2.0},
+    "urn:eigenius:julia:jump:dual_solution_kv": {"plate_hours": -1.0, "handling_hours": -2.0},
+    "urn:eigenius:julia:jump:status_block": "urn:eigenius:demo:assay:screening_lp_status"
+  }
+]

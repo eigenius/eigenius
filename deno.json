@@ -1,0 +1,24 @@
+{
+  "fmt": {
+    "exclude": [
+      ".github/",
+      "CLAUDE.md",
+      "README.md",
+      "clients/eigenius-ts/generated/",
+      "crates/",
+      "demo/",
+      "docker-compose.yml",
+      "docs/",
+      "examples/",
+      "julia/",
+      "kernel/",
+      "node_modules/",
+      "notebooks/",
+      "ontologies/",
+      "orchestration/",
+      "proto/",
+      "storage/",
+      "target/"
+    ]
+  }
+}

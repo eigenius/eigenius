@@ -1,0 +1,657 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Well-known IRI constants for the Eigenius core ontology.
+//!
+//! These constants avoid repeated string parsing for frequently used IRIs.
+//! They correspond to the resources defined in `ontologies/core/core-ontology.json`.
+
+use crate::ontology::iri::Iri;
+
+/// Parse a well-known constant into an [`Iri`]. Panics if the constant
+/// isn't a valid IRI — by construction the strings in this module are.
+pub fn iri(s: &str) -> Iri {
+    Iri::parse(s).expect("well-known IRI constants must be valid")
+}
+
+// --- Namespaces ---
+
+/// The core-ontology IRI prefix. Core is the root layer present on every chain,
+/// so its vocabulary acts as an always-available prelude — e.g. EigenQL short-name
+/// resolution treats this namespace as implicitly imported (see
+/// [`crate::query::resolve`]).
+pub const CORE_NAMESPACE: &str = "urn:eigenius:core:";
+
+// --- Classes ---
+
+pub const CLASS: &str = "urn:eigenius:core:Class";
+pub const PROPERTY: &str = "urn:eigenius:core:Property";
+pub const DATA_TYPE: &str = "urn:eigenius:core:DataType";
+pub const FORMAT: &str = "urn:eigenius:core:Format";
+pub const ENCODING: &str = "urn:eigenius:core:Encoding";
+pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirement";
+
+// --- Layer reconciliation (D20 §6.1) ---
+//
+// A `MergeComorphism` is the typed witness for a `Witness`-strategy
+// resolution: its `merge_transformation` Component has signature
+// `(A, A, Option<A>) -> A` where `A` is the class of the IRI being
+// merged. Distinct from the institution-layer `Comorphism` (which
+// witnesses cross-institution translation); same triadic typing
+// discipline, different application surface.
+
+pub const MERGE_COMORPHISM: &str = "urn:eigenius:core:MergeComorphism";
+pub const MERGE_TRANSFORMATION: &str = "urn:eigenius:core:merge_transformation";
+
+// --- D43 §3.1 — Index Resource classes and their property slots ---
+
+/// Class IRI for a `core:TextIndex` Resource — the first-class
+/// Resource that declares an inverted-index target plus analyzer
+/// configuration for D43 §2.3.
+pub const TEXT_INDEX_CLASS: &str = "urn:eigenius:core:TextIndex";
+
+/// Class IRI for a `core:VectorIndex` Resource — the first-class
+/// Resource that declares an embedded-vector target plus model,
+/// dimensionality, distance metric, strategy, and policy for
+/// D43 §2.4 / §5.
+pub const VECTOR_INDEX_CLASS: &str = "urn:eigenius:core:VectorIndex";
+
+/// Class IRI for a `core:ValueIndex` Resource — the first-class
+/// Resource that declares an EXACT value-index target (D65).
+pub const VALUE_INDEX_CLASS: &str = "urn:eigenius:core:ValueIndex";
+
+/// Property IRI for `target_property` — the Property an Index
+/// Resource (TextIndex / VectorIndex / ValueIndex) targets for indexing.
+/// Value is a resource reference to a `core:Property`.
+pub const TARGET_PROPERTY: &str = "urn:eigenius:core:target_property";
+
+/// Property IRI for `text_analyzer` — the analyzer ID for a
+/// TextIndex (e.g. `"en-stem-v1"`).
+pub const TEXT_ANALYZER: &str = "urn:eigenius:core:text_analyzer";
+
+/// Property IRI for `value_normalizer` — the normalizer Resource a
+/// ValueIndex applies to values before exact keying (D65). One of
+/// `urn:eigenius:core:normalizers:{identity,lowercase,lowercase_trim}`;
+/// default `identity` when omitted.
+pub const VALUE_NORMALIZER: &str = "urn:eigenius:core:value_normalizer";
+
+/// Property IRI for `vec_model` — the Embedder Component IRI a
+/// VectorIndex uses.
+pub const VEC_MODEL: &str = "urn:eigenius:core:vec_model";
+
+/// Property IRI for `vec_dim` — declared output dimensionality.
+pub const VEC_DIM: &str = "urn:eigenius:core:vec_dim";
+
+/// Property IRI for `vec_distance` — distance-metric Resource ref
+/// (one of `core:distances:cosine | l2 | dot`).
+pub const VEC_DISTANCE: &str = "urn:eigenius:core:vec_distance";
+
+/// Property IRI for `vec_strategy` — per-segment strategy Resource
+/// ref (one of `core:strategies:flat | hnsw | auto`).
+pub const VEC_STRATEGY: &str = "urn:eigenius:core:vec_strategy";
+
+/// Property IRI for `vec_hnsw_m` — HNSW M parameter (optional).
+pub const VEC_HNSW_M: &str = "urn:eigenius:core:vec_hnsw_m";
+
+/// Property IRI for `vec_hnsw_ef_construction` — HNSW build-time
+/// exploration depth (optional).
+pub const VEC_HNSW_EF_CONSTRUCTION: &str = "urn:eigenius:core:vec_hnsw_ef_construction";
+
+/// Property IRI for `vec_embedding_policy` — embedding-policy
+/// Resource ref (one of `core:embedding_policies:eager_on_load | lazy_on_query | manual`).
+pub const VEC_EMBEDDING_POLICY: &str = "urn:eigenius:core:vec_embedding_policy";
+/// The class a `MergeComorphism` is declared for — its `A` in the
+/// `(A, A, Option<A>) -> A` transformation signature (D37 §3.3, §6.1).
+/// Required on every committed `MergeComorphism` so the witness path
+/// can early-reject application to a mismatched conflict class and so
+/// the notebook's WitnessEditor can show only applicable comorphisms
+/// for the current conflict's class.
+pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
+
+/// The declared Pi-type of a standalone `Lambda` resource (D37 §4.1,
+/// §5.1). Carrying the type alongside the term lets the validator
+/// commit-time-check the lambda's body against its declared signature
+/// rather than deferring the check to apply time. Optional on
+/// embedded lambdas inside `program` bodies (where the type is
+/// inferred from the surrounding `Pi`), required on top-level Lambda
+/// resources.
+pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
+
+/// The class a `program:Program` declares it produces (`domain:
+/// [program:Program]`, `class_types: [core:Class]`, declared in
+/// `ontologies/program/program-ontology.json`).
+///
+/// A program is typed `I -> O`, so its output inhabits `O`. `run_program` reads
+/// this to give an output its `is_a` when the computation stated no class of its
+/// own — a wrapped-R script builds its result through `r_eigon_begin` /
+/// `r_eigon_set_*` and need not name one. The runtime substrate used to supply
+/// that class by stamping `reflection:DerivedResource` on every output; P4 (6/n)
+/// deleted the axis (a computed claim rests on `App(Declared(plan),
+/// Observed(inputs))`, not on the fact that a run happened) and P5 (2/n) removed
+/// the class, so the declared type is what fills the slot now.
+pub const PROGRAM_OUTPUT_TYPE: &str = "urn:eigenius:program:output_type";
+
+// --- Merge resolution records (D38 §3) ---
+//
+// One `MergeResolutionRecord` resource is committed alongside the
+// resolved bodies in every merge layer, one record per resolved
+// conflict. Required slots pin the strategy + conflict id; per-strategy
+// optional slots capture the strategy-specific choices. For Witness
+// resolutions the comorphism + transformation Lambda are also copied
+// into the merge layer at their original IRIs so the record's pointer
+// is guaranteed to resolve on the merge layer's own chain (D38 §3.2).
+
+pub const MERGE_RESOLUTION_RECORD: &str = "urn:eigenius:core:MergeResolutionRecord";
+pub const MERGE_RECORD_CONFLICT_ID: &str = "urn:eigenius:core:merge_record_conflict_id";
+pub const MERGE_RECORD_STRATEGY: &str = "urn:eigenius:core:merge_record_strategy";
+pub const MERGE_RECORD_BRANCH_A_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_a_source_layer";
+pub const MERGE_RECORD_BRANCH_B_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_b_source_layer";
+pub const MERGE_RECORD_ANCESTOR_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_ancestor_source_layer";
+pub const MERGE_RECORD_WITNESS: &str = "urn:eigenius:core:merge_record_witness";
+pub const MERGE_RECORD_WITNESS_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_witness_source_layer";
+pub const MERGE_RECORD_RENAME_SIDE: &str = "urn:eigenius:core:merge_record_rename_side";
+pub const MERGE_RECORD_RENAME_FROM_IRI: &str = "urn:eigenius:core:merge_record_rename_from_iri";
+pub const MERGE_RECORD_RENAME_TO_IRI: &str = "urn:eigenius:core:merge_record_rename_to_iri";
+pub const MERGE_RECORD_QUOTIENT_KIND: &str = "urn:eigenius:core:merge_record_quotient_kind";
+pub const MERGE_RECORD_QUOTIENT_WINNER: &str = "urn:eigenius:core:merge_record_quotient_winner";
+pub const MERGE_RECORD_RESTRUCTURE_NEW_PARENT: &str =
+    "urn:eigenius:core:merge_record_restructure_new_parent";
+pub const MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS: &str =
+    "urn:eigenius:core:merge_record_restructure_affected_class";
+
+/// Canonical optional/maybe inductive (Phase 15b step 3, D20 §6.1).
+/// Used by `MergeComorphism` to type the optional ancestor argument
+/// of a `(A, A, Option<A>) -> A` witness signature.
+pub const OPTION: &str = "urn:eigenius:core:Option";
+
+/// Canonical list inductive ([`crate::nbe::term::list_decl`]). A kernel
+/// built-in (not a chain resource), so type-expression decoders
+/// short-circuit this IRI to the built-in decl — as they do the
+/// primitive datatypes — rather than resolving it against the chain.
+pub const LIST: &str = "urn:eigenius:core:List";
+
+// --- Inductive types (Phase 11b, D19) ---
+
+pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
+pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
+
+/// D52 §12 — smart-constructor macro decl persisted as a chain
+/// resource so child-file compiles can re-hydrate it via
+/// `compile_against_layer`. The resource carries the macro's name,
+/// parameter list, return type, and body — all serialized as JSON
+/// blobs of the corresponding AST shapes. Macros emit no chain
+/// resources at *call sites* (the call is fully inlined at compile
+/// time); this resource is only the declaration's persistent form,
+/// not the call expansion.
+pub const MACRO: &str = "urn:eigenius:core:Macro";
+/// Serialized macro-declaration body (JSON of `ast::MacroDecl`).
+pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
+
+/// D39 §4.1 atomic propositional inductive: `Asserts(iri) : Prop` —
+/// uniform-parameter, zero-constructor inductive type declared in
+/// `Sort(0)`. Different IRIs produce distinct propositions; the only
+/// inhabitation paths are institutional dispatch or `eigentt:Axiom`
+/// introduction (D46 §10). Used by the D49 witness emitter as the
+/// default canonical proposition when a target resource carries no
+/// explicit `eigentt:proposition`. The well-known IRI is
+/// pinned here so emission and the eventual `justification:Grounds.declared`
+/// consumer share one source of truth.
+pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
+pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
+pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
+pub const CTORS: &str = "urn:eigenius:core:ctors";
+
+/// The two inductives the D47 codec writes into, and the only two whose constructor names it
+/// hard-codes. They were spelled as private constants in five places across four modules
+/// before D85 step 4; the codec, the ESL emitters and Rule 21 all mean the same declaration.
+pub const EIGENTT_TERM: &str = "urn:eigenius:eigentt:Term";
+pub const LEVEL: &str = "urn:eigenius:core:Level";
+pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
+pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
+pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";
+pub const TYPE_NAME: &str = "urn:eigenius:core:type_name";
+pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
+pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";
+pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
+pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
+/// Index telescope on an inductive-type resource (D48 Phase J Layer 2).
+/// Array of `InductiveParam` resources, parallel to `type_params`
+/// but for the indices that vary per constructor. Absent or empty for
+/// non-indexed declarations (the default).
+pub const INDICES: &str = "urn:eigenius:core:indices";
+/// Result sort of an inductive type former (D48 Phase J Layer 2).
+/// A `core:Level` tree — `Zero` / `Succ` / `Max` / `IMax` / `Param` —
+/// so `data X : Sort u` is expressible. Absent defaults
+/// to `Succ(Zero)`, the level of `Set`.
+pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
+
+/// The level variables an inductive declaration binds (D76 Phase E2).
+/// Ordered — a reference instantiates by position.
+pub const UNIVERSE_PARAMS: &str = "urn:eigenius:core:universe_params";
+/// Typed-ctor full Π-telescope encoded via the D47 type-fragment codec
+/// (D48 Phase J Layer 2). Present on `InductiveCtor` resources that
+/// were authored with the `name : <type-expr>` surface form. When
+/// present, the kernel decoder uses this directly and ignores
+/// `arg_types`. Required for ctors of indexed inductives (the
+/// positional form cannot express conclusion indices).
+pub const CTOR_TYPE: &str = "urn:eigenius:core:ctor_type";
+
+/// Names of a constructor's telescope binders the author does not write (D88 §4).
+///
+/// Each name must bind exactly once in `CTOR_TYPE`'s telescope past the inductive's parameter
+/// prefix. Names rather than positions so the list and the telescope cannot silently disagree —
+/// a name matching no binder is an error at decode, where a stale index would just move which
+/// slot an argument lands on.
+pub const IMPLICIT_ARGS: &str = "urn:eigenius:core:implicit_args";
+
+// --- Institution-realisation vocabulary (D14) ---
+
+/// is_a marker for a cross-institution comorphism resource. The Comorphism class is declared in `institution-ontology.json` and
+/// carries `export_format`, `transformation`, `import_format`, and
+/// `exact` properties — see [`EXPORT_FORMAT`], [`TRANSFORMATION`],
+/// [`IMPORT_FORMAT`], [`EXACT`].
+pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
+
+// --- Comorphism triadic shape (s, m, t) ---
+
+/// ExportFormat reference on a Comorphism — the source-side `s`.
+pub const EXPORT_FORMAT: &str = "urn:eigenius:institution:export_format";
+/// EigenTT Component IRI implementing the comorphism's middle `m: S → T`.
+pub const TRANSFORMATION: &str = "urn:eigenius:institution:transformation";
+/// ImportFormat reference on a Comorphism — the target-side `t`.
+pub const IMPORT_FORMAT: &str = "urn:eigenius:institution:import_format";
+/// Exactness flag on a Comorphism (Diaconescu 2025, Thm. 14.15). Absent
+/// or `false` is the safe default; only explicit `true` is an exactness
+/// claim.
+pub const EXACT: &str = "urn:eigenius:institution:exact";
+
+// --- ExportFormat / ImportFormat ---
+
+/// is_a marker for an ExportFormat resource — a typed outbound view of
+/// a source institution's resource class.
+pub const EXPORT_FORMAT_CLASS: &str = "urn:eigenius:institution:ExportFormat";
+/// is_a marker for an ImportFormat resource — a typed inbound
+/// constructor for a target institution's resource class.
+pub const IMPORT_FORMAT_CLASS: &str = "urn:eigenius:institution:ImportFormat";
+
+/// Source class of an ExportFormat — the resource class it extracts from.
+pub const FROM_CLASS: &str = "urn:eigenius:institution:from_class";
+/// Target class of an ImportFormat — the resource class it constructs.
+pub const TO_CLASS: &str = "urn:eigenius:institution:to_class";
+/// EigenTT type IRI of an ExportFormat / ImportFormat payload.
+pub const PAYLOAD_TYPE: &str = "urn:eigenius:institution:payload_type";
+/// Procedure IRI dispatched to the institution's `extract_typed` /
+/// `reify` handler.
+pub const PROCEDURE: &str = "urn:eigenius:institution:procedure";
+
+// --- QueryClass ---
+
+/// is_a marker for a QueryClass resource — a typed function on resources
+/// in the institution's fibre, with one or more dispatch roles.
+pub const QUERY_CLASS_CLASS: &str = "urn:eigenius:institution:QueryClass";
+
+/// Input class of a QueryClass — dispatch keys on this IRI.
+pub const QUERY_CLASS: &str = "urn:eigenius:institution:query_class";
+/// Output class of a QueryClass — must be `Verdict` for AutoOnLoad /
+/// Decidable roles.
+pub const RESULT_CLASS: &str = "urn:eigenius:institution:result_class";
+/// Array of dispatch role IRIs declaring how the kernel routes calls
+/// to this QueryClass.
+pub const DISPATCH_ROLE: &str = "urn:eigenius:institution:dispatch_role";
+/// IRI of the QueryClass implementation — either a Component (the
+/// kernel orchestrates extract → component → reify) or an
+/// institution-runtime procedure dispatched to the institution's
+/// `query` handler.
+pub const QUERY_HANDLER: &str = "urn:eigenius:institution:query_handler";
+
+// --- RuntimeKind / DispatchRole / Verdict ---
+
+/// is_a marker for a RuntimeKind resource on an Institution.
+pub const RUNTIME_KIND_CLASS: &str = "urn:eigenius:institution:RuntimeKind";
+/// `runtime` property on an Institution — IRI of the runtime kind.
+pub const RUNTIME: &str = "urn:eigenius:institution:runtime";
+/// External service (gRPC, LSP, etc.) runtime.
+pub const RUNTIME_EXTERNAL: &str = "urn:eigenius:institution:runtimes:external";
+/// In-process Rust runtime (kernel-linked).
+pub const RUNTIME_IN_PROCESS: &str = "urn:eigenius:institution:runtimes:in_process";
+
+/// is_a marker for a DispatchRole resource on a QueryClass.
+pub const DISPATCH_ROLE_CLASS: &str = "urn:eigenius:institution:DispatchRole";
+/// Explicit-invocation dispatch (FIBER / RPC).
+pub const DISPATCH_ON_DEMAND: &str = "urn:eigenius:institution:dispatch_roles:on_demand";
+/// Auto-on-Load dispatch — fires when a resource of the bound query
+/// class enters the chain via Load. Replaces the prior
+/// `validate_morphism` mechanism.
+pub const DISPATCH_AUTO_ON_LOAD: &str = "urn:eigenius:institution:dispatch_roles:auto_on_load";
+/// Decidable dispatch — referenced from `Exp::NativeDecide`. Replaces
+/// the prior `decide` mechanism.
+pub const DISPATCH_DECIDABLE: &str = "urn:eigenius:institution:dispatch_roles:decidable";
+
+/// `requires_environment` property on an Institution — IRI of a
+/// `RuntimeEnvironment` resource the institution dispatches into.
+/// Required for institutions whose `runtime` is `external` (D31 §5).
+pub const INSTITUTION_REQUIRES_ENVIRONMENT: &str = "urn:eigenius:institution:requires_environment";
+
+/// `image_digest` property on a `RuntimeEnvironment` — the
+/// content-addressed worker image (`sha256:...`) the substrate
+/// dispatches into.
+pub const RUNTIME_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+
+/// `method_name` property on a `RuntimeMethodSignature` — the symbol
+/// the worker resolves in `Main` after handler-package `using` import.
+pub const RUNTIME_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
+
+/// `language` property on a `RuntimeEnvironment` — the language
+/// identifier (`"julia"`, `"python"`, …) the substrate dispatches
+/// against its `LanguageRuntime` registry.
+pub const RUNTIME_LANGUAGE: &str = "urn:eigenius:runtime:language";
+
+/// is_a marker for the `Verdict` inductive type — the tri-state
+/// outcome of an institution-bound predicate query (D14 §6.1).
+pub const VERDICT: &str = "urn:eigenius:institution:Verdict";
+/// `Verdict::Holds` constructor name.
+pub const VERDICT_HOLDS: &str = "Holds";
+/// `Verdict::Fails` constructor name.
+pub const VERDICT_FAILS: &str = "Fails";
+/// `Verdict::Undecidable` constructor name.
+pub const VERDICT_UNDECIDABLE: &str = "Undecidable";
+
+/// Name of a named constructor-argument binder (Phase 11b step 15h).
+/// Presence on an `InductiveArgType` resource flags the arg as a
+/// Π/SizedPi binder rather than an anonymous positional type.
+pub const BINDER_NAME: &str = "urn:eigenius:core:binder_name";
+
+// --- Term resource shapes for codata observation types (Phase 11b step 15h.3) ---
+
+/// is_a marker for a non-dependent arrow `A -> B` in a codata
+/// observation type.
+pub const TYPE_ARROW: &str = "urn:eigenius:core:TypeArrow";
+/// is_a marker for a size-binder arrow `{j < i} -> body` or
+/// `{j : Kind} -> body` in a codata observation type.
+pub const TYPE_BINDER_ARROW: &str = "urn:eigenius:core:TypeBinderArrow";
+
+/// Domain of a `TypeArrow` — embedded Term resource (or string).
+pub const ARROW_DOMAIN: &str = "urn:eigenius:core:arrow_domain";
+/// Codomain of a `TypeArrow`.
+pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
+
+/// Kind of a size-binder arrow's bound variable. A name string — the size sort is `"Size"`.
+/// (`urn:eigenius:core:Size` is still ACCEPTED by the decoder's `:Size` suffix match, but it names
+/// no resource on any chain and nothing emits it. This property was not retyped
+/// to an `eigentt:Term` along with `core:param_kind` / `core:type_name`.)
+pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
+/// Body of a size-binder arrow — embedded Term resource or
+/// string.
+pub const BINDER_BODY: &str = "urn:eigenius:core:binder_body";
+
+// --- Properties ---
+
+pub const IS_A: &str = "urn:eigenius:core:is_a";
+pub const DESCRIPTION: &str = "urn:eigenius:core:description";
+pub const SHORT_NAME: &str = "urn:eigenius:core:short_name";
+pub const PARENT_CLASSES: &str = "urn:eigenius:core:subclass_of";
+/// `core:EquivalentClasses` — classes that denote the same thing (D99 §11, OWL 2's
+/// `EquivalentClasses`). Consulted by [`crate::layer::Layer::is_subclass_of`] for subsumption only.
+pub const EQUIVALENT_CLASSES: &str = "urn:eigenius:core:EquivalentClasses";
+/// `core:classes` — the classes an [`EQUIVALENT_CLASSES`] resource lists.
+pub const EQUIVALENT_CLASSES_MEMBERS: &str = "urn:eigenius:core:classes";
+pub const REQUIRES: &str = "urn:eigenius:core:requires";
+pub const RECOMMENDS: &str = "urn:eigenius:core:recommends";
+pub const DATA_TYPE_PROP: &str = "urn:eigenius:core:data_type";
+pub const FORMAT_PROP: &str = "urn:eigenius:core:format";
+pub const PATTERN: &str = "urn:eigenius:core:pattern";
+pub const DOMAIN: &str = "urn:eigenius:core:domain";
+pub const CLASS_TYPES: &str = "urn:eigenius:core:class_types";
+pub const ALLOWS_ONLY: &str = "urn:eigenius:core:allows_only";
+pub const ELEMENT_TYPE: &str = "urn:eigenius:core:element_type";
+pub const CONDITIONAL_REQUIRES: &str = "urn:eigenius:core:conditional_requires";
+pub const WHEN_PROPERTY: &str = "urn:eigenius:core:when_property";
+pub const HAS_VALUE: &str = "urn:eigenius:core:has_value";
+pub const THEN_REQUIRES: &str = "urn:eigenius:core:then_requires";
+pub const THEN_RECOMMENDS: &str = "urn:eigenius:core:then_recommends";
+pub const MIN_VALUE: &str = "urn:eigenius:core:min_value";
+pub const MAX_VALUE: &str = "urn:eigenius:core:max_value";
+pub const MIN_LENGTH: &str = "urn:eigenius:core:min_length";
+pub const MAX_LENGTH: &str = "urn:eigenius:core:max_length";
+pub const CONTENT_TYPE: &str = "urn:eigenius:core:content_type";
+pub const CONTENT_ENCODING: &str = "urn:eigenius:core:content_encoding";
+pub const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
+
+// --- DataType IRIs ---
+
+pub const STRING: &str = "urn:eigenius:core:string";
+/// An absolute IRI — a refinement of [`STRING`], not a separate carrier (D88 §3).
+pub const IRI_TYPE: &str = "urn:eigenius:core:iri";
+pub const INTEGER: &str = "urn:eigenius:core:integer";
+pub const FLOAT: &str = "urn:eigenius:core:float";
+pub const BOOLEAN: &str = "urn:eigenius:core:boolean";
+pub const RESOURCE: &str = "urn:eigenius:core:resource";
+pub const RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
+pub const VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
+pub const JSON: &str = "urn:eigenius:core:json";
+/// D94 exact numerics. `core:bigint` is a REFINEMENT of `core:rational` checking `den == 1`, not a
+/// separate carrier — both are `Exp::LitRat` (D88 §3, the shape `core:iri` has to `core:string`).
+pub const RATIONAL: &str = "urn:eigenius:core:rational";
+/// See [`RATIONAL`].
+pub const BIGINT: &str = "urn:eigenius:core:bigint";
+/// D93 units of measure. A rational exponent vector over the seven SI base dimensions — NOT the
+/// unit type, which is `One`.
+pub const UNIT: &str = "urn:eigenius:core:unit";
+/// D93 — the unit product and power. Declared as axioms in `units.esl`, and reduced by the kernel
+/// (`nbe::unit_ext`) the way nanoda's kernel reduces `Nat.add`: recognised by name, not by a term
+/// form of their own.
+pub const UNITS_MUL: &str = "urn:eigenius:units:mul";
+/// See [`UNITS_MUL`].
+pub const UNITS_POW: &str = "urn:eigenius:units:pow";
+
+/// **D79 §2.2 — the synthetic index predicate for term references.**
+///
+/// `(R, core:mentions, i)` means *`R` carries a D47-encoded term that names `i`*.
+/// Emitted by `extract_indexable_triples` for `core:inductive`-typed values and
+/// resolvable with `scan_predicate_object(core:mentions, i)` — "which resources
+/// mention declaration `i`", the question the retroactive scan and a merge's
+/// rebound-set pass both ask.
+///
+/// **Deliberately not declared as a `core:Property`.** No resource carries it; it
+/// exists only in the triple index. Declaring it would say resources *may* carry
+/// it, which is the same kind of misleading declaration D79 §2.1 exists to remove.
+pub const MENTIONS: &str = "urn:eigenius:core:mentions";
+pub const INDUCTIVE: &str = "urn:eigenius:core:inductive";
+
+// --- Format IRIs ---
+
+pub const FMT_DATE: &str = "urn:eigenius:core:formats:date";
+pub const FMT_DATETIME: &str = "urn:eigenius:core:formats:datetime";
+pub const FMT_TIME: &str = "urn:eigenius:core:formats:time";
+pub const FMT_IRI: &str = "urn:eigenius:core:formats:iri";
+pub const FMT_UUID: &str = "urn:eigenius:core:formats:uuid";
+pub const FMT_REGEX: &str = "urn:eigenius:core:formats:regex";
+
+// --- Encoding IRIs ---
+
+pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
+
+// --- Reflection namespace (D6b, Phase 10b) ---
+
+pub const META_LEVEL: &str = "urn:eigenius:core:meta_level";
+// The four grade classes stood here. They stamped a WARRANT grade onto a
+// resource, which conflated the two axes: how a resource came to exist is
+// provenance and applies to everything, while what evidence exists for its
+// proposition is warrant and applies only to a resource carrying one. Warrant is
+// now computed from a justification term and stored nowhere, so there is nothing
+// for a class to name. `VerifiedResource subclass_of DerivedResource` went with
+// them — it asserted an ordering between two grades the design holds to be
+// independent.
+/// `institution:EmittedDerivation` — marker subclass of
+/// `DerivedResource` for resources the kernel commits as side-effects of
+/// AutoOnLoad institution dispatches. It records what the run produced and
+/// grounds nothing on its own: the witness emitter used to walk these directly
+/// (no ProgramTrace required) to admit
+/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6, but a
+/// computed claim rests on the plan being DECLARED to denote a function of its
+/// input and on the input being OBSERVED, and no execution establishes either.
+pub const INSTITUTION_EMITTED_DERIVATION: &str = "urn:eigenius:institution:EmittedDerivation";
+/// `institution:from_subject` — the analysis/claim IRI that triggered
+/// the emission of an `InstitutionEmittedDerivation`. Bidirectional
+/// navigability between an analysis and its derivations.
+pub const FROM_SUBJECT: &str = "urn:eigenius:institution:from_subject";
+/// `institution:runtime_invocation` — back-pointer to the producing
+/// `RuntimeInvocation` on an `InstitutionEmittedDerivation`.
+pub const RUNTIME_INVOCATION: &str = "urn:eigenius:institution:runtime_invocation";
+pub const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
+pub const DERIVATION: &str = "urn:eigenius:prov:derivation";
+// `epistemic_status` and the four `epistemic:*` individuals went with the grade
+// classes. The property let a trace nominate the grade of its own output, which
+// is the self-nomination the design forbids: the thing being graded chose its
+// own grade and nothing checked the choice.
+
+// --- D49 ChainWitness: Trace event classes + canonical proposition ---
+//
+// The four Trace classes are the chain-side artifacts the D49 witness
+// machinery reads. Their IRIs are matched by class name in
+// `trace_category` during `layer_admits_witness`; nothing is
+// materialised into an index (D66 slice 0).
+
+/// The abstract parent of the provenance traces. Used as the subsumption target
+/// when the kernel has to tell a trace from any other emitted resource —
+/// `institution::dispatch::finalize_emitted_resource` withholds the
+/// `InstitutionEmittedDerivation` marker from anything under this class, since a
+/// trace records what a check ESTABLISHED and a derivation records only what a
+/// run produced.
+pub const TRACE: &str = "urn:eigenius:prov:Trace";
+/// Resource recording that a resource was declared by a human/agent.
+/// Carries `prov:resource` (target IRI). Per D49 §6, a successful
+/// commit emits an `IsDeclaredAs` witness for the target resource.
+pub const DECLARATION_TRACE: &str = "urn:eigenius:prov:DeclarationTrace";
+/// Resource recording that a resource was observed from external reality.
+/// Carries `prov:resource` and `prov:was_generated_by`. Per D49 §6, a
+/// successful commit emits an `IsObservedAs` witness.
+pub const OBSERVATION_TRACE: &str = "urn:eigenius:prov:ObservationTrace";
+/// Resource recording a complete program execution. Pure provenance: it admits
+/// no witness, because the fact that a computation ran grounds nothing. What a
+/// computed claim rests on is `App(Declared(plan), Observed(inputs))`, whose two
+/// halves come from the plan's [`DECLARATION_TRACE`] and the input's
+/// [`OBSERVATION_TRACE`].
+pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
+/// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
+/// one, distinguished by [`PROOF_SYSTEM`] rather than by class: an external prover,
+/// whose exported blob is externalized forward and compared by `def_eq` against the claim's own
+/// proposition (D74), and the kernel, whose type-checked `justification:Grounds` certificate is
+/// itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
+pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
+
+/// `prov:resource` — the target IRI a Trace points at. Common to
+/// all four Trace classes (semantically; for `ProgramTrace` the role is
+/// played by the output resource's own IRI, not a separate property).
+pub const REFLECTION_RESOURCE: &str = "urn:eigenius:prov:resource";
+
+/// `prov:proof_system` — which verifier checked the proof recorded by a
+/// [`VERIFICATION_TRACE`]: an external prover (`lean4`, `coq`, `agda`) or `urn:eigenius:kernel`.
+pub const PROOF_SYSTEM: &str = "urn:eigenius:prov:proof_system";
+
+/// `prov:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
+/// prover's blob, or the chain-resident IRI of the `justification:Conclusion` whose certificate checked.
+pub const PROOF_TERM: &str = "urn:eigenius:prov:proof_term";
+
+/// `prov:timestamp` — when a Trace's event occurred. Required by every Trace class.
+pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
+
+/// `prov:judgement` — the checker's RESULT on a [`VERIFICATION_TRACE`]: `holds(logic, t, P)`
+/// (D87 §2). What the trace ESTABLISHED, as against what it records about the occasion, and what
+/// `witness_admission::emit_from_trace` reads to key `Verified` — off this judgement's own `type`
+/// rather than off the target's stored `canonical_proposition`.
+pub const PROV_JUDGEMENT: &str = "urn:eigenius:prov:judgement";
+
+/// `prov:checked_declaration` — which declaration inside the artifact [`PROOF_TERM`] names was
+/// checked. [`PROOF_TERM`] alone under-determines the verdict: an export is a whole environment,
+/// so a party re-running the check would have to try every declaration in it to find the one the
+/// proposition was compared against (D87 §5).
+pub const CHECKED_DECLARATION: &str = "urn:eigenius:prov:checked_declaration";
+
+/// `prov:permitted_axioms` — the axiom names the checker was permitted to admit, as the check
+/// actually ran (D87 §5). One of the two inputs a verdict is a function of that nothing recorded,
+/// so two proofs — one leaning on `Classical.choice` and one not — produced identical traces.
+pub const PERMITTED_AXIOMS: &str = "urn:eigenius:prov:permitted_axioms";
+
+/// `prov:checker_identity_kind` — which kind of identity [`CHECKER_IDENTITY`] carries:
+/// `image_digest` (binds the running binary) or `source_pin` (binds only the source). Kind plus
+/// value, so a stronger identity adds a kind rather than reshaping the schema (D87 §9.3).
+pub const CHECKER_IDENTITY_KIND: &str = "urn:eigenius:prov:checker_identity_kind";
+
+/// `prov:checker_identity` — the checker's identity in the form [`CHECKER_IDENTITY_KIND`] names.
+pub const CHECKER_IDENTITY: &str = "urn:eigenius:prov:checker_identity";
+
+/// `eigentt:proposition` — the optional `Prop`-typed
+/// proposition a resource asserts (per D49 §6). Carries a D47-encoded
+/// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
+/// at witness-emission time. Type-checked at `Prop` at commit by
+/// its `eigentt:expected_type` (`Prop`) and Rule 21.
+pub const PROPOSITION: &str = "urn:eigenius:eigentt:proposition";
+
+/// `eigentt:expected_type` — the type a property's term-valued instances must
+/// check against. Rule 21 forms `Ann(value, expected_type)` and runs the
+/// kernel's existing inference path, whose `Ann` rule *is* the check.
+///
+/// This replaced `PROPOSITION_SLOTS`, a hardcoded list of the slots required to
+/// hold a proposition. That list could say nothing but "must be a Prop", so
+/// every other obligation — a category value being a category — went unstated,
+/// and the rule's `check_infer`-then-discard fallback let a value of the wrong
+/// type commit as long as it had *some* type.
+pub const EXPECTED_TYPE: &str = "urn:eigenius:eigentt:expected_type";
+
+/// `eigentt:is_a_type` — when true, the property's values must themselves be
+/// types (`check_type`, the first step of the same `Ann` rule). Separate from
+/// [`EXPECTED_TYPE`] because the inhabited sorts vary within a single slot and
+/// that property holds one term.
+pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
+
+// --- D49 ChainWitness: predicate-type IRIs ---
+//
+// The three kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
+// predicate types. ESL has no constructors for their inhabitants; the
+// kernel synthesises `Val::ChainWitness` values at `justification:Grounds.*`
+// constructor type-check time via the per-Layer witness-index lookup.
+// The IRIs are referenced from the `justification:Grounds` indexed
+// inductive's constructor signatures (D39 §5) and from the witness-
+// synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
+//
+// `IsDerivedAs` was a fourth until the three-grounds change. It could only ever
+// be consumed by `justification:Grounds.derived`, which is gone with the
+// `DerivedEvidence` term constructor, so no lookup can ask for it — removing the
+// constant is forced by the algebra, not a separate decision.
+
+pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:witness:IsDeclaredAs";
+pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:witness:IsObservedAs";
+pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:witness:IsVerifiedAs";
+
+/// `logic:False` — bottom, the codomain of a negation (`ontologies/logic/logic.esl`). Named here
+/// because the kernel's own `Exp::Apart` rule types its proof as `Id(A, x, y) -> logic:False`.
+pub const LOGIC_FALSE: &str = "urn:eigenius:logic:False";
+
+/// Helper: map a class IRI for one of the three `ChainWitness.IsXxAs`
+/// predicate types to its `WitnessCategory`, or `None` if the IRI is
+/// not a ChainWitness predicate.
+pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::WitnessCategory> {
+    use crate::witness::WitnessCategory;
+    match iri {
+        CHAIN_WITNESS_IS_DECLARED_AS => Some(WitnessCategory::Declared),
+        CHAIN_WITNESS_IS_OBSERVED_AS => Some(WitnessCategory::Observed),
+        CHAIN_WITNESS_IS_VERIFIED_AS => Some(WitnessCategory::Verified),
+        _ => None,
+    }
+}
