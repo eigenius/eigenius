@@ -14,7 +14,6 @@ import FeaturedWriting from "../components/FeaturedWriting.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import PaperCard from "../components/PaperCard.astro";
-import YouTubeEmbed from "../components/YouTubeEmbed.astro";
 import heroBgSrc from "../assets/hero_background.png";
 import { getImage } from "astro:assets";
 
@@ -28,15 +27,6 @@ const heroBg = await getImage({
   width: 2400,
 });
 
-// The landing-page Watch section highlights the platform pitch video.
-// Subsequent videos in the playlist are embedded on the concept
-// pages they correspond to ("Bridging Languages" on /concepts/institutions/,
-// "Feedback Loop" on /concepts/).
-//
-// Source playlist:
-// https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA
-const PLAYLIST_URL =
-  "https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA";
 ---
 
 <BaseLayout
@@ -180,31 +170,6 @@ const PLAYLIST_URL =
       </div>
     </section>
 
-    <!-- ───────── Watch: the platform pitch ───────── -->
-    <section class="section section-watch">
-      <div class="section-inner">
-        <span class="section-eyebrow">Watch</span>
-        <h2 class="section-title">
-          Three minutes on what Eigenius is.
-        </h2>
-        <p class="section-prose">
-          The infrastructure-for-truth pitch in video form.
-          Additional explainers covering specific concepts
-          (cross-vocabulary bridges, AI reasoning verification, kernel
-          design) are embedded on the relevant
-          <a href="/concepts/">Concepts</a> pages, and the
-          <a href={PLAYLIST_URL}>full playlist on YouTube ↗</a> walks
-          through everything.
-        </p>
-        <div class="watch-single">
-          <YouTubeEmbed
-            videoId="33jgEGcPBhs"
-            title="Eigenius — The Infrastructure for Truth"
-            description="The platform pitch: how Eigenius makes scientific reasoning machine-checkable, so AI agents have to show their work instead of letting it hide in author prose."
-          />
-        </div>
-      </div>
-    </section>
 
     <!-- ───────── Writing (latest series or post) ───────── -->
     <FeaturedWriting />
@@ -291,11 +256,5 @@ const PLAYLIST_URL =
   /* ───────── Trust-gap section variant ───────── */
   .section-trust-gap {
     background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
-  }
-
-  /* ───────── Watch section (single centered video) ───────── */
-  .watch-single {
-    max-width: 48rem;
-    margin: 1.4rem auto 0 auto;
   }
 </style>

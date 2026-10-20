@@ -6,7 +6,6 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
-import YouTubeEmbed from "../components/YouTubeEmbed.astro";
 
 const description =
   "The structural ideas behind Eigenius. The four-warrant taxonomy, domain bridges, institutions, and the feedback loop that makes AI reasoning agents auditable — written for readers who want to understand the framework without committing to learning the platform.";
@@ -46,17 +45,10 @@ const description =
           a type-checker, and a test suite give them a feedback loop
           they cannot fake. AI reasoning agents, by contrast, produce
           prose that nobody mechanically checks &mdash; so brilliance
-          and hallucination look identical at the surface. The video
-          below frames the move: build a feedback loop for AI thought
-          out of typed chain commits the kernel can verify.
+          and hallucination look identical at the surface. The move:
+          build a feedback loop for AI thought out of typed chain
+          commits the kernel can verify.
         </p>
-        <div class="watch-single">
-          <YouTubeEmbed
-            videoId="_yGO5p1YUjs"
-            title="Eigenius — The Feedback Loop for AI Thought"
-            description="Why AI coding agents are incredibly effective while AI reasoning agents remain dangerously unreliable, and how a typed-knowledge-graph kernel closes the gap by being the compiler-for-AI-thought the reasoning side has been missing."
-          />
-        </div>
       </div>
     </section>
 
@@ -192,12 +184,5 @@ const description =
 
   .concepts-pitch a {
     color: var(--sl-color-text-accent);
-  }
-
-  /* The video card sits centered under the section title with the
-     same max-width treatment used on the landing-page Watch section. */
-  .watch-single {
-    max-width: 48rem;
-    margin: 1.4rem auto 0 auto;
   }
 </style>
