@@ -73,12 +73,24 @@ It is outside the repo and therefore does not travel — copy it with the rest i
 matters to you. The local branch `pre-clean-history-2026-10-20` and tag `pre-clean-2026-10-20` point
 at the same thing while this working copy lives.
 
-The LLM-component removal (folded into the cleaned base) took out the orchestration/TypeScript
-components — `CompleteText`, `CompleteJson`, the `ai` SDK pin — **not** the Rust reranker. `use-llm`
-is still declared in `cli`, `eigenius-wordnet`, `eigenius-encoding` and `lexicon-align`, and nothing
-under `crates/eigenius-wordnet`, `kernel/src/dcg` or `scripts/measure-parse-rate.sh` was touched —
-so every measurement recorded in the notes remains reproducible, and the cap-only `--no-llm` arm is
-unaffected.
+**THE SNAPSHOT IS DEAD — rebuild it before any measurement.** The LLM-component removal edited four
+bootstrap ontologies (`core-ontology.json`, `program-ontology.json`, `program-traces.json`,
+`prov.esl`), and the repository cleaning moved them again. A store is stamped with the bootstrap
+manifest and refuses to open when it drifts, so `wordnet-umls-hpo-aligned-2026-10-13-fa` now fails
+with `BootstrapError::ManifestDrift` on exactly those four layers — every other layer, ours included,
+still matches. There is no migration: the kernel notes that a compatibility arm for this "was written
+and removed", and that "the reseed that answers it rewrites the chain from source".
+
+An earlier revision of this note claimed the recorded measurements stayed reproducible on the new
+base. **That was wrong.** It checked that the LLM removal left the harness CODE alone, which it did,
+and failed to check the bootstrap ONTOLOGIES, which is what a snapshot is pinned to. The numbers in
+the notes remain correct as measurements — they were taken on a store that matched the code at the
+time — but reproducing or extending any of them needs a rebuilt store first.
+
+The LLM removal itself still does not disturb the parse path: `use-llm` is declared in `cli`,
+`eigenius-wordnet`, `eigenius-encoding` and `lexicon-align`, and nothing under
+`crates/eigenius-wordnet`, `kernel/src/dcg` or `scripts/measure-parse-rate.sh` was touched, so the
+cap-only `--no-llm` arm is unaffected once a current store exists.
 
 ## Standing the environment back up
 
