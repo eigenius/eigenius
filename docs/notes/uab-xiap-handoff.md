@@ -44,18 +44,41 @@ rsync -av <this-machine>:~/src/eigenius/eigenius/experiments/uab/ \
 
 ```
 branch  uab-step5-document-model
-base    "Remove LLM components"  — rebased onto it 2026-10-18, 61 commits, 0 conflicts
+base    the cleaned root commit "Eigenius" (2026-10-18)
 ```
 
-`origin/uab-step5-document-model` still points at the **pre-rebase** tip. The rebase rewrote
-history, so the next push needs `--force-with-lease`. There is no open PR, and no commits exist on
-the remote that are not local, so nothing is at risk from the force-push.
+**The repository was REPLACED with a cleaned version on `2026-10-19`.** The old history — 345
+commits, and every branch other than `main` and this one — is gone from the remote. This branch was
+rebuilt on the new root and carries all of the work; `main` is the cleaned base.
 
-The LLM-component removal took out the orchestration/TypeScript components (`CompleteText`, `CompleteJson`, the `ai`
-SDK pin), **not** the Rust reranker. `use-llm` is still declared in `cli`, `eigenius-wordnet`,
-`eigenius-encoding` and `lexicon-align`, and nothing under `crates/eigenius-wordnet`,
-`kernel/src/dcg` or `scripts/measure-parse-rate.sh` was touched — so every measurement recorded in
-the notes remains reproducible on the new base, and the cap-only `--no-llm` arm is unaffected.
+Local and `origin/uab-step5-document-model` are identical as of `2026-10-20`, so **no force-push is
+needed** and nothing here diverges from the remote.
+
+**The cleaning strips references that no longer resolve** — commit SHAs and GitHub issue numbers —
+because a fresh root makes them dangling. Two consequences when writing notes in this repo:
+
+- **Do not cite a commit SHA or a `#NNN` issue number**; name the change instead ("the short-passive
+  participial lift", "the LLM-component removal"). Anything already written that cites one was
+  rewritten by the cleaning, and this note was among them.
+- A measurement's provenance is the STORE NAME plus its three reproduce counts, never a commit SHA.
+
+**The pre-clean history survives in exactly one place**, a verified self-contained bundle:
+
+```
+/home/hm/src/eigenius/history-backup/eigenius-pre-clean-2026-10-20.bundle    (32 MB, 20 refs)
+git clone eigenius-pre-clean-2026-10-20.bundle old-history     # to read it
+```
+
+It is outside the repo and therefore does not travel — copy it with the rest if the old history
+matters to you. The local branch `pre-clean-history-2026-10-20` and tag `pre-clean-2026-10-20` point
+at the same thing while this working copy lives.
+
+The LLM-component removal (folded into the cleaned base) took out the orchestration/TypeScript
+components — `CompleteText`, `CompleteJson`, the `ai` SDK pin — **not** the Rust reranker. `use-llm`
+is still declared in `cli`, `eigenius-wordnet`, `eigenius-encoding` and `lexicon-align`, and nothing
+under `crates/eigenius-wordnet`, `kernel/src/dcg` or `scripts/measure-parse-rate.sh` was touched —
+so every measurement recorded in the notes remains reproducible, and the cap-only `--no-llm` arm is
+unaffected.
 
 ## Standing the environment back up
 
