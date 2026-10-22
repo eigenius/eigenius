@@ -315,6 +315,17 @@ resource units:litre : units:NamedUnit {
     core:description = "litre. The SI also accepts lowercase `l`; that variant is a lexicon entry, not a second unit.";
     units:symbol = "L"; units:dimension = u"m^3"; units:factor = 0.001r; units:factor_pi = 0; units:prefixable = true;
 }
+// The ångström is NOT in the SI Brochure's table of accepted non-SI units — it was dropped — and is
+// here because structural biology states interatomic distances in no other unit. An exact decimal
+// power of the metre, so a converted magnitude stays exact (unlike `Da`, the measured exception).
+// NOT prefixable: `mÅ` and `kÅ` are not used, and admitting them would mint surfaces nothing writes.
+// U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE, not U+212B ANGSTROM SIGN, which is the Unicode
+// compatibility character and normalises to U+00C5 under NFC — the same code-point discipline
+// `units:symbol` states for μ and Ω. A U+212B surface is the lexicon's concern, not this layer's.
+resource units:angstrom : units:NamedUnit {
+    core:description = "ångström. 10⁻¹⁰ m exactly.";
+    units:symbol = "Å"; units:dimension = u"m"; units:factor = 0.0000000001r; units:factor_pi = 0; units:prefixable = false;
+}
 resource units:tonne : units:NamedUnit {
     core:description = "tonne";
     units:symbol = "t"; units:dimension = u"kg"; units:factor = 1000r; units:factor_pi = 0; units:prefixable = true;

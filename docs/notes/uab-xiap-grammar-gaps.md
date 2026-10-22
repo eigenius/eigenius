@@ -823,6 +823,49 @@ model delta. The +1 unit against
 +10 sentences is the diffuse tail again: a unit needs every piece to parse, and 228 of 275 are
 blocked by several things at once.
 
+## Step 5 item 2: the ångström — a missing UNIT, not a grammar gap
+
+`units.esl` defined 64 symbols and ångström was not among them, so `3.46 Å` had no seeding at all —
+the whole of the corpus's residual `non-prose` class.
+
+```text
+resource units:angstrom : units:NamedUnit {
+    units:symbol = "Å"; units:dimension = u"m"; units:factor = 0.0000000001r;
+    units:factor_pi = 0; units:prefixable = false;
+}
+```
+
+Three judgements, each of which could have gone the other way:
+
+- **U+00C5, not U+212B.** The corpus uses U+00C5 exclusively (14 occurrences) and it is the
+  canonical form; U+212B ANGSTROM SIGN is the Unicode compatibility character that normalises to it.
+  Same code-point discipline `units:symbol` already states for μ and Ω.
+- **Not prefixable.** `mÅ` and `kÅ` are not written, and admitting them mints surfaces nothing uses.
+- **`bp` / `nt` / `kb` deliberately EXCLUDED.** They surfaced in the same survey, but a base pair is
+  a countable thing rather than a dimension, so per D95 they belong in `has_count`, not
+  `has_quantity` — and they cause no failures. Adding them as units would have been the easy wrong
+  move.
+
+**Verified without a database, before the reseed.** `quantity_corpus.rs` parses over the bootstrap
+chain and the corpus's own content words, so a row (`The distance was 3.46 Å.`) proved the unit
+tokenizes, the sentence parses, the reading contains `has_quantity`, and the value normalises to
+`173/500000000000 m` exactly — an hour before a store existed to use it.
+
+| CNL corpus, 1,056 sentences | `cat_numpred` | + `Å` |
+|---|---:|---:|
+| encoded | 13 | **17** |
+| parsed | 495 | **501** |
+| **non-prose** | **7** | **0** |
+| grammar-gap | 554 | 555 |
+| source units fully covered | 38 | **41 (14.9%)** |
+
+All 7 resolved: four to ENCODED with a UNIQUE reading, two to AMBIG, one to grammar-gap. The net
+`+6` hides that last one, which is why the per-sentence diff matters — its near-identical sibling
+parses, so the residual cause is the gerund-subject construction, not the unit.
+
+**Cumulative source-unit coverage**: raw prose 19/298 (6.4%) → CNL rewrite 37 (13.5%) →
+`cat_numpred` 38 (13.8%) → `Å` **41 (14.9%)**.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
