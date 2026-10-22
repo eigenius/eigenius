@@ -759,6 +759,70 @@ An upper bound, since the A/B recovered 7 of 15 rather than all. **228 of 275 un
 diffuse tail** — the same shape the DON'T-row census found, now measured on the rewritten corpus:
 no single cause dominates, and the residue is long.
 
+## Step 5 item 1: a dimensionless measured value is a claim (`cat_numpred`)
+
+The decimal gap, localized. **No combinator consumes `cat_num`** — the grep over
+`kernel/src/dcg/rules/` is empty. A numeral is usable only through the cardinal determiners, and
+those are gated on `value.is_integer()`, so a decimal had no route in any position:
+
+| position | integer | decimal |
+|---|---|---|
+| determiner, `expects N variants` | AMBIG | GAP |
+| copula complement, `The ratio is N.` | ENCODED | GAP |
+| verb object, `The score reaches N.` | GAP | GAP |
+
+### Lifting the integer gate would have been the wrong fix
+
+`has_count(…, 21.3)` asserts a set has 21.3 members. "21.3 expected missense variants" states a
+model's EXPECTATION. That is a parse meaning something false — the `compound_kind` failure mode
+again — and R2 forbids it. The honest encoding is `has_quantity`, which D95 decision 1 already
+defines, and the position for it is the copula complement.
+
+### A provenance guard failed, and a category did not
+
+D95 slice 7 decision 6 had already built and removed the numeral's measure-phrase seeding: a bound
+marker took it, `mod_lifts` made it prenominal, and `at least 1,000 cells` gained a second reading.
+A first cut restored only the predicative adjective `S[adj]\NP`, tagged, with `mod_lifts` refusing
+the tag. **It measured the defect straight back** (`2026-10-21`):
+
+| | baseline | provenance tag | `cat_numpred` |
+|---|---:|---:|---:|
+| `At least 1,000 cells were scored.` | ×2 | **×4** | **×2** |
+| `At least 1,000 cells per sample were scored.` | ×4 | **×12** | **×4** |
+| `The ratio is 0.94.` | GAP | ENCODED | ENCODED |
+| `21 variants` / `Five cell lines` / `517 cell lines` / `37 °C` | ×6/×6/×4/×2 | unchanged | unchanged |
+| total readings | 25 | 37 | **27** |
+
+The sems named the cause: `has_quantity` inside the noun's Σ restrictor, reached because `at least`
+composed with the leaf FIRST and the composed adjective carried the combinator's provenance, not the
+leaf's. **A provenance tag cannot survive the composition that precedes the lift.**
+
+`cat_numpred` is a distinct category with ⟦·⟧ = `Entity → Prop` and exactly four consumers, the
+is/are/was/were copula entries. `mod_lifts` keys on `is_adjective_cat` and does not match it; no
+adjective-modifying adverb composes with it; no measure consumer or bound marker sees it. The
+defect is unreachable rather than blocked, and the sems confirm it — the Σ-restrictor readings are
+ABSENT, not outnumbered. The +2 readings over baseline are exactly the two intended ones.
+
+### What it bought, one variable, matched bootstraps
+
+The baseline arm also settled a standing question: on the cleaned bootstrap the CNL corpus measures
+**byte-identical** to the retired `fa` store (12/325/148/564, 37,954 readings, 2,878 skeletons), so
+the repo cleaning and the LLM removal were inert for parsing and only invalidated the manifest stamp.
+
+| CNL corpus, 1,056 sentences | baseline | `cat_numpred` |
+|---|---:|---:|
+| parsed | 485 | **495** |
+| grammar-gap | 564 | **554** |
+| readings | 37,954 | 38,311 (+0.9%) |
+| skeletons | 2,878 | 2,903 (+0.9%) |
+| source units fully covered | 37 (13.5%) | **38 (13.8%)** |
+
+All 10 conversions are `GRAMMAR-GAP →` parsed, and every one is the target class: a copular
+sentence whose complement is a bare dimensionless measured value — a ratio, a predictor score, a
+model delta. The +1 unit against
++10 sentences is the diffuse tail again: a unit needs every piece to parse, and 228 of 275 are
+blocked by several things at once.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:

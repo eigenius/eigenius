@@ -313,6 +313,54 @@ resource lexicon:were_copula : lexicon:LexicalEntry {
     lexicon:sense    = "be";
 }
 
+// ── Copula over a DIMENSIONLESS MEASURED VALUE (D95 slice 7, decision 6's gloss, 2026-10-22) ──
+// "The observed-to-expected ratio is 0.94." The complement is `cat_numpred`, the category a bare
+// numeral seeds alongside `cat_num` and its cardinal determiners, over
+// `λx. ontology:has_quantity(x, u"1", q)`. ⟦cat_numpred⟧ = Entity → Prop, the same denotation the
+// `adj` complement carries, so these are the is/are/was/were copula entries with one argument
+// swapped and `copula_sem` (`λP.P`) unchanged.
+//
+// These four entries are the ONLY consumers of `cat_numpred`, and that is what makes the category
+// the fix rather than a guard. Decision 6 removed the numeral's measure-phrase seeding because a
+// bound marker took it and the modifier lift made it prenominal, giving `at least 1,000 cells` a
+// second reading over cells with a quantity of at least 1000. Restoring the predicate at `S[adj]\NP`
+// behind a provenance guard measured that defect straight back (2026-10-21): `at least` composed
+// with the leaf first, the composed adjective carried the combinator's provenance rather than the
+// leaf's, and the lift took it anyway. At `cat_numpred` nothing lifts it, no adjective-modifying
+// adverb composes with it, and no measure consumer sees it — only the copula.
+resource lexicon:is_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:are_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:was_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:were_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+
 // ── Predicate-nominal `a` (D63 §8.5, Slice 3c) ────────────────────────
 // The PREDICATIVE indefinite article: "HeLa is **a cell line**". Distinct from the
 // existential determiner `a` — here `a` is semantically the membership former, not a

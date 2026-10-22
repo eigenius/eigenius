@@ -462,6 +462,36 @@ data lexicon:Cat : Type 1 {
     // ratio is neither a number nor a measure phrase: before `fewer`, `10%` and `3` state differences.
     // The factor comparatives (`0.56-fold fewer`) take it.
     cat_factor : lexicon:Cat,
+    // NUMPRED — a DIMENSIONLESS MEASURED VALUE as a predicate (D95 slice 7, decision 6's closing
+    // gloss, revisited 2026-10-22): `0.94` in "the observed-to-expected ratio is 0.94".
+    // ⟦cat_numpred⟧ = lexicon:Entity -> core:Prop, over `λx. ontology:has_quantity(x, u"1", q)` —
+    // the same denotation a predicative adjective `S[adj]\NP` carries, so the copula's semantics
+    // needs no change to take it.
+    //
+    // **It is a DISTINCT CATEGORY rather than `S[adj]\NP`, and that is the whole design.** Decision
+    // 6 removed the numeral's measure-phrase seeding after slice 4 had it: a bound marker's measure
+    // predicate took the bare number, the modifier lift made it prenominal, and `at least 1,000
+    // cells` gained a second reading — cells with a quantity of at least 1000. A first cut at
+    // restoring the predicate seeded `S[adj]\NP` behind a provenance guard on the modifier lift,
+    // and MEASURED THE DEFECT BACK (2026-10-21): `at least` composed with the leaf as a degree
+    // modifier FIRST, the composed adjective carried the combinator's own provenance rather than the
+    // leaf's, and the lift took it — `at least 1,000 cells` went from 2 readings to 4, the `per
+    // sample` form from 4 to 12, with `has_quantity` inside the noun's Σ restrictor exactly as
+    // decision 6 described. A provenance tag cannot survive the composition that precedes the lift.
+    //
+    // A category can. `mod_lifts` keys on `is_adjective_cat`, which `cat_numpred` does not satisfy,
+    // so nothing lifts it prenominally; no `cat_mp` is seeded, so no measure consumer or bound
+    // marker reaches it; and no adjective-modifying adverb can compose with it. The defect is
+    // UNREACHABLE rather than blocked. Only an entry that names `cat_numpred` takes it, and the
+    // copula is the one that does.
+    //
+    // What this reopens is decision 6's gloss — "a bare number as a dimensionless measured value
+    // (`P = 0.02`) is a statistic, which the CNL keeps out of a claim" — not its mechanism. That
+    // holds for a test statistic, a property of an inference procedure. It fails for a measured
+    // quantity of the subject matter, which has a truth condition. Measured on the UAB certification
+    // log (2026-10-21): 53 of its 427 gold claim spans carry a bare dimensionless decimal, 38 of
+    // them `observed` — 17% of every `observed` claim, each with a `reproduce:` line.
+    cat_numpred : lexicon:Cat,
     // STAT — a STATISTIC over a group's members (D95 slice 9, decision 3): `a median`. ⟦cat_stat⟧ =
     // (Entity → core:float) → Entity → core:float, a measure to its summary over a group; the factor
     // comparatives apply it to both measures they compare (`a median 0.56-fold fewer`).

@@ -8903,3 +8903,29 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         "no layer should populate more than a few hundred entries; worst was {worst_entries}"
     );
 }
+
+/// LOCALIZE the dimensionless-measure regression: which readings does the bare numeral's
+/// predicative adjective actually add? Prints EVERY closed reading's sem for the control D95
+/// slice 7 recorded, so the new ones can be named rather than guessed at.
+///
+///     EIGENIUS_DB_SNAPSHOT=… cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_dimensionless_measure -- --ignored --nocapture
+#[test]
+#[ignore = "localize the dimensionless-measure readings; --ignored --nocapture"]
+fn probe_dimensionless_measure() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for s in [
+        "At least 1,000 cells were scored.",
+        "The study screened 517 cell lines.",
+        "The ratio is 0.94.",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={} open={}", closed.len(), open.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+    }
+}

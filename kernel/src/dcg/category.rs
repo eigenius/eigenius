@@ -114,6 +114,18 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             Vec::new(),
             vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
         )),
+        // ⟦NUMPRED⟧ = Entity → Prop — a dimensionless measured value AS A PREDICATE, over
+        // `λx. has_quantity(x, u"1", q)` (D95 slice 7 decision 6's gloss, revisited 2026-10-22).
+        // The same denotation `S[adj]\NP` carries, deliberately: the copula's semantics is unchanged
+        // and only the CATEGORY differs, which is what keeps it out of `mod_lifts` and away from
+        // every adjective-modifying adverb. See `lexicon:cat_numpred` for the measurement that
+        // rejected a provenance guard in its place.
+        ("cat_numpred", []) => {
+            let entity = Exp::EigonClass(
+                Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+            );
+            Ok(Exp::Arrow(Box::new(entity), Box::new(Exp::sort(0))))
+        }
         // ⟦STAT⟧ = (Entity → float) → Entity → float — a statistic takes a measure to its summary over
         // a group's members (D95 slice 9, decision 3).
         ("cat_stat", []) => {
@@ -532,6 +544,17 @@ pub fn measure_phrase_cat(
             Exp::InductiveCtor(readings, reading.to_string(), vec![]),
         ],
     ))
+}
+
+/// A dimensionless measured value's PREDICATE category `cat_numpred` (D95 slice 7 decision 6's
+/// gloss, revisited 2026-10-22), for the second item a numeral seeds — `λx. has_quantity(x, u"1", q)`,
+/// which the copula takes in "the observed-to-expected ratio is 0.94". Distinct from `S[adj]\NP` so
+/// that no modifier lift and no adjective-modifying adverb can reach it; see `lexicon:cat_numpred`
+/// for the measurement that rejected a provenance guard in its place. `None` if the layer lacks the
+/// `Cat` inductive.
+pub(super) fn numpred_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_numpred".to_string(), vec![]))
 }
 
 /// A bare number's category `cat_num` (D95 slice 7), for the item a numeral seeds. `None` if

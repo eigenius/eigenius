@@ -1018,6 +1018,39 @@ impl Parser {
                 // A whole number is also a cardinal determiner stating its exact count (D95 slice 7):
                 // `1` in `a`'s singular categories, any other in `these`'s plural ones, `0`
                 // included — `has_count(…, 0)` reads `0 genes`, where an existential could not.
+                // The DIMENSIONLESS MEASURED VALUE as a predicate (D95 slice 7 decision 6's gloss,
+                // revisited 2026-10-22): `λx. has_quantity(x, u"1", q)` at `cat_numpred`, which the
+                // copula takes — "the observed-to-expected ratio is 0.94". EVERY numeral seeds it,
+                // integer included: a ratio of 7 is a measured value as much as 0.94 is, and the
+                // count reading stays available alongside.
+                //
+                // At `cat_numpred` and deliberately NOT at `S[adj]\NP`. A first cut used the
+                // predicative adjective behind a provenance guard on `mod_lifts` and measured
+                // decision 6's defect straight back: `at least` composed with the leaf first, the
+                // composed adjective carried the combinator's provenance rather than the leaf's, and
+                // the lift took it. A distinct category cannot be laundered that way — see
+                // `lexicon:cat_numpred`.
+                if let (Some(cat), Some(rel)) = (
+                    super::super::category::numpred_cat(&self.grammar.layer),
+                    Iri::parse(HAS_QUANTITY)
+                        .ok()
+                        .filter(|r| self.grammar.layer.resolve(r).is_some()),
+                ) {
+                    let x = "NP#x";
+                    let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+                    let q = dimensionless(Reading::Value);
+                    let body = app(
+                        app(
+                            app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                            Exp::LitUnit(q.unit.clone()),
+                        ),
+                        q.term(),
+                    );
+                    items.push(Item::new(
+                        cat,
+                        Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+                    ));
+                }
                 if value.is_integer() && value.numer() >= &num_bigint::BigInt::from(0) {
                     let one = num_bigint::BigInt::from(1);
                     let templates = if value.numer() == &one {

@@ -46,6 +46,13 @@ carries:
 - A dozen measured DON'Ts were missing, the largest being that the lexer DELETES a clause-position
   `:` or `;`.
 
+**Revised `2026-10-22`: a measured value is a claim, and now parses.** D95 slice 7 decision 6's
+closing gloss — a bare dimensionless number is a statistic kept out of the claim — was narrowed to
+TEST statistics, and `lexicon:cat_numpred` gives the copula a route to `has_quantity(x, u"1", q)`.
+R3 and the "Test statistics" DON'T row both told an author to drop exactly what the certification
+corpus is mostly made of: 17% of every `observed` claim. On the 1,056-sentence CNL corpus, parsed
+485 → 495 at +0.9% readings, with D95's own `at least 1,000 cells` control identical to baseline.
+
 **Revised `2026-10-15`, the final revision before the rewrite it governs.** Three changes, all from
 measurements taken `2026-10-14`. (1) **R1 now carries a token budget** — under 31 — because length is
 the only variable measured on the XIAP page that separates parsed units from failing ones, and R1 now
@@ -100,6 +107,15 @@ to apply this guide" below for the measurement that puts it there.
   is correct — they are 15% of the register and unparseable by construction. The same applies to a
   span that covers SEVERAL claims (`compressed`) or states why a claim is not checkable (`exempt`):
   0 of those 25 spans parse, because neither is a single assertion. Represent them as structure.
+  - ⚠ **A MEASURED VALUE is not a citation and not a statistic — keep it in the claim.** `The
+    observed-to-expected ratio for that window is 0.94.` parses (`2026-10-22`), to
+    `has_quantity(the(ratio), u"1", 0.94)`. The line to draw is whether the number describes the
+    SUBJECT MATTER or the inference procedure: an observed-to-expected ratio, a predictor score and
+    an allele frequency are claims with truth conditions; `P`, `n` and `Q` qualify a claim and are
+    not one. Measured: **53 of the 427 gold claim spans carry a bare dimensionless decimal, 38 of
+    them `observed` — 17% of every `observed` claim**, each with a `reproduce:` line. Routing those
+    to provenance would leave the kernel checking a judgement in place of the measurement that was
+    reproduced.
 
 ## How to apply this guide
 
@@ -253,7 +269,7 @@ tables:
 
 | Avoid (journal style) | Why | Rewrite recipe |
 |---|---|---|
-| **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
+| **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. **Narrowed `2026-10-22`:** this covers a property of the INFERENCE PROCEDURE only. A measured quantity of the subject matter — an observed-to-expected ratio, a predictor score, an allele frequency — is a claim and now parses (`The ratio is 0.94.` → `has_quantity(…, u"1", 0.94)`); keep it. | State the **qualitative** claim for a test statistic; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Do NOT apply this to a measured value. |
 | **A quantity as a verb's object** (`contained 4 μg`, `reached ~100 mm³`) | A quantity is not a noun phrase. It composes where a word takes one (DO §13); an imported verb takes a noun phrase (D95 slice 8, decision 7). | Name the quantity: `reached a volume of about 100 mm³`, `contained 4 μg of puromycin`. |
 | **A preposition with a clause as its object** (`96 h after adding doxycycline`) | A preposition takes a noun phrase; a gerund clause has no parse, with or without the quantity. | Nominalize: `96 h after the addition of doxycycline`. |
 | **`the` before a mass noun** (`The viability was assayed.`) | `the` has entries for a singular and a plural count noun only. | Write the bare mass noun: `Cell viability was assayed.` |

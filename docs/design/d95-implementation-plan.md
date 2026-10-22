@@ -727,6 +727,30 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
    `incubated at 37` without a unit has no parse. A percentage is still a measure phrase (`>90%
    infection efficiency`). A bare number as a dimensionless measured value (`P = 0.02`) is a
    statistic, which the CNL keeps out of a claim.
+   - *Narrowed 2026-10-22, and the MECHANISM above is untouched.* The gloss holds for a TEST
+     statistic — `P`, `n`, `Q` — which is a property of an inference procedure and has no truth
+     condition about the subject matter. It does NOT hold for a measured quantity OF the subject
+     matter: an observed-to-expected ratio, a predictor score, an allele frequency. Those have truth
+     conditions, they are the paradigm `observed` claim, and routing them out leaves the kernel
+     checking a qualitative judgement in place of the measurement that was actually reproduced.
+     Measured on the UAB certification log: **53 of its 427 gold claim spans carry a bare
+     dimensionless decimal, 38 of them `observed` — 17% of every `observed` claim**, each with a
+     `reproduce:` line.
+   - The predicate route is `lexicon:cat_numpred`, seeded by every numeral alongside `cat_num` and
+     its cardinal determiners, over `λx. has_quantity(x, u"1", q)`; its only consumers are four
+     copula entries. **A DISTINCT CATEGORY, not `S[adj]\NP`**, because a first cut used the
+     predicative adjective behind a provenance guard on `mod_lifts` and measured this decision's own
+     defect straight back (2026-10-21): `at least` composed with the leaf FIRST, the composed
+     adjective carried the combinator's provenance rather than the leaf's, and the lift took it —
+     `at least 1,000 cells` went 2 readings → 4 and the `per sample` form 4 → 12, with
+     `has_quantity` inside the noun's Σ restrictor exactly as described above. A provenance tag
+     cannot survive the composition that precedes the lift; a category cannot be laundered by it.
+   - Measured at `cat_numpred`, one variable, matched bootstraps (2026-10-22). Controls: `at least
+     1,000 cells` **×2**, `per sample` **×4**, `517 cell lines` **×4**, `37 °C` **×2** — every one
+     identical to baseline, and the Σ-restrictor readings absent from the sems rather than
+     outnumbered. CNL corpus, 1,056 sentences: parsed **485 → 495**, grammar-gap 564 → 554, readings
+     37,954 → 38,311 (+0.9%), skeletons 2,878 → 2,903 (+0.9%). All 10 conversions are
+     `GRAMMAR-GAP →` parsed.
 
 **7a, 7b — built** (2026-09-29).
 - `ontology:has_count` (`ontology.esl`); `cat_num` (`lexicon-ontology.esl`, `dcg/category.rs`).
