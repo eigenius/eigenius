@@ -16,6 +16,7 @@ namespace logic     = "urn:eigenius:logic";
 namespace ontology  = "urn:eigenius:ontology";
 namespace measurements = "urn:eigenius:measurements";
 namespace core         = "urn:eigenius:core";
+namespace eigentt      = "urn:eigenius:eigentt";   // D99 §10 identity forms (the identity copula)
 namespace units        = "urn:eigenius:units";
 
 // ── Quantifier cores (factored; D63 §8.3 Phase 1) ─────────────────────
@@ -310,6 +311,84 @@ resource lexicon:were_copula : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+
+// ── IDENTITY COPULA (D99 §10's identity form; D63 §8.5's membership `a` is its counterpart) ──
+// "The NOD2-to-NF-kB axis is the inflammatory-bowel-disease arm." Both sides are REFERRING
+// expressions and the claim is that they denote the same entity. `is a Y` gives
+// `ontology:is_a(s, T)` — MEMBERSHIP, which cannot express this: `is the lever` is not `is a lever`,
+// and encoding the definite as the indefinite drops the uniqueness the claim asserts (R2).
+//
+// **Takes the complement as an ordinary NP rather than binding the noun's Set.** The natural shape,
+// a predicative `the` at `fun (T : Set) => ... eigentt:Eq(Entity, s, ontology:the(T))`, does NOT
+// type-check: `ontology:the : forall (A : Set) => A` gives `the(T) : T`, and coercive subtyping
+// (Luo 2012) reaches `Entity` from a CONCRETE class the chain knows is a subclass — never from a
+// bound variable, for which nothing says `T ≤ Entity`. Ascription does not help and ESL has no
+// bounded quantification. Of the 147 entries here that bind `T`, every one uses it as a Set
+// ARGUMENT or returns at `T`; none takes `the(T)` as an Entity-typed term. Letting the definite NP
+// form normally and putting the identity on the COPULA sidesteps it: both sides arrive at their own
+// concrete classes and coerce at the argument slots.
+//
+// Written with `eigentt:Eq`, the ESL surface spelling of the kernel's `Id` (D99 §10), so the
+// proposition COMPUTES — `refl` inhabits it, `J` eliminates it, `apart` refutes it. An opaque
+// 2-place axiom would parse the same sentences and prove nothing with them, the defect the WordNet
+// importer records for opaque `be`.
+//
+// Measured over the 1,056-sentence CNL corpus on `wordnet-umls-hpo-aligned-2026-10-24-identity`
+// (provenance 38,391 / 20,533 / 864): parsed **501 → 557**, grammar-gap 555 → 499, source units
+// fully covered **41 → 51** of 274, **0 sentences lost**. Sems verified on its targets —
+// `ni_p_ile380thr = the(Σsubject. prep_of(…)).1`.
+//
+// **IT COSTS A SECOND DERIVATION ON THE INDEFINITE, AND THAT IS A DELIBERATE STANCE** (2026-10-24).
+// `HeLa is a cell line` now has two parses: `is_a(hela, CellLine)` and
+// `∃x:CellLine. hela = x` — LOGICALLY EQUIVALENT, not a wrong reading. ENF would refuse the second,
+// as `ObliqueParticipial` refuses a route that "re-derives a reading plain application already
+// gives", and two uniqueness pins enforced it. They are relaxed to 2 here because ENF is a strong
+// default and COVERAGE is the non-negotiable: the alternative was losing the construction entirely,
+// at 56 sentences and 10 units, to avoid a redundant spelling of a proposition the grammar already
+// gets right. The cost is ranking and chart size, never a distorted claim.
+//
+// Narrowing it properly needs a way to say "do not fire where the predicate-nominal route already
+// covers it" — a DEFINITENESS feature in the category system (today `the_subj` and `a_subj` are
+// byte-identical, definiteness living only in the sem), or recasting the copula as a RULE so it can
+// carry a `ProvGuard`, which is per-rule and cannot key on an entry. Either is real design work.
+resource lexicon:identity_copula_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => eigentt:Eq(lexicon:Entity, x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:is_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:are_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:was_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:were_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "be";
 }
 

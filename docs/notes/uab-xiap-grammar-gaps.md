@@ -866,6 +866,153 @@ parses, so the residual cause is the gerund-subject construction, not the unit.
 **Cumulative source-unit coverage**: raw prose 19/298 (6.4%) → CNL rewrite 37 (13.5%) →
 `cat_numpred` 38 (13.8%) → `Å` **41 (14.9%)**.
 
+## The gap breakdown, and two corrections to it
+
+**Gaps are not equal, and the useful cut is by VALUE.** Of the grammar gaps, only those that are
+the LAST failing sentence of their source unit convert a unit when fixed. Measured after the
+identity copula (274 claim units):
+
+| sentences still failing | units | |
+|---:|---:|---|
+| 0 | **51** | fully covered |
+| 1 | **94** | ONE away — each of these 94 gap sentences is worth a whole unit |
+| 2 | 55 | |
+| 3 | 34 | |
+| 4+ | 40 | |
+
+Fixing all 94 would take coverage 51 → 145 of 274. Every other gap is worth zero on its own.
+
+### Classification of the last-blockers, by hand
+
+A regex census was run first and was useless — the best lift was +10.3pp on n=45 against a 16%
+base, and 52 of 91 went unclassified. Reading them and assigning a type by hand gave the table
+below. **Every row is a CANDIDATE cause until a one-variable A/B confirms it**; the adverb-placement
+row is the standing warning, since that shape scored +15.3pp over 97 sentences and died at 1/14
+against 1/14.
+
+| construction type | units | status |
+|---|---:|---|
+| definite predicate nominal (`X is the N`) | 12 | **BUILT** — the identity copula, below |
+| adverb placement (mid-sentence / fronted) | 10 | candidate |
+| free relative / embedded question (`what`, `which`, `how much`) | 8 | candidate |
+| degree / scalar (`very likely`, `slightly above`, `more X than`) | 6 | candidate |
+| `both` / `all` / partitive as SUBJECT | 6 | candidate |
+| negative / indefinite subject | 5 | candidate |
+| bare mass or gerund subject | 5 | candidate |
+| modal + bare subject | 3 | candidate |
+| `both X and Y` as an argument | 2 | candidate |
+| gerund as complement | 2 | candidate |
+| imperative · `neither … nor` · `rather than` + participle | 1 each | candidate |
+| one-offs with no shared type | 19 | — |
+
+### Correction 1: `name-as-copula-subj` was not a construction at all
+
+Seven units were filed under "a proper name cannot be a copula subject", marked CONFIRMED on a
+ladder. **Withdrawn.** The ladder used `dbSNP` in every arm, so it confirmed a property of ONE
+word's grounding and the result was generalised to proper names. Widening it refutes the reading:
+
+```text
+  GRAMMAR-GAP  dbSNP is informative.          GRAMMAR-GAP  dbSNP returns three records.
+  GRAMMAR-GAP  dbSNP matters.                 AMBIG        dbSNP has assigned no identifier to c.1139.
+  ENCODED      MaveDB is empty.               AMBIG        Lynch syndrome is common.
+```
+
+`be` is not the discriminator (`MaveDB is empty` parses), transitivity is not (`has assigned` parses
+and `returns` does not), and the `Num` feature is not (`Lynch syndrome`, the lattice's own `name`
+example, parses). What varies is the OOV GROUNDING: these are resource names absent from the
+lexicon, and the augmentation injects an entry bound to whatever the text index matched, so whether
+one works as a subject depends on what it grounded TO. The seven units leave the construction table
+and become an OOV-handling question — plausibly cheaper, since they are names the document uses
+throughout and the glossary already has recurrent-name machinery.
+
+### Correction 2: the definite predicate nominal was never blocked on D98 slice 1
+
+It was recorded here as blocked, needing `Id`, which "ESL cannot write yet". **Wrong in both
+parts.** `eigentt:Eq(T, x, y)` is the ESL surface spelling of the kernel's `Id` and has existed
+since D99 §10 — `variant.esl` already uses it. The grep that "established" its absence searched for
+`Id(` in `ontologies/`, which the surface spelling could never match: the kernel's name was searched
+for, ESL's was not, and a 2026-09-29 statement in D95 was treated as current. That is the
+"'open' is a claim about absence" trap.
+
+The real obstacle was narrower: the natural shape needs `the(T) : T` at `Entity`, and coercive
+subtyping cannot reach `Entity` from a BOUND variable. Putting the identity on the COPULA instead
+avoids needing it — `fwd(bwd(cat_s(dcl,fin), cat_np(Entity,sg)), cat_np(Entity,num_any))` over
+`λy. λx. eigentt:Eq(Entity, x, y)`, so both sides arrive at concrete classes and coerce at the
+argument slots.
+
+### Correction 3: built, kept, and ENF traded against coverage on purpose
+
+It works. Measured over the 1,056-sentence CNL corpus on a reseeded store
+(`2026-10-24-identity`, provenance 38,391 / 20,533 / 864), all four finite forms:
+
+| | base | identity copula |
+|---|---:|---:|
+| parsed | 501 | **557** |
+| grammar-gap | 555 | **499** |
+| source units fully covered | 41 | **51** of 274 |
+| sentences LOST | — | **0** |
+
+Sems verified on its targets — `ni_p_ile380thr = the(Σsubject. prep_of(…)).1`,
+`the(Σaxis. compound(…)).1 = the(Σarm. compound_kind(…)).1`.
+
+**It broke two pinned uniqueness invariants, and the pins were relaxed rather than the entry
+dropped.** `HeLa is a cell line` goes from 1 parse to 2:
+
+```text
+  [0] is_a(hela, CellLine)                               the pinned reading
+  [1] ΠG#0:Prop. ΠG#1:CellLine. hela = G#1 → G#0 → G#0   ∃x:CellLine. hela = x
+```
+
+The second is **logically EQUIVALENT to the first**, not a wrong reading. So the invariant at stake
+is ENF — the codebase refuses a route that re-derives what another already gives, in the words
+`ObliqueParticipial` uses for itself — and not correctness.
+
+**The stance, decided 2026-10-24: ENF is a strong default; COVERAGE is the non-negotiable.** The
+alternative was losing the construction entirely, at 56 sentences and 10 source units, to avoid a
+redundant SPELLING of a proposition the grammar already gets right. The cost is ranking and chart
+size, never a distorted claim — which is the distinction that decides it. R2 protects against
+distortion (the `compound_kind` noun pile, `waiting` as an adjective degree: readings that MEAN
+something false). ENF protects against redundancy. Only the second is being traded.
+
+The first instinct here was to revert and record the construction as blocked. That was wrong, and
+the reasoning that corrects it was already written down: *the RIGHT reading outranks reducing
+reading/skeleton count; coverage stays non-negotiable*. The correct reading is present either way.
+
+Narrowing it properly — so the identity route does not fire where the predicate-nominal route
+already covers it — needs a **definiteness feature** in the category system (today `the_subj` and
+`a_subj` are BYTE-IDENTICAL, definiteness living only in the sem), or the copula recast as a **RULE**
+so it can carry a `ProvGuard`; those are per-rule and cannot key on a lexical entry. Either is real
+design work, and neither blocks the construction now.
+
+### Follow-up: converge the two spellings instead of tolerating both
+
+The stance above trades ENF for coverage. A better answer dissolves the trade: make
+`∃x:T. s = x` and `is_a(s, T)` converge on ONE representation, so the two derivations collapse to
+one reading — ENF restored, coverage kept, no definiteness feature needed. Two routes, both
+design-level.
+
+**(a) DEFINE `is_a` rather than axiomatize it.** `ontology:is_a : lexicon:Entity -> Set -> Prop` is
+an opaque axiom today. Defined as `is_a(s, T) := ∃x:T. Id(Entity, s, x)` the two readings become
+DEFINITIONALLY equal and NbE converges them with no new machinery. It also buys real reasoning
+power: a transparent `is_a` is one `refl` can discharge when `s : T`, where an opaque axiom can
+prove nothing.
+- *Cost:* the opacity is deliberate — `is_a` is "grounded downstream by ChainWitness", and making it
+  transparent changes what grounding means. It unfolds in roughly 33 pinned sems across 12 test
+  files, so the blast radius is wide even if every one of them is mechanically updatable.
+- *Check first:* whether `∃` here is the impredicative encoding `passive_sem` uses, because the
+  convergence depends on the identity reading's Church form being syntactically the definition's.
+
+**(b) A post-parse normalization pass** recognising `∃x:T. s = x` and emitting `is_a(s, T)`, run
+before reading dedup.
+- *Cost:* no such machinery exists — `normalize_holes` is string-level over skeletons and
+  `reading_ranker` reorders rather than merges — so it is a new pass. It also pattern-matches on
+  SEMS, which this codebase avoids on principle: the `DerivedIndividual` note argues a firing
+  decision should read provenance, not sems, so as not to need a packing bit.
+
+(a) is the more principled of the two: it makes the equivalence a fact the kernel KNOWS rather than
+a rewrite asserting it downstream. It is also the larger decision, and it belongs to whoever owns
+`ontology:is_a`'s opacity rather than to this note.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:

@@ -1783,7 +1783,21 @@ fn kind_subject_predicate_nominal_is_subclass_of() {
     // "genes are cell lines" → subclass_of(Gene, CellLine) : Prop (opaque; truth is a
     // separate grounding judgment — felicity ≠ truth).
     let forest = index.parse("genes are cell lines", &PluralS);
-    assert_eq!(forest.len(), 1, "exactly one kind-subject parse");
+    // TWO parses since the identity copula (2026-10-24), and that is a DELIBERATE STANCE rather
+    // than a weakened assertion. The second is `∃x:CellLine. hela = x` — LOGICALLY EQUIVALENT to
+    // `is_a(hela, CellLine)`, not a wrong reading. ENF would refuse it, as `ObliqueParticipial`
+    // refuses a route that "re-derives a reading plain application already gives". It is admitted
+    // because ENF is a strong default and COVERAGE is the non-negotiable: refusing it meant losing
+    // the definite predicate nominal entirely (`X is the N` — identity, which membership cannot
+    // express), measured at 56 sentences and 10 source units on the UAB corpus with 0 losses.
+    // The cost is ranking and chart size, never a distorted claim. Narrowing it needs a definiteness
+    // feature in the category system — `the_subj` and `a_subj` are byte-identical today — or the
+    // copula recast as a rule so it can carry a `ProvGuard`. See `lexicon:is_identity`.
+    assert_eq!(
+        forest.len(),
+        2,
+        "the is_a kind-subject parse and the equivalent identity parse"
+    );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("kind nominal type-checks");
     assert_eq!(

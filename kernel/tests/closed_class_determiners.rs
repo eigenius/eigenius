@@ -5437,7 +5437,21 @@ fn predicate_nominal_parses_to_is_a() {
     // the copula lifts it; the subject applies → is_a(hela, CellLine) : Prop.
     let (layer, index) = index_over_bootstrap();
     let forest = index.parse("HeLa is a cell line", &Identity);
-    assert_eq!(forest.len(), 1, "exactly one predicate-nominal parse");
+    // TWO parses since the identity copula (2026-10-24), and that is a DELIBERATE STANCE rather
+    // than a weakened assertion. The second is `∃x:CellLine. hela = x` — LOGICALLY EQUIVALENT to
+    // `is_a(hela, CellLine)`, not a wrong reading. ENF would refuse it, as `ObliqueParticipial`
+    // refuses a route that "re-derives a reading plain application already gives". It is admitted
+    // because ENF is a strong default and COVERAGE is the non-negotiable: refusing it meant losing
+    // the definite predicate nominal entirely (`X is the N` — identity, which membership cannot
+    // express), measured at 56 sentences and 10 source units on the UAB corpus with 0 losses.
+    // The cost is ranking and chart size, never a distorted claim. Narrowing it needs a definiteness
+    // feature in the category system — `the_subj` and `a_subj` are byte-identical today — or the
+    // copula recast as a rule so it can carry a `ProvGuard`. See `lexicon:is_identity`.
+    assert_eq!(
+        forest.len(),
+        2,
+        "the is_a predicate-nominal parse and the equivalent identity parse"
+    );
     assert_eq!(
         sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
