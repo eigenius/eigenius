@@ -8929,3 +8929,64 @@ fn probe_dimensionless_measure() {
         }
     }
 }
+
+/// LOCALIZE the identity copula's cost: are the readings it ADDS to `X is a Y` wrong, or merely a
+/// redundant spelling of the membership reading? Prints every closed reading's sem.
+#[test]
+#[ignore = "identity-copula readings; --ignored --nocapture"]
+fn probe_identity_copula() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    // Build the SAME augmentation the page harness uses, from the whole page named by
+    // `EIGENIUS_PROBE_PAGE`. Without it the probe parses a different grammar than the measurement
+    // does — an unaugmented run returned `closed=0` for sentences the measurement parsed, and 224
+    // readings for one it reported far fewer of. A probe that cannot reproduce the measurement
+    // cannot adjudicate it.
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    eprintln!(
+        "probe page: {}  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+    // `.with_document(...)` as well as the augmentation: the page harness does both, and the
+    // document context is what the glossary's named-entity and abbreviation resolution reads.
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+    let extra: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    for s in [
+        "The gene is a vulnerability.",
+        "A short-window tool is the lever.",
+        "The database is the informative row.",
+    ] {
+        // Invented probes only: the corpus itself is gitignored, so a sentence lifted from it
+        // cannot live in a tracked test. For an ad-hoc check against real units, point
+        // `EIGENIUS_PROBE_FILE` at a file of sentences — read below, never committed.
+        let (closed, _open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={}", closed.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+    }
+    for s in &extra {
+        let (closed, _open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={}", closed.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+    }
+}

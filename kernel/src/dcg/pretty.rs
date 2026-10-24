@@ -112,6 +112,15 @@ pub fn pretty_term(e: &Exp) -> String {
         Exp::Fst(a) => format!("{}.1", pretty_term(a)),
         Exp::Snd(a) => format!("{}.2", pretty_term(a)),
         Exp::Ann(a, _) => pretty_term(a),
+        // The IDENTITY family (D99 §10). These fell through to `exp_kind` and printed as bare
+        // `<id>` / `<refl>` / `<apart>`, discarding every argument — so a sem containing an identity
+        // could be seen to EXIST but not read, and whether it related the right two terms was
+        // invisible. Nothing wrote `Id` until the identity copula, which is why it went unnoticed.
+        // The type argument is suppressed the way `Ann` suppresses its ascription: it is recoverable
+        // from the operands and would double the width of every equation.
+        Exp::Id(_, x, y) => format!("{} = {}", pretty_term(x), pretty_term(y)),
+        Exp::Refl(a) => format!("refl({})", pretty_term(a)),
+        Exp::Apart(_, x, y) => format!("{} ≠ {}", pretty_term(x), pretty_term(y)),
         Exp::Sort(l) if l.is_nat(0) => "Prop".to_string(),
         Exp::Sort(l) if l.is_nat(1) => "Set".to_string(),
         Exp::Sort(n) => format!("Sort({n})"),
