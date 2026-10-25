@@ -1,0 +1,69 @@
+// ════════════════════════════════════════════════════════════════════
+// BARE DEMONSTRATIVE PRONOUNS — `this` / `that` / `these` / `those` as a plain NP.
+//
+// ADDITIVE ONLY. Four NEW IRIs; no base entry is shadowed. The existing `this_subj` / `this_obj`
+// (and siblings) are DETERMINERS — `cat_forall(sg, λT. …)`, "this gene" — and stay exactly as they
+// are. What the grammar has no entry for is the demonstrative standing ALONE as an argument.
+//
+// MEASURED CAUSE (2026-10-25, `EIGENIUS_GAP_BOUNDARY`). «This is the gene.» gets a FORCED cut at 1,
+// before «is». The left block holds four nodes and every one is a determiner —
+// `cat_det_premod(sg, λT. …)` and `cat_forall(sg, λT. …)` — while the right block is a saturated
+// `S[dcl,fin]\NP[Entity,sg]` wanting a subject. Verdict `WRONG-ARG×4`, no `PRUNED` pair, so the
+// cell is empty for want of a category and not for want of beam. The instrument named the missing
+// category outright: `cat_np(Entity, sg)`.
+//
+// SEMANTICS. A bare demonstrative is anaphoric with NO restrictor, so it takes `lexicon:anaphor`
+// (the pronoun hole, `: Entity`) and not `lexicon:anaphor_of` (the determiner's restrictor-typed
+// `∀(A:Set) → A`). That is the whole difference between the two: `these findings` supplies `A` from
+// the noun and resolves only to findings, while bare `these` has nothing to type the hole with and
+// resolves as `it` / `they` do. So these entries are `it_pron` with a different form — the same
+// category, the same `anaphor_sem`, the same `sem_type` — which is the point: the demonstrative
+// pronoun is not a new mechanism, it is the pronoun mechanism applied to four more surfaces.
+//
+// `that` IS THE RISK, and it is here to be measured rather than assumed. The form already carries
+// `that_comp` (`cat_cp / S[dcl,fin]`, the complementiser) and the relative pronoun. Giving it a bare
+// NP reading lets «showed that WRN is essential» try `showed` + NP `that` + a stranded clause. The
+// other three have no such homograph. If the measurement charges for `that`, drop `that_pron` and
+// keep the rest: the blockers that motivated this are `this`-initial.
+//
+// KILL CRITERION. No sentence may be LOST (parsed → gap), and the reading-count rise must be
+// confined to sentences containing one of the four forms. Measure with:
+//   scripts/add-layer-to-snapshot.sh --base <aligned-snapshot> --out <new> \
+//       experiments/parsing/probes/demonstrative-pronouns.esl
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace core      = "urn:eigenius:core";
+
+resource lexicon:this_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: singular proximal demonstrative PRONOUN ('this is the gene').";
+    lexicon:form     = "this";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "this_pron";
+}
+resource lexicon:that_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: singular distal demonstrative PRONOUN ('that is the gene').";
+    lexicon:form     = "that";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "that_pron";
+}
+resource lexicon:these_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural proximal demonstrative PRONOUN ('these are the genes').";
+    lexicon:form     = "these";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "these_pron";
+}
+resource lexicon:those_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural distal demonstrative PRONOUN ('those are the genes').";
+    lexicon:form     = "those";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "those_pron";
+}

@@ -1207,3 +1207,108 @@ Two usage rules for the instrument follow. The gap report names a seam and a ver
 name a derivation, so `EIGENIUS_TRACE_FOREST` on a **passing** control is what identifies the route
 the gapping sentence is missing. And a category dump explains a lexeme, not a family — the family
 needs the one-variable grid across lexemes.
+
+## The three diagnosed gaps, addressed (2026-10-25)
+
+All three came from the gap-boundary instrument. Two are closed; the third is blocked on a design
+decision it shares with work already on the books.
+
+### 1. The `cat_cp` copula complement — a CNL rule, not an ontology commitment
+
+`X is that P` needs the copula to take a `cat_cp`, whose denotation is `Prop`, against a subject of
+type `Entity`. Bridging those means reifying propositions as entities. `judgements-and-warrants.tex`
+takes no position on that — its reification is of the proof-checker operator — so this would be a new
+ontological commitment, made for **one unit**.
+
+Measured instead, on the identity snapshot:
+
+| | |
+|---|---|
+| `The worst case is that it behaves like a null allele.` | GAP, forced cut before «that» |
+| `In the worst case, it behaves like a null allele.` | GAP — cut before «case», `NO-FUNCTOR` |
+| `It behaves like a null allele in the worst case.` | **parses** |
+| `The worst case is a null allele.` | parses, closed=32 |
+
+The postposed PP carries it. So this is a CNL rewrite rule — move the scenario PP to the end — and
+the reification stays available if the construction ever earns it.
+
+**Separate finding:** the FRONTED `In the worst case,` form gaps for an unrelated reason, splitting
+`«In the worst» ⊕ «case , it behaves…»` with `NO-FUNCTOR`. That is a comma-fronted-modifier gap, and
+fronted PPs are common enough to be worth more than the construction this entry was chasing.
+
+### 2. The bare demonstrative pronoun — built, and narrowed by a one-variable arm
+
+`this` / `that` / `these` / `those` had only DETERMINER entries (`cat_forall`, `cat_det_premod`).
+Standing alone they have no category at all, which the instrument named outright: a forced cut at 1
+and `WRONG-ARG` against a saturated `S[dcl,fin]\NP` wanting a subject, with no `PRUNED` pair, so the
+cell was empty for want of a category and not for want of beam.
+
+The entries are `it_pron` with different forms — `cat_np(Entity, sg|pl)` over `anaphor_sem`. A bare
+demonstrative is anaphoric with no restrictor, so it takes `lexicon:anaphor : Entity` and not the
+determiner's restrictor-typed `anaphor_of : ∀(A:Set) → A`.
+
+Measured as a LAYER on `…-2026-10-24-identity`, cap-only, `--units-per-line`, same page:
+
+| | baseline | all four | **`that` dropped** |
+|---|---:|---:|---:|
+| encoded | 20 | 19 | **20** |
+| ambiguous | 399 | 393 | **399** |
+| open | 138 | 158 | 142 |
+| grammar-gap | **499** | 486 | **495** |
+| total-skeletons | 3,542 | 3,895 | 3,639 |
+
+With `that_pron` in, gaps fall 13 but SEVEN sentences go closed → open, every one of them
+`That <noun> …` — `that` as a determiner, where the bare NP opens a spurious apposition. Dropping it
+leaves `encoded` and `ambiguous` byte-identical to baseline: four gaps closed, nothing lost.
+
+Of those four, **two are the target construction** and two close through the compound defect below.
+The honest figure is two sentences, not four — and the aggregate counts did not show this. Only the
+per-unit set diff did (`GRAMMAR-GAP → OPEN` ×13, `AMBIG → OPEN` ×6, `ENCODED → OPEN` ×1 for the
+four-entry arm).
+
+### 3. The adverb and the unsaturated copula — one decision, three symptoms
+
+Blocked, deliberately. Modes cannot scope it: `category::unify_into` does not unify slash
+modalities ("Rule licensing is enforced where rules fire, not here"), so an adverb typed
+`((S\NP)/NP)\((S\NP)/NP)` would match any transitive verb's functor regardless of mode, licensing an
+adverb between a verb and its object.
+
+What it needs is a distinction the category system does not carry — and it is the third such case:
+
+| site | distinction needed |
+|---|---|
+| the adverb modifier | the copula's `(S\NP)/NP` vs a transitive verb's |
+| the identity copula's redundant derivation | definiteness (its own comment says so) |
+| `named_compound`'s left operand | a pronominal NP vs a nominal one |
+
+Each is individually patchable and each patch is a Band-Aid. One mechanism — a feature the category
+system carries, or recasting these as rules that can hold guards — settles all three.
+
+### Found on the way: `named_compound` accepts a pronoun
+
+`named_compound` (D63 §8.13) matches `left_pat: Ctor("cat_np", [_, _])` — ANY `cat_np` — against a
+`cat_n` head, building `Σx:C. compound(x, ⟦left⟧)`. It exists for named-entity compounds (`HeLa
+cells`). But a referential pronoun is categorially a plain NP, as the closed-class file states, so
+`it` matches. On the BASE snapshot with no layer applied:
+
+```
+«it scores» → cat_n(Σ__cmp_x:n05737153. compound(__cmp_x, $anaphor$3_3), pl)  prov=Compound
+```
+
+"a score compounded with ⟨whatever *it* refers to⟩". English has no such construction (`*it scores`;
+the possessive `its scores` is a determiner, handled elsewhere), and `compound(x, d)` wants a
+DESIGNATOR in `d` — an unresolved discourse referent designates nothing, so the restrictor
+constrains nothing. The rule already restricts its left operand (`NotKindRaised`, `NotPpRefined`),
+never for pronominality.
+
+Pre-existing, and not the demonstratives' doing: the demonstrative layer only exposed it on three
+more surfaces. It fires wherever a pronoun precedes a common noun, which for `it` / `they` is
+constant, mostly adding a junk reading to sentences that parse anyway — and occasionally
+manufacturing a parse, which is how it was found.
+
+Fix: guards already read provenance (`Guard::NotKindRaised(op) => op.pick(…).prov != …`), and the
+seed site that freshens `$anaphor$` already knows which items are pronouns. So a
+`Combinator::Pronoun` provenance set there plus `Guard::NotPronoun(Operand::Left)` on
+`named_compound`. A provenance tag guards the LEAF only; a pronoun compound modifier is always
+consumed directly from the leaf, so it holds here, which is why this is a guard and not the general
+mechanism §3 needs.
