@@ -1113,24 +1113,97 @@ categories, `cat_forall(sg, λT. …)` and `cat_det_premod(sg, λT. …)`. There
 block is a saturated `S[dcl,fin]\NP[Entity,sg]` wanting a subject. **`this` has no pronominal
 `cat_np` entry.** One closed-class entry.
 
-**`The claim is still the strongest evidence.`** — no forced cut; several minimal tilings exist, and
-the instrument says so rather than naming one. The seam it shows is `[0..3]«The claim is still`» ⊕
-`[4..6]«the strongest evidence»`, and the two blocks explain the family:
+**`The claim is still the strongest evidence.`** — the report put a forced cut before «the» at
+cap 2 (unforced at cap 4, where extra `ForwardComp` nodes appear), with the seam
+`[0..3]«The claim is still»` ⊕ `[4..6]«the strongest evidence»`. The right block's six nodes are all
+`cat_detmod` or type-raised. My first reading of this — that the gap is a definite NP having no
+`S[pred]\NP` form, and that `still` already carried a complement-preserving category so the adverb
+was not the gap — was **wrong on both counts**. `EIGENIUS_TRACE_FOREST` on the adverb-free control
+and on `still` itself settles it.
 
-- the left block *does* reach `S[dcl,fin_any]/(S[dcl,pred]\NP)` by `ForwardComp`, so `still` already
-  has a complement-preserving category — the adverb is not the gap;
-- the right block holds six nodes, all `cat_detmod` or type-raised (`S/(S\NP)`, `VP\(VP/NP)`). **A
-  definite NP has no `S[pred]\NP` form**, so nothing can fill the composed copula's slot.
+The control `The claim is the strongest evidence.` derives as:
 
-This is the same structural fact that killed `UnaryKind::IdentityPredicate`: definites arrive
-type-raised and there is no plain `cat_np` intermediate. It also explains why the earlier adverb A/B
-(MID 1/14 vs FRONT 1/14) found no position effect — position is not the variable.
+```
+#15 [2..2] «is»   cat = (S[dcl,fin]\NP[Entity,sg]) / NP[Entity,num_any]
+                  sem = λy. λx. x = y
+#67 [3..5] «the strongest evidence»  =  the object type-raised  VP\(VP/NP)
+     └ Combine@k=2, BackwardApp  →  #73 [2..5]  S[dcl,fin]\NP[Entity,sg]
+#48 [0..1] «The claim»  =  subject-raised  S/(S\NP),  ForwardApp at k=1
+```
 
-*Not yet measured:* why the adverb-free control parses. The inference is that `is the strongest
-evidence` builds as one cell and so never needs `S[pred]\NP`, but the instrument is gated on a
-failed parse and the control succeeds, so this wants a `EIGENIUS_TRACE_FOREST=cell:2..6` run on the
-control before it is relied on.
+So the control parses through the **identity copula** (the `ad6d253d` entry), with the raised
+definite backward-applying to it. It never builds a predicate nominal, and never needs
+`S[pred]\NP`. What it needs is `is` and the NP **adjacent**, because `VP\(VP/NP)` selects a `VP/NP`
+immediately to its left.
+
+`still` has ten leaf categories and **none of them is adverbial**:
+
+| Category | Reading |
+|---|---|
+| `S[dcl,adj]\NP` | predicative adjective — "the water is still" |
+| `S[dcl,pred]\NP` | predicate nominal (KindRaised) |
+| `cat_measure`, `cat_mod` | |
+| `cat_n(n04319248, mass)`, `cat_n(n04319248, sg)` | the **noun** "a still" (distillation apparatus) |
+| `cat_np(n04319248, sg)` + subject/object raises | raises of that noun |
+
+The same ten in verbal position (`The gene still affects cells.`), so it is a lexeme fact, not a
+positional one. `is still` [2..3] therefore builds as a **saturated** `S[dcl,fin]\NP[Entity,sg]` —
+"the claim is motionless" — `The claim is still` is a complete sentence, and the real predicate is
+stranded; hence the cut before «the» rather than before «still». The `S/(S[pred]\NP)` forms at
+`[0..3]` that I read as evidence of a complement-preserving adverb are `is` composing with still's
+**raised noun**, not an adverb entry.
+
+But the missing adverb entry is **not** what blocks this family. `also` has the full adverb set —
+
+```
+(S[dcl,fin]\NP[ADV#num]) \ (S[dcl,fin]\NP[ADV#num])
+(S[dcl,ADV#fin]\NP[ADV#num]) / (S[dcl,ADV#fin]\NP[ADV#num])
+S[dcl,fin_any] \ S[dcl,fin_any]        S[dcl,fin_any] / S[dcl,fin_any]
+```
+
+— and gaps identically. The one-variable grid:
+
+| Sentence | Adverb's categories | Result |
+|---|---|---|
+| `The claim is also the strongest evidence.` | full adverb set | **GAP**, same seam, `WRONG-ARG` |
+| `The claim is therefore the strongest evidence.` | full adverb set | **GAP**, same seam |
+| `The claim is still the strongest evidence.` | none adverbial | **GAP**, same seam |
+| `The claim is also strong.` | full adverb set | parses |
+| `The claim is still strong.` | none adverbial | parses (closed=12, after widen) |
+
+The variable is the **complement type**, not the adverb. An adjective complement parses; a definite
+NP complement — the identity reading — gaps whatever the adverb. The reason is categorial: every
+adverb category above modifies a **saturated** VP or S. The identity copula is `(S\NP)/NP`,
+unsaturated, and its raised definite complement `VP\(VP/NP)` selects an adjacent `VP/NP`. No
+VP-modifier can occupy that position, however well-typed.
+
+**The fix is therefore a category this grammar does not have**, not a lexical entry: a
+functor-modifier `((S\NP)/NP)\((S\NP)/NP)`, so an adverb modifies the transitive copula in place
+and `is still` stays a `VP/NP`. Filling `S[pred]\NP` instead would give the sentence a predication
+reading where the correct one is identity.
+
+*Open, and a reason not to write that category yet:* an unrestricted `(VP/NP)\(VP/NP)` adverb also
+licenses an adverb between any transitive verb and its object (`*affects still cells`). The category
+needs scoping — to the copula, or to the identity copula specifically — and that is a design
+decision, not a lexicon edit. Two measurements still missing before it: whether the other six units
+in this family share this shape, and whether `still` lacking adverb entries is a separate real gap
+(`The gene still affects cells.` parses with 4 readings, which with no adverb category available
+means it parses WRONGLY — the readings have not been inspected).
 
 The work order this implies is not the one this note carried. Two of the three are single
-closed-class entries; the third is the definite-NP predicate-nominal form, which is shared with the
-identity-copula line of work rather than being an adverb problem.
+closed-class entries — a copula taking `cat_cp`, and a pronominal `cat_np` for `this`. The third is
+a new category coupled to the identity copula, with an open over-generation question, so it is the
+largest of the three rather than the smallest.
+
+Three claims in this note were refuted by the measurements above and are withdrawn: that `still`
+already had a complement-preserving category; that the blocker was the definite NP's missing
+`S[pred]\NP`; and that the family is a per-lexeme adverb gap fixable by giving `still` adverb
+entries. The first two came from reading the gap report's categories without asking where they came
+from — they were real, their provenance was not what I assumed. The third came from stopping at the
+first measurement that fit (`still` has no adverb categories) instead of running the control that
+would break it (`also` does, and gaps anyway).
+
+Two usage rules for the instrument follow. The gap report names a seam and a verdict; it does not
+name a derivation, so `EIGENIUS_TRACE_FOREST` on a **passing** control is what identifies the route
+the gapping sentence is missing. And a category dump explains a lexeme, not a family — the family
+needs the one-variable grid across lexemes.
