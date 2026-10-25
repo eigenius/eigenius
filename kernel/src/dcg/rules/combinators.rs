@@ -1068,6 +1068,27 @@ enum Guard {
     /// `compound(x, kind_of(C))` duplicating the `compound_kind` classifier (D63 §7.5). Reads
     /// provenance, not the category — the same distinction `mod_lifts` already makes for `KindRaised`.
     NotKindRaised(Operand),
+    /// The named operand must NOT be a **bare referential pronoun** ([`Combinator::Pronoun`]).
+    ///
+    /// `named_compound` builds `Σx:C. compound(x, ⟦left⟧)`, so its left operand fills a DESIGNATOR
+    /// slot. A pronoun designates nothing until resolution, and English has no pronoun-premodifier
+    /// compound (`*it scores`; the possessive `its scores` is a determiner, handled elsewhere).
+    /// Measured on the base snapshot before this guard: «it scores» built
+    /// `cat_n(Σx:n05737153. compound(x, $anaphor$3_3), pl)` — "a score compounded with ⟨whatever
+    /// `it` refers to⟩".
+    ///
+    /// Reads PROVENANCE because the category cannot carry this: a pronoun is a plain `cat_np`,
+    /// identical in shape to a proper name's. The type index cannot carry it either — the obvious
+    /// cheaper fix, reusing [`Self::ProperName`] (whose own doc claims it "keeps close-naming
+    /// apposition off a pronoun"), was tried and MEASURED: grammar-gap 499 → 531, because this
+    /// corpus's named-entity compounds are built on OOV-augmented doc-local names that are not
+    /// concrete `EigonClass`es either, so the type test refuses `NOD2-to-NF-kB axis` along with
+    /// `it scores`. Pronominality is the property; it has to be tested directly.
+    ///
+    /// Like [`Self::NotKindRaised`] this guards the LEAF only. A pronoun that composed first would
+    /// lose the tag — contrived here (a pronoun reaches this rule directly), and the general fix is
+    /// a category-system distinction, not a tag.
+    NotPronoun(Operand),
     /// The bound type-index metavar must be a **genuine proper-name class** — a concrete `EigonClass`
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
@@ -1137,6 +1158,7 @@ impl Guard {
             Guard::NotCompoundRefined(_) => "NotCompoundRefined",
             Guard::NotAdjectiveRefined(_) => "NotAdjectiveRefined",
             Guard::NotKindRaised(_) => "NotKindRaised",
+            Guard::NotPronoun(_) => "NotPronoun",
             Guard::ProperName(_) => "ProperName",
             Guard::NotDerivedIndividual(_) => "NotDerivedIndividual",
             Guard::NotPlural(_) => "NotPlural",
@@ -1150,6 +1172,7 @@ impl Guard {
             Guard::NotCompoundRefined(o)
             | Guard::NotAdjectiveRefined(o)
             | Guard::NotKindRaised(o)
+            | Guard::NotPronoun(o)
             | Guard::NotDerivedIndividual(o)
             | Guard::NotPpRefined(o) => match o {
                 Operand::Left => "L",
@@ -1166,6 +1189,7 @@ impl Guard {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
+            Guard::NotPronoun(op) => op.pick(left, right).prov != Combinator::Pronoun,
             Guard::NotDerivedIndividual(op) => {
                 op.pick(left, right).prov != Combinator::DerivedIndividual
             }
@@ -1226,6 +1250,7 @@ fn refine_rules() -> &'static [CatRule] {
                     Guard::NotCompoundRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Right),
                     Guard::NotKindRaised(Operand::Left),
+                    Guard::NotPronoun(Operand::Left),
                     // Same PP-adjacency constraint its sibling `kind_compound` carries (32bfd21): a
                     // PP-postmodified modifier would need its PP to sit between it and the head.
                     Guard::NotPpRefined(Operand::Left),

@@ -37,6 +37,11 @@ use crate::nbe::term::Exp;
 /// *apply*).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Combinator {
+    /// A **bare referential pronoun** leaf (`it`, `they`, the bare demonstratives) — an NP whose sem
+    /// is the referent hole itself. Carried so a rule can refuse one where the CATEGORY cannot tell
+    /// it apart: a pronoun is categorially a plain `cat_np` (core-en `ProNP` = NP), identical to a
+    /// proper name's. `named_compound` is the rule that needs it — see `Guard::NotPronoun`.
+    Pronoun,
     /// Forward application (`>`) or the dependent `cat_forall` application.
     ForwardApp,
     /// Backward application (`<`).
@@ -435,6 +440,11 @@ impl Item {
         self.category.cost
     }
     /// Replace the sem in place (the per-span hole freshening).
+    /// Replace the producing combinator. Used at SEED time only, to mark a leaf whose category
+    /// cannot carry the distinction a rule needs (see [`Combinator::Pronoun`]).
+    pub fn set_prov(&mut self, prov: Combinator) {
+        self.category.prov = prov;
+    }
     pub fn set_sem(&mut self, sem: Exp) {
         self.semantics.sem = sem;
     }

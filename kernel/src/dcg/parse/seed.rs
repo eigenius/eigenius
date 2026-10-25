@@ -734,6 +734,14 @@ impl Parser {
             for j in i..last {
                 let surface = join_surfaces(&tokens[i..=j]);
                 for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
+                    // A BARE pronoun is tagged here, before freshening — afterwards the placeholder
+                    // is an ordinary `Exp::Var` and nothing distinguishes it. The tag is what lets
+                    // `named_compound` refuse a pronoun as a compound MODIFIER: categorially a
+                    // pronoun is a plain `cat_np`, identical to a proper name's, so no pattern can
+                    // tell them apart (`Guard::NotPronoun`).
+                    if crate::dcg::holes::is_bare_pronoun_sem(it.sem()) {
+                        it.set_prov(super::super::item::Combinator::Pronoun);
+                    }
                     // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
                     // fresh per-occurrence free var (typed `Entity` at felicity).
                     it.set_sem(freshen_anaphor(it.sem(), &hole_base(i, j)));

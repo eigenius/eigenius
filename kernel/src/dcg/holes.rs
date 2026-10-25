@@ -49,6 +49,18 @@ pub(super) fn hole_base(i: usize, j: usize) -> String {
 /// sem) and possessive-determiner sems (nested inside the λ — `poss_of(A, x, anaphor)`); the
 /// compound forms those traverse are covered below, and every other form is returned
 /// unchanged (no anaphor occurs there).
+/// Is this sem a **bare referential pronoun** — exactly the `lexicon:anaphor` placeholder, with
+/// nothing wrapped around it?
+///
+/// EXACTLY, not "contains": the possessive `its` / `their` carries the same axiom NESTED inside the
+/// determiner's λ (it is the possessor, not the referent), and the demonstrative DETERMINER carries
+/// the restrictor-typed sibling `anaphor_of` instead. Only a bare pronoun — `it`, `they`, and the
+/// bare demonstratives — denotes the hole itself. Checked before [`freshen_anaphor`] runs, since
+/// after it the placeholder is an ordinary `Exp::Var` indistinguishable from any other.
+pub(super) fn is_bare_pronoun_sem(exp: &Exp) -> bool {
+    matches!(exp, Exp::EigonAxiom(a) if a.as_str() == ANAPHOR_IRI)
+}
+
 pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
     let go = |e: &Exp| freshen_anaphor(e, fresh);
     match exp {
