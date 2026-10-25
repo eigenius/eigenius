@@ -1312,3 +1312,44 @@ seed site that freshens `$anaphor$` already knows which items are pronouns. So a
 `named_compound`. A provenance tag guards the LEAF only; a pronoun compound modifier is always
 consumed directly from the leaf, so it holds here, which is why this is a guard and not the general
 mechanism §3 needs.
+
+### The compound guard, measured — and what it did not fix
+
+`Guard::NotPronoun(Operand::Left)` on `named_compound` (commit `90704bd4`). Measured on the BASE
+snapshot, cap-only, same page: encoded 20, ambiguous 399, open 138, grammar-gap 499, total-readings
+40,932 and the whole reading-count histogram **all byte-identical to baseline**; total-skeletons
+3,542 → 3,385.
+
+Nothing observable changes because `COMPOUND_STEP_PENALTY` already ranked these below the
+`CLASSIFY_BUDGET` cut — they counted toward the skeleton pool without ever surviving as readings.
+What the guard prevents is the case where the junk is the ONLY reading, which is what the
+demonstrative entries hit.
+
+**A recorded negative first.** Reusing `Guard::ProperName` looked right — its own doc claims it
+"keeps close-naming apposition off a pronoun / bare-kind `cat_np(Entity)`". Measured: grammar-gap
+499 → **531**, covered 419 → 390. The 32 losses are named-entity compounds built on OOV-augmented
+DOC-LOCAL names, which are not concrete `EigonClass`es either, so the type test refused them for the
+same reason it refused a pronoun. The type index cannot carry this distinction in this corpus.
+Pronominality had to be tested directly, via provenance tagged at the seed site where a bare
+pronoun's sem is still exactly `EigonAxiom(lexicon:anaphor)`.
+
+**Re-measured with both** (demonstrative layer, `that` dropped, + the guard): encoded 20, ambiguous
+399 — untouched — open 138 → 141, grammar-gap 499 → **496**.
+
+| unit | before | after guard | what it is |
+|---|---|---|---|
+| bare `This is …` | gap | OPEN | the construction ✓ |
+| bare `Those are …` | gap | OPEN | the construction ✓ |
+| `These <noun> … those <noun> …` | OPEN | **gap** | compound misparse, correctly withdrawn |
+| `<V> those <noun>` | OPEN | OPEN | **still a misparse** — see below |
+
+The prediction was 497 and the result was 496, because that last unit had **two** junk routes, not
+one. The guard killed its `compound(x, $anaphor$)` route; it then closed at cap 8 by a different
+one — `λ__front_m. And(__front_m, …)(v01111816_i($anaphor$3_3))`, the head noun read as an
+INTRANSITIVE VERB with the bare demonstrative as its subject. Killing one junk route for a
+determiner-homograph surface does not kill the others.
+
+**So the demonstrative entries are worth two sentences, not three or four.** Each narrowing step cut
+the claim: 13 (all four forms) → 4 (`that` dropped) → 3 (compound guard) → 2 (route inspected). Only
+the last two steps required looking at derivations rather than counts; the counts were consistent
+with every one of the wrong figures.
