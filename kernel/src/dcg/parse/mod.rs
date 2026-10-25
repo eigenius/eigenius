@@ -702,6 +702,11 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>, WidenTrace) {
+        // One sentence = one gap report, however many cap rungs the widen ladder runs
+        // (`chart::boundary`). Clearing here, at the per-SENTENCE entry point, is what makes the
+        // per-rung dedup inside the instrument mean "this rung repeats the previous rung" rather than
+        // "this sentence repeats the previous sentence".
+        super::chart::boundary::reset_rung_dedup();
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
         // when packing is enabled, the combinatory-core spike is off, and this sentence is not
         // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).

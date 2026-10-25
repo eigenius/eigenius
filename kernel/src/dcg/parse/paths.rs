@@ -130,6 +130,43 @@ impl Parser {
             );
         }
 
+        // Gap-boundary localization (set `EIGENIUS_GAP_BOUNDARY`, see `chart::boundary`): when the
+        // sentence produced NO top-span clause, say where the derivation stopped and which two
+        // categories refused to combine there. Gated on `top.is_empty()` because that is the only
+        // case it answers — a sentence that parsed has no boundary to find, and printing for it would
+        // drown the gaps in a page run. Fires once per cap rung, like the trace above; the header
+        // carries the cap so an early rung and the widened one can be told apart.
+        if top.is_empty() && std::env::var("EIGENIUS_GAP_BOUNDARY").is_ok() {
+            let header = format!(
+                "===== GAP BOUNDARY cap={cap:?} nodes={} tokens={:?} =====",
+                forest.nodes.len(),
+                tokens.iter().map(|t| t.surface()).collect::<Vec<_>>(),
+            );
+            // The token-keyed binary rules are span-keyed, so only the parser holds what they need.
+            // The instrument asks whether one actually COMBINES a seam's pair — not whether a site
+            // merely exists there: `trig_appose_group` emits a site at every split of every cell, so
+            // site existence is true everywhere and diagnoses nothing.
+            let bin_rule_combines =
+                |l_span: (usize, usize), r_span: (usize, usize), l: &Item, r: &Item| {
+                    self.grammar
+                        .binary_sites(&tokens, l_span.0, r_span.1)
+                        .into_iter()
+                        .filter(|site| site.left == l_span && site.right == r_span)
+                        .any(|site| self.grammar.apply_bin_rule(site.rule, l, r).is_some())
+                };
+            eprint!(
+                "{}",
+                super::super::chart::boundary::gap_report(
+                    &forest,
+                    &tokens,
+                    &top,
+                    &self.grammar.layer,
+                    &bin_rule_combines,
+                    &header,
+                )
+            );
+        }
+
         let mut candidates: Vec<Item> = Vec::new();
         for id in top.iter().copied() {
             candidates.extend(

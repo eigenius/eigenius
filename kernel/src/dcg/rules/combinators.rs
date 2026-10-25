@@ -1823,7 +1823,7 @@ fn slash_mode_name(mode: &Exp) -> Option<&str> {
 /// Whether a slash bearing `mode` may be consumed by the HARMONIC composition rules — keyed to
 /// `⋄` (194), so it admits `m_harm` and its subtypes `m_perm_left`/`m_perm_right`/`m_all`, and
 /// refuses `m_app` (application only) and the two crossed modes.
-fn harmonic_licenses(mode: &Exp) -> bool {
+pub(crate) fn harmonic_licenses(mode: &Exp) -> bool {
     matches!(
         slash_mode_name(mode),
         Some("m_harm" | "m_perm_left" | "m_perm_right" | "m_all")

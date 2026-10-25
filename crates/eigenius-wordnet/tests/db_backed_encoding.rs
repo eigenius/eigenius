@@ -8990,3 +8990,81 @@ fn probe_identity_copula() {
         }
     }
 }
+
+/// LOCALIZE every grammar gap in a file of sentences: for each one that gets no parse, where did the
+/// derivation stop, and which two categories refused to combine there? Drives the kernel's
+/// `EIGENIUS_GAP_BOUNDARY` instrument (`dcg::chart::boundary`) over the SAME index the page
+/// measurement builds — document augmentation and document context included, since a probe that
+/// cannot reproduce the measurement cannot adjudicate it.
+///
+/// Reads the sentences from `EIGENIUS_PROBE_FILE` (one per line; the corpus is gitignored, so the
+/// tracked default is a set of invented controls that exercise each verdict) and the augmentation
+/// page from `EIGENIUS_PROBE_PAGE`. Both must be ABSOLUTE paths — cargo runs tests from the crate
+/// directory, and a relative one silently yields no augmentation.
+///
+///     EIGENIUS_DB_SNAPSHOT=… EIGENIUS_PROBE_PAGE=/abs/page.txt EIGENIUS_PROBE_FILE=/abs/gaps.txt \
+///         cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_gap_boundary -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_gap_boundary() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    eprintln!(
+        "probe page: {} lines  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+
+    let sentences: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            [
+                // Invented controls, one per expected verdict class. The corpus itself is gitignored,
+                // so no real unit can live in a tracked test.
+                "The claim is very strong.",
+                "The worst case is that it behaves like a null allele.",
+                "This is the gene.",
+                "The gene is a vulnerability.",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+        });
+
+    // The kernel prints the report itself, gated on a sentence having produced no top-span clause.
+    std::env::set_var("EIGENIUS_GAP_BOUNDARY", "1");
+    let mut gapped = 0usize;
+    for s in &sentences {
+        let unknown = index.unknown_words(s, &lem);
+        eprintln!("\n################ {s:?}");
+        if !unknown.is_empty() {
+            eprintln!("  OOV {unknown:?} — lexical, not a boundary");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        if !closed.is_empty() || !open.is_empty() {
+            eprintln!("  PARSES closed={} open={}", closed.len(), open.len());
+            continue;
+        }
+        gapped += 1;
+    }
+    std::env::remove_var("EIGENIUS_GAP_BOUNDARY");
+    eprintln!("\n==== {gapped} of {} gapped ====", sentences.len());
+}

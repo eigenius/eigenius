@@ -991,27 +991,34 @@ The stance above trades ENF for coverage. A better answer dissolves the trade: m
 one reading — ENF restored, coverage kept, no definiteness feature needed. Two routes, both
 design-level.
 
-**(a) DEFINE `is_a` rather than axiomatize it.** `ontology:is_a : lexicon:Entity -> Set -> Prop` is
-an opaque axiom today. Defined as `is_a(s, T) := ∃x:T. Id(Entity, s, x)` the two readings become
-DEFINITIONALLY equal and NbE converges them with no new machinery. It also buys real reasoning
-power: a transparent `is_a` is one `refl` can discharge when `s : T`, where an opaque axiom can
-prove nothing.
-- *Cost:* the opacity is deliberate — `is_a` is "grounded downstream by ChainWitness", and making it
-  transparent changes what grounding means. It unfolds in roughly 33 pinned sems across 12 test
-  files, so the blast radius is wide even if every one of them is mechanically updatable.
-- *Check first:* whether `∃` here is the impredicative encoding `passive_sem` uses, because the
-  convergence depends on the identity reading's Church form being syntactically the definition's.
+**(a) THE KERNEL ROUTE — give `is_a` a resolved meaning at the checker seam.** This is D18's
+pattern, not a new one: an `EigonClass` IRI stays opaque in the term and the CHECKER resolves it to
+a nested Σ on demand (`CheckHooks::resolve_class`, `program::ground`). `is_a` would work the same
+way — the term keeps `ontology:is_a(s, T)`, and the kernel knows it MEANS `∃x:T. Id(Entity, s, x)`,
+so `conv.rs` finds the two convertible when it normalizes both sides.
 
-**(b) A post-parse normalization pass** recognising `∃x:T. s = x` and emitting `is_a(s, T)`, run
-before reading dedup.
-- *Cost:* no such machinery exists — `normalize_holes` is string-level over skeletons and
-  `reading_ranker` reorders rather than merges — so it is a new pass. It also pattern-matches on
-  SEMS, which this codebase avoids on principle: the `DerivedIndividual` note argues a firing
-  decision should read provenance, not sems, so as not to need a packing bit.
+Today it cannot: `EigonAxiom` evaluates to a NEUTRAL (`Neut::EigonAxiom`), axioms never δ-unfold,
+and that opacity is the whole reason the two spellings stay distinct. The change is to let an axiom
+that carries a chain-resident definition unfold, leaving one with none opaque as now — the exact
+analogue of "a class with a Σ resolves, a primitive does not".
 
-(a) is the more principled of the two: it makes the equivalence a fact the kernel KNOWS rather than
-a rewrite asserting it downstream. It is also the larger decision, and it belongs to whoever owns
-`ontology:is_a`'s opacity rather than to this note.
+- **The surface does not change.** `is_a(hela, CellLine)` stays textually identical in all ~33
+  pinned sems across 12 test files; what changes is that previously-distinct readings become
+  IDENTIFIED. Reading counts fall — the two uniqueness pins relaxed above would return to 1, which
+  is the point.
+- It also buys reasoning power the opaque form cannot have: a transparent `is_a` is discharged by
+  `refl` when `s : T`.
+- *Cost and caution:* the opacity is deliberate — `is_a` is "grounded downstream by ChainWitness" —
+  so this must not make the grounding vacuous. And δ-unfolding axioms is a kernel-wide capability,
+  not a local fix: every axiom with a definition becomes transparent, which is a decision about the
+  ontology's whole stance on opacity.
+- *Check first:* whether `∃` here is the impredicative encoding `passive_sem` uses, since
+  convergence needs the identity reading's Church form to normalize to the definition's.
+
+(a) is the right one, and the owner's call (2026-10-24): it makes the equivalence a fact the kernel
+KNOWS rather than a rewrite asserting it downstream, and it follows the architecture already in
+place for classes rather than adding a pass beside it. (b) would assert the same equivalence from
+outside the kernel, where nothing can check it.
 
 ## Order of work
 
@@ -1034,3 +1041,96 @@ addresses length — the dominant variable — directly, where a grammar rule do
 
 Nothing above the lexicon is in doubt: `missing-lexeme` is 0 over the corpus, and the one lexical
 gap the battery found (`cannot`) is a closed-class omission rather than a content word.
+
+## The gap-boundary instrument (2026-10-24)
+
+Four of the five hypotheses in this note were formed by behavioural A/B — minimal pairs, ablations,
+frequency tables — and four were refuted. The one that held (`UnaryKind::IdentityPredicate` never
+fires because definites arrive type-raised) came from instrumentation. The reason A/B keeps failing
+here is structural: it measures the output of the whole pipeline, so it cannot separate a missing
+category from a feature clash from a normal-form guard. Those three call for different fixes.
+
+`kernel/src/dcg/chart/boundary.rs` answers the question directly, on the real chart.
+
+**What it computes.** A cell `[i..j]` is derivable iff the packed forest holds a node there. Tile the
+token span with as few derivable cells as possible. A sentence that parses tiles in 1; a gap tiles in
+*k* > 1, and the *k* − 1 seams are where the grammar ran out. A cut position is **forced** iff no
+minimal tiling straddles it — a property of the grammar's coverage of the sentence rather than of
+which decomposition the DP happened to reconstruct. At each seam it crosses every left-block node
+against every right-block node and reports the **nearest miss**, ranked:
+
+| Verdict | Meaning | What it points at |
+|---|---|---|
+| `PRUNED` | `apply` succeeds on the reps, yet the cell is empty | sense cap / cell beam, **not** the grammar |
+| `NORMAL-FORM` | slot unifies, no mode objects | an Eisner `ProvGuard` |
+| `MODE` | composition available, a slash mode refuses it | the mode lattice |
+| `FEATURE(pos)` | same constructor, one position fails its own test | a `feat_meets` / subsumption gap, position named |
+| `WRONG-ARG` | functor faces the right way, different constructor | no entry for the construction |
+| `NO-FUNCTOR` | neither side is a functor facing the other | wrong category outright |
+
+Each verdict re-runs the predicate the parser itself would have run (`unify_cat`, `feat_meets`,
+`type_subsumes`, `harmonic_licenses`, the provenance guards), so the label names a cause instead of
+classifying a surface shape. `feature_position` mirrors `unify_into` **per position** — `cat_s`
+matches mood by equality and finiteness by the feature-meet, and one uniform predicate across all
+positions would mislabel a mood clash as `WRONG-ARG`. Composition is tested `fwd` only, because
+`comb_rules()` registers `forward_comp` and no backward counterpart; testing `bwd` would report a
+refusal for a rule the parser never tries.
+
+Run it:
+
+```
+EIGENIUS_DB_SNAPSHOT=… EIGENIUS_PROBE_PAGE=/abs/cnl-page.txt EIGENIUS_PROBE_FILE=/abs/gaps.txt \
+  cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+  probe_gap_boundary -- --ignored --nocapture
+```
+
+The kernel prints the report itself under `EIGENIUS_GAP_BOUNDARY`, gated on the sentence having
+produced no top-span clause, once per cap rung with repeats elided.
+
+**Caveats the output states.** The cross product runs `apply` (the universal combinators, the
+nominal-modification and other-grammar rules, the group rules) and, through a caller-supplied
+callback, the *token-keyed* binary rules, which are keyed to reserved words the forest does not
+carry. A token-keyed rule that succeeds yields `PRUNED` like any other. The first version instead
+reported whether a seam *coincided* with a binary-rule SITE — which says nothing, since
+`trig_appose_group` emits a site at every split of every cell, so the note fired at all three seams
+below and meant nothing at any of them. Verdicts are exact for everything a packed node holds (the
+packing invariant makes the decision a function of the signature), but the sem shown is the
+representative's.
+
+### First three results
+
+Measured on the identity snapshot over the CNL page's augmentation.
+
+**`The worst case is that it behaves like a null allele.`** — forced cut at 4, before «that». The
+that-clause **does** build, as `cat_cp`. The left block is the copula composed to
+`S[dcl,fin_any]/X` for seven different X: `S[dcl,adj]\NP`, `S[dcl,ger]\NP`, `S[dcl,pass]\NP`,
+`S[dcl,pred]\NP`, `NP`, `cat_numpred`, and a `pss` functor. None of them is `cat_cp`. So this is not
+a construction gap: **no copula entry takes `cat_cp` as complement.** One closed-class entry,
+parallel to the `cat_numpred` copulas.
+
+**`This is the gene.`** — forced cut at 1, before «is». `This` carries only determiner
+categories, `cat_forall(sg, λT. …)` and `cat_det_premod(sg, λT. …)`. There is no `cat_np`. The right
+block is a saturated `S[dcl,fin]\NP[Entity,sg]` wanting a subject. **`this` has no pronominal
+`cat_np` entry.** One closed-class entry.
+
+**`The claim is still the strongest evidence.`** — no forced cut; several minimal tilings exist, and
+the instrument says so rather than naming one. The seam it shows is `[0..3]«The claim is still`» ⊕
+`[4..6]«the strongest evidence»`, and the two blocks explain the family:
+
+- the left block *does* reach `S[dcl,fin_any]/(S[dcl,pred]\NP)` by `ForwardComp`, so `still` already
+  has a complement-preserving category — the adverb is not the gap;
+- the right block holds six nodes, all `cat_detmod` or type-raised (`S/(S\NP)`, `VP\(VP/NP)`). **A
+  definite NP has no `S[pred]\NP` form**, so nothing can fill the composed copula's slot.
+
+This is the same structural fact that killed `UnaryKind::IdentityPredicate`: definites arrive
+type-raised and there is no plain `cat_np` intermediate. It also explains why the earlier adverb A/B
+(MID 1/14 vs FRONT 1/14) found no position effect — position is not the variable.
+
+*Not yet measured:* why the adverb-free control parses. The inference is that `is the strongest
+evidence` builds as one cell and so never needs `S[pred]\NP`, but the instrument is gated on a
+failed parse and the control succeeds, so this wants a `EIGENIUS_TRACE_FOREST=cell:2..6` run on the
+control before it is relied on.
+
+The work order this implies is not the one this note carried. Two of the three are single
+closed-class entries; the third is the definite-NP predicate-nominal form, which is shared with the
+identity-copula line of work rather than being an adverb problem.
