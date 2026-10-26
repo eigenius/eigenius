@@ -93,6 +93,14 @@ resource lexicon:the_ref_obj_sem : lexicon:SemTerm {
           : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
+// Plain definite NP: λA. the(A) — the same ι term standing ALONE, at the noun's own type. The two
+// sems above wrap `ontology:the` in a predicate slot and so yield TYPE-RAISED categories; this one
+// yields a plain `cat_np` argument (`the_plain_np` below).
+resource lexicon:the_plain_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => ontology:the(A) : forall (A : Set) => A )
+    );
+}
 
 // ── Demonstratives are ANAPHORIC, not ι (D64, docs/notes/d64-demonstratives-as-holes.md) ──────
 // "these findings" refers back into the discourse; denoting it `ontology:the(A)` (as above) was a
@@ -1085,6 +1093,86 @@ resource lexicon:whereas_subord : lexicon:LexicalEntry {
     lexicon:sense    = "whereas";
 }
 
+// ── FRONTED subordinators — «Because X, Y» beside the «Y because X» above ──────
+// Every entry above is `(S\S)/S`: it takes its clause on the RIGHT and the result attaches to a
+// matrix clause on its LEFT. Fronted, the matrix is on the right, so the category needed is
+// `(S/S)/S` — which is exactly what `category::is_sentence_premodifier` names and what the
+// `AbsorbComma` fronted-modifier comma already consumes. Only the outer slash flips; the comma is
+// optional either way, which is how the fronted POSITION was isolated from the punctuation
+// (core-en battery, 2026-10-25: «The study failed because the gene affects cells.» parsed and the
+// fronted order did not, with or without the comma).
+//
+// Each sem is reused VERBATIM, which is why this is eight entries and not a design: `because_sem`
+// is `λs2. λs1. Because(s1, s2, …)` — it takes the SUBORDINATE clause first in both orders.
+//
+// `but` is excluded: «But Y, X» is a discourse connective, not a fronted subordinator. `when` has
+// no subordinator entry in either order, and no temporal relation to denote one with.
+
+resource lexicon:if_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('if the assay works, the study fails').";
+    lexicon:form     = "if";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "if";
+}
+resource lexicon:because_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('because the assay works, the study fails').";
+    lexicon:form     = "because";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:because_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "because";
+}
+resource lexicon:although_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('although the assay works, the study fails').";
+    lexicon:form     = "although";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "although";
+}
+resource lexicon:while_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('while the assay works, the study fails').";
+    lexicon:form     = "while";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "while";
+}
+resource lexicon:though_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('though the assay works, the study fails').";
+    lexicon:form     = "though";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "though";
+}
+resource lexicon:whilst_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whilst the assay works, the study fails').";
+    lexicon:form     = "whilst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whilst";
+}
+resource lexicon:unless_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('unless the assay works, the study fails').";
+    lexicon:form     = "unless";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:unless_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "unless";
+}
+resource lexicon:whereas_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whereas the assay works, the study fails').";
+    lexicon:form     = "whereas";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whereas";
+}
+
 // ── Indefinite pronouns (paradigm completion) ────────────────────────────────
 // An indefinite pronoun IS a quantified NP: `something` = "some thing", `everyone` = "every
 // person". So its category is the determiner's RESULT with the restrictor already fixed —
@@ -1367,6 +1455,41 @@ resource lexicon:they_pron : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:anaphor_sem;
     lexicon:sem_type = type_expr( lexicon:Entity );
     lexicon:sense    = "they";
+}
+// Bare DEMONSTRATIVE pronouns — `this` / `these` / `those` standing alone as an argument
+// («This is the gene.»). The `this_subj` / `these_subj` family further down are DETERMINERS
+// (`this gene`); a bare demonstrative has no restrictor to type a hole with, so it takes
+// `lexicon:anaphor` (`: Entity`) and not the determiners' restrictor-typed `lexicon:anaphor_of`,
+// and resolves exactly as `it` / `they` do. Categorially it IS `it_pron` with another form — the
+// demonstrative pronoun is the pronoun mechanism applied to three more surfaces, not a new one.
+//
+// `that` is deliberately absent, and that was measured (2026-10-25) rather than assumed: with
+// `that_pron` in, grammar gaps fell 499 → 486 but SEVEN closed parses went OPEN, every one of them
+// `That <noun> …` — `that` as a determiner, where the bare NP creates a spurious apposition
+// carrying a hole. The other three forms have no determiner homograph in that position.
+resource lexicon:this_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: singular proximal demonstrative PRONOUN ('this is the gene').";
+    lexicon:form     = "this";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "this_pron";
+}
+resource lexicon:these_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural proximal demonstrative PRONOUN ('these are the genes').";
+    lexicon:form     = "these";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "these_pron";
+}
+resource lexicon:those_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural distal demonstrative PRONOUN ('those are the genes').";
+    lexicon:form     = "those";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "those_pron";
 }
 
 // `we` — DEICTIC 1st-person-plural pronoun. Unlike `it`/`they` it is NOT anaphoric: it
@@ -3371,6 +3494,35 @@ resource lexicon:the_obj_pl : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "the";
+}
+// PLAIN-NP definite — `the gene` as an argument rather than a generalised quantifier. The four
+// entries above are the only definite categories there were, and all four are type-raised:
+// `S/(S\NP)` as subject, `VP\(VP/NP)` as object, with no plain `cat_np` intermediate. Measured
+// consequences (2026-10-25): NP coordination over definites was unreachable — «The gene and the
+// protein affect cells.» failed while «A gene and a protein affect cells.» parsed, and ONE definite
+// conjunct sufficed to break it — and `UnaryKind::IdentityPredicate` never fired, because its
+// `cat_np` pattern never matched a definite.
+//
+// No new machinery: `ontology:the : forall (A : Set) => A` gives `the(T) : T`, and
+// `⟦cat_np(T, num)⟧ = T`, so the plain form is `cat_forall(num, λT. cat_np(T, num))` over
+// `λA. the(A)`, consumed by `CombKind::DepApply` exactly as the raised forms are. Measured as a
+// layer before merging: XIAP units 51 → 59, +2 core-en battery constructions, `encoded` and
+// `ambiguous` byte-identical.
+resource lexicon:the_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form ('the gene' as an argument).";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
+}
+resource lexicon:the_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form, plural ('the genes').";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
 }
 resource lexicon:this_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";

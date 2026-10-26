@@ -1,3 +1,6 @@
+// NOT MERGED — superseded 2026-10-26 by `demonstrative-pronouns-no-that.esl`, which IS in
+// `ontologies/lexicon/closed-class.esl`. This four-entry arm includes `that_pron`, measured and
+// REJECTED: gaps 499 -> 486 but seven closed parses went OPEN. Kept for the measurement record.
 // ════════════════════════════════════════════════════════════════════
 // BARE DEMONSTRATIVE PRONOUNS — `this` / `that` / `these` / `those` as a plain NP.
 //

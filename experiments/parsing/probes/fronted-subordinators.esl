@@ -1,3 +1,6 @@
+// MERGED 2026-10-26 into `ontologies/lexicon/closed-class.esl`. These entries are now in the
+// bootstrap; this file is kept for the measurement record only. DO NOT layer it onto a
+// post-2026-10-26 snapshot — the IRIs are already there.
 // ════════════════════════════════════════════════════════════════════
 // FRONTED SUBORDINATORS — «Because X, Y» alongside the committed «Y because X».
 //
