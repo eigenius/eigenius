@@ -73,13 +73,19 @@ It is outside the repo and therefore does not travel — copy it with the rest i
 matters to you. The local branch `pre-clean-history-2026-10-20` and tag `pre-clean-2026-10-20` point
 at the same thing while this working copy lives.
 
-**THE SNAPSHOT IS DEAD — rebuild it before any measurement.** The LLM-component removal edited four
-bootstrap ontologies (`core-ontology.json`, `program-ontology.json`, `program-traces.json`,
-`prov.esl`), and the repository cleaning moved them again. A store is stamped with the bootstrap
-manifest and refuses to open when it drifts, so `wordnet-umls-hpo-aligned-2026-10-13-fa` now fails
-with `BootstrapError::ManifestDrift` on exactly those four layers — every other layer, ours included,
-still matches. There is no migration: the kernel notes that a compatibility arm for this "was written
-and removed", and that "the reseed that answers it rewrites the chain from source".
+**SUPERSEDED `2026-10-26`: the live store is `wordnet-umls-hpo-aligned-2026-10-26-basic`** (3.7 GB,
+seeded at `292dc5ab`, all three provenance counts reproduced). `wordnet-umls-hpo-aligned-2026-10-13-fa`
+and every other historical snapshot were DELETED that day to reclaim 456 GB; the raw reseed base
+`wordnet-umls-2026-10-26-basic` was kept so an alignment-only rebuild costs ~10 min instead of 53.
+Read the rest of this section as the record of why `-fa` died, not as instructions.
+
+The LLM-component removal edited four bootstrap ontologies (`core-ontology.json`,
+`program-ontology.json`, `program-traces.json`, `prov.esl`), and the repository cleaning moved them
+again. A store is stamped with the bootstrap manifest and refuses to open when it drifts, so
+`wordnet-umls-hpo-aligned-2026-10-13-fa` failed with `BootstrapError::ManifestDrift` on exactly those
+four layers — every other layer, ours included, still matched. There is no migration: the kernel
+notes that a compatibility arm for this "was written and removed", and that "the reseed that answers
+it rewrites the chain from source".
 
 An earlier revision of this note claimed the recorded measurements stayed reproducible on the new
 base. **That was wrong.** It checked that the LLM removal left the harness CODE alone, which it did,
@@ -95,7 +101,8 @@ cap-only `--no-llm` arm is unaffected once a current store exists.
 ## Standing the environment back up
 
 **The snapshot is required for every measurement.** Name:
-`wordnet-umls-hpo-aligned-2026-10-13-fa`, 3.8 GB, in `db-snapshot/` beside the repo.
+`wordnet-umls-hpo-aligned-2026-10-26-basic`, 3.7 GB, in `db-snapshot/` beside the repo, with the raw
+base `wordnet-umls-2026-10-26-basic` (3.5 GB) beside it.
 
 Either copy it (fastest, one `rsync`), or rebuild it. Rebuilding is step 1 (`reseed-lexicon-db.sh`,
 **~30 minutes** — not the ~3 h older notes assumed) followed by the four-step chain, whose recipe is
@@ -112,7 +119,7 @@ Measurement command, the arms every number in the notes was taken with:
 
 ```bash
 scripts/measure-parse-rate.sh --page <corpus> --no-llm --units-per-line \
-  --snapshot <db-snapshot>/wordnet-umls-hpo-aligned-2026-10-13-fa
+  --snapshot <db-snapshot>/wordnet-umls-hpo-aligned-2026-10-26-basic
 ```
 
 The full 1,056-sentence CNL corpus takes roughly an hour; the 325-unit page about 15 minutes. Run
