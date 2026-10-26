@@ -1353,3 +1353,79 @@ determiner-homograph surface does not kill the others.
 the claim: 13 (all four forms) → 4 (`that` dropped) → 3 (compound guard) → 2 (route inspected). Only
 the last two steps required looking at derivations rather than counts; the counts were consistent
 with every one of the wrong figures.
+
+## Track A: the cause census over all 94 blockers (2026-10-25)
+
+The hand classification above grouped the blockers by what the sentences LOOK like. Three of its
+rows were investigated with the instrument and all three turned out to be something other than their
+label. So the census was redone on the measured cause: `probe_gap_boundary` over all 94 one-away
+blockers, keyed on the verdict plus the two type-index-erased `cat_shape`s at the nearest miss.
+
+`experiments/parsing/blockers.py` extracts the 94 (run log + `cnl-map.tsv`). It reproduces the
+recorded breakdown exactly — 274 claim units, 51 / 94 / 55 / 34 / 40 — which is what licenses using
+it as the input.
+
+### What the parser is actually refusing
+
+| verdict | sentences |
+|---|---:|
+| `WRONG-ARG` | 65 |
+| `NO-FUNCTOR` | 7 |
+| `FEATURE(type)` | 2 |
+| `FEATURE(prep)` | 2 |
+| `PRUNED` | **0** |
+| `NORMAL-FORM` | **0** |
+| `MODE` | **0** |
+
+Three of those zeros matter. **No blocker is a pruning artifact** — the beam and sense cap are not
+costing a single one of the 94, so widening them cannot help. **No Eisner normal-form guard and no
+slash modality blocks any of them** either, which settles at scale what four separate mode
+experiments found one at a time ("none has moved a single skeleton").
+
+### The grouping is contaminated — conclusion withdrawn
+
+| | |
+|---|---:|
+| sentences with a seam verdict | 76 |
+| distinct cause groups | 68 |
+| groups of 3 / 2 / 1 | 1 / 6 / **61** |
+
+The first reading of this was "no dominant cause, so the grammar route is exhausted". **That does
+not follow, and the key is the reason.**
+
+A chart's maximal derivable spans are INFLATED BY MISPARSES. Each block grows as far as *some*
+derivation reaches, including a wrong one, so the seam lands where spurious coverage ran out — not
+where the missing rule is. Both sentences examined in detail today show it:
+
+- `The claim is still the strongest evidence.` — the left block reached `cat_s(dcl, fin_any)`, a
+  COMPLETE sentence, because `still` was read as the predicative adjective "motionless". The seam
+  sat after `still`; the missing rule concerns a token the block had already swallowed.
+- `Finding 9 reports those scores.` — the left block was a three-deep `compound_kind` pile reading
+  `reports` as a noun.
+
+Two for two. And the census key is (left block's `cat_shape` × right block's `cat_shape`) over
+blocks spanning most of the sentence, so it encodes whichever accidental reading grew furthest —
+close to a per-sentence hash of lexical ambiguity. 61 singletons is what that key produces whether
+or not a dominant cause exists. **It measures the instrument, not the grammar.**
+
+What survives is the verdict distribution above: zero `PRUNED`, zero `MODE`, zero `NORMAL-FORM` are
+facts about the chart whatever the seam's position. So the beam, the modalities and the normal-form
+guards are still ruled out for all 94. The three gaps diagnosed earlier also survive — each was
+established by TRACING a derivation, never by the grouping.
+
+### What the bottom-up instrument can and cannot do
+
+It localizes a seam, which is a SYMPTOM. Grammar engineering works the other way: hold a sentence's
+intended analysis and ask which step of that derivation the grammar fails to license. That is how
+CCGbank was built — the treebank-to-CCG conversion's FAILURES are the inventory of what is missing —
+and it is the DELPH-IN/`[incr tsdb()]` loop. The diagnosis it yields is keyed on the construction
+("this token needs a category of shape X"), which groups across sentences; a seam key does not.
+
+The cheap approximation, needing no gold trees: **token-level category ablation.** For each token
+*i*, inject a permissive category and re-parse; if the sentence closes, *i* is implicated, and the
+category the completed derivation demanded at *i* names the missing entry directly. Cost is *n*
+re-parses per sentence. The exact version infers the required category at *i* by unification from
+the surrounding chart instead of guessing it.
+
+Until that is run, the size of the remaining grammar work is UNKNOWN — not zero, and not the 3 the
+contaminated key suggested.

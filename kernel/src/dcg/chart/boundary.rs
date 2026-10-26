@@ -402,7 +402,7 @@ fn report_seam(
     (ri, rj): (usize, usize),
     bin_rule_combines: BinRuleCombines,
     out: &mut String,
-) {
+) -> Option<(Verdict, NodeId, NodeId)> {
     let lefts: Vec<NodeId> = forest.cells[li][lj].values().copied().collect();
     let rights: Vec<NodeId> = forest.cells[ri][rj].values().copied().collect();
     out.push_str(&format!(
@@ -415,7 +415,7 @@ fn report_seam(
     // A minimal-tiling block always holds nodes; a diagnostic still says so rather than indexing blind.
     let (Some(&_l0), Some(&r0)) = (lefts.first(), rights.first()) else {
         out.push_str("    (empty block — no nodes to diagnose)\n");
-        return;
+        return None;
     };
     // The right operand's right context is the combined cell's, as both chart drivers compute it.
     let rctx = forest.nodes[r0].rctx;
@@ -458,6 +458,7 @@ fn report_seam(
     }
     let counts: Vec<String> = tally.iter().map(|(k, n)| format!("{k}×{n}")).collect();
     out.push_str(&format!("    all pairs: {}\n", counts.join("  ")));
+    best
 }
 
 thread_local! {
@@ -615,6 +616,7 @@ fn gap_report_body(
         },
     ));
 
+    let mut worst: Option<(Verdict, NodeId, NodeId)> = None;
     for w in blocks.windows(2) {
         let (l, r) = (w[0], w[1]);
         let cut = r.0;
@@ -624,7 +626,25 @@ fn gap_report_body(
             ""
         };
         out.push_str(&format!("  ── cut {cut}{marker} ──\n"));
-        report_seam(forest, tokens, layer, l, r, bin_rule_combines, &mut out);
+        if let Some(miss) = report_seam(forest, tokens, layer, l, r, bin_rule_combines, &mut out) {
+            if worst.is_none_or(|(w, _, _)| miss.0 > w) {
+                worst = Some(miss);
+            }
+        }
+    }
+    // ONE machine-readable line per report, for `sort | uniq -c` over a corpus of blockers. The
+    // census key is the VERDICT plus the two `cat_shape`s at the nearest miss — type-index-erased,
+    // so sentences whose gap is the same categorial refusal group together however their nouns
+    // differ. Grouping on the sentence's surface shape is what produced three successive wrong work
+    // orders; this groups on what the parser actually refused.
+    if let Some((v, l, r)) = worst {
+        out.push_str(&format!(
+            "GAPSUM\t{}\tcuts={}\tL={}\tR={}\n",
+            v.label(),
+            forced.len(),
+            super::forest::cat_shape(forest.nodes[l].rep.cat()),
+            super::forest::cat_shape(forest.nodes[r].rep.cat()),
+        ));
     }
     out
 }
