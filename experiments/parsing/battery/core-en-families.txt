@@ -48,3 +48,42 @@ The study reported what affects cells.
 Three genes affect cells.
 The first gene affects cells.
 This gene affects cells.
+The gene does not contain proteins.
+No gene is essential.
+The gene is not a protein.
+Genes do not affect cells.
+The study did not report genes.
+The gene that the study reported is essential.
+The genes which the study reported are essential.
+The protein that affects cells is essential.
+Cells that contain genes are essential.
+The gene which is essential affects cells.
+A gene and a protein affect cells.
+The gene affects cells and proteins.
+Genes affect cells and contain proteins.
+The gene or the protein affects cells.
+Neither gene affects cells.
+The gene affects cells in the study with proteins.
+The protein binds to the gene in cells.
+The study reported genes with proteins.
+The gene affects cells for proteins.
+The gene was reported by the study.
+The gene has been reported.
+The gene will affect cells.
+The gene could affect cells.
+The study wants to report genes.
+Reporting genes is essential.
+The study began reporting genes.
+The reported gene is essential.
+The gene reported by the study is essential.
+A gene affecting cells is essential.
+The study reported genes and the gene affects cells.
+If the gene affects cells the study fails.
+When the gene affects cells the study fails.
+The gene is essential and the protein is essential.
+More genes affect cells.
+Most genes affect cells.
+All genes affect cells.
+Many genes affect cells.
+Few genes affect cells.
+The two genes affect cells.

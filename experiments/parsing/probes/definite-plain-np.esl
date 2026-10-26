@@ -1,0 +1,65 @@
+// ════════════════════════════════════════════════════════════════════
+// A DEFINITE NP GETS A PLAIN `cat_np` — the cheap test of the definiteness root cause.
+//
+// ADDITIVE. Two new IRIs; `the_subj` / `the_obj` / `the_subj_pl` / `the_obj_pl` are untouched.
+//
+// THE ROOT CAUSE (measured 2026-10-25, four independent symptoms). A definite builds ONLY
+// type-raised categories — `S/(S\NP)` as subject, `VP\(VP/NP)` as object — and no plain `cat_np`
+// intermediate. That single fact explains:
+//   1. the identity copula's redundant derivation (its comment asks for definiteness to narrow it)
+//   2. the adverb/copula adjacency: the raised definite selects an ADJACENT `VP/NP`, so no adverb
+//      can sit between the copula and its complement
+//   3. `UnaryKind::IdentityPredicate` never firing — definites arrive raised, so the shift's
+//      `cat_np` pattern never matches
+//   4. basic NP COORDINATION. Measured grid: «A gene and a protein affect cells.» parses,
+//      «Genes and proteins affect cells.» parses, «The gene and the protein affect cells.» does
+//      NOT, and neither does the singular-verb variant — so it is not number agreement. One
+//      definite conjunct suffices to break it.
+//
+// THE CHEAP FIX, IF IT WORKS. `ontology:the : forall (A : Set) => A`, so `the(T) : T`; and
+// `⟦cat_np(T, num)⟧ = T`. A plain definite NP is therefore ALREADY type-correct and expressible
+// with the existing dependent-determiner machinery — `cat_forall(num, λT. cat_np(T, num))` over
+// `λA. the(A)`, consumed by `CombKind::DepApply` exactly as the raised forms are. Two lexical
+// entries against the ≈148 sites an arity-changing definiteness FEATURE would touch.
+//
+// WHAT IT PLAUSIBLY COSTS, and why this is a measurement and not a patch. A bare kind already has
+// both a plain `cat_np` (core-en's `bnp`) and a raised copy, and the Eisner guard
+// `ProvGuard::RightNotKindRaised` exists precisely because the raised copy would otherwise
+// re-derive what plain application already gives. Those guards key on `Combinator::KindRaised`,
+// NOT on a definite's provenance — so a plain definite alongside the raised ones may duplicate
+// every definite-argument derivation. That is the predicted cost; the run decides whether it is
+// real and how large.
+//
+// KILL CRITERION. «The gene and the protein affect cells.» must parse, and `encoded` + `ambiguous`
+// on the XIAP page must not fall. Measure as a layer — this changes `closed-class.esl` semantics
+// only through NEW IRIs, so the base snapshot stays valid for comparison.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace ontology  = "urn:eigenius:ontology";
+namespace core      = "urn:eigenius:core";
+
+// λA. the(A) — the ι term itself, at the noun's own type. The raised entries wrap this same
+// `ontology:the` in a predicate slot; here it stands alone, which is what makes the result a plain
+// argument rather than a generalised quantifier.
+resource lexicon:the_plain_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => ontology:the(A) : forall (A : Set) => A )
+    );
+}
+resource lexicon:the_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form ('the gene' as an argument).";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
+}
+resource lexicon:the_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form, plural ('the genes').";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
+}

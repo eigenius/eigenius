@@ -1550,3 +1550,69 @@ defects rather than by what the domain needs to express.
 
 The battery is also the artifact the top-down method needs — 50 sentences whose intended analysis is
 known BY CONSTRUCTION, which is what neither probe built today had.
+
+## The plain definite NP: two entries, +8 units (2026-10-25)
+
+`ontology:the : forall (A : Set) => A`, so `the(T) : T`; and `⟦cat_np(T, num)⟧ = T`. A plain definite
+NP is therefore already type-correct and expressible with the EXISTING dependent-determiner
+machinery — `cat_forall(num, λT. cat_np(T, num))` over `λA. the(A)`, consumed by `CombKind::DepApply`
+exactly as the raised forms are. Two lexical entries, no kernel change, no arity change, against the
+≈148 sites an arity-changing definiteness FEATURE would have touched.
+
+Measured as a layer on `…-2026-10-24-identity` (`experiments/parsing/probes/definite-plain-np.esl`):
+
+| | base | + plain definite NP |
+|---|---:|---:|
+| battery (89 basic constructions) | 70 | **72** |
+| page grammar-gap | 499 | **477** |
+| page covered (E+A) | 419 | **439** |
+| **source units fully covered** | **51 / 274** | **59 / 274** |
+| one-away blockers | 94 | 87 |
+| total-skeletons | 3,542 | 5,078 |
+
+Page transitions: 17 `GRAMMAR-GAP → AMBIG`, 5 `GRAMMAR-GAP → OPEN`, 3 `OPEN → AMBIG` (an
+improvement — open became closed), 3 `ENCODED → AMBIG`. **Nothing lost coverage.**
+
+Two basic-grammar failures close: NP coordination with definite conjuncts, and — unpredicted — the
+**zero object relative**, a core-en family (`rrel`) this note had listed as missing because only the
+subject-gap half was taken. It needed a plain definite NP to build the gapped clause.
+
+### The cost is derivational, not semantic
+
+The 3 `ENCODED → AMBIG` sentences all begin `The <noun>`, so the subject now derives two ways. The
+sems are IDENTICAL as printed:
+
+```
+base    closed=1   [0] has_quantity(the(n13759014), <term>, mk_quantity(<term>, 0))
++plain  closed=2   [0] has_quantity(the(n13759014), <term>, mk_quantity(<term>, 0))
+                   [1] has_quantity(the(n13759014), <term>, mk_quantity(<term>, 0))
+```
+
+So this is the identity copula's bargain again — "logically equivalent, not a wrong reading; the
+cost is ranking and chart size, never a distorted claim" — and here the readings are not merely
+equivalent but textually identical.
+
+**Open, and it decides whether the +43% skeleton cost is removable.** `paths.rs` already runs
+`retain_distinct_sems` over the candidates, so two identical sems should not both survive. Either
+they differ in subterms `pretty_term` elides as `<term>`, or the dedup is not catching them. If the
+latter, the skeleton growth is a DEDUP DEFECT and disappears when fixed; if the former, the
+duplicates are genuinely distinct terms and want an ENF guard of their own. Settle this before the
+entries go into `closed-class.esl`.
+
+### What it says about the work order
+
+The five constructions this note worked through earlier — the reduced relative, `rather than`, the
+closed-class batch, Fork A, the `ger` participial — moved the page **16 → 19 of 325 across all
+five**. Two entries fixing BASIC grammar moved units **51 → 59**.
+
+That is the case for ranking by basic-grammar coverage rather than by corpus unit-yield, measured
+rather than argued. A corpus-specific patch is worth 0–2 units because the pattern occurs 0–2 times;
+a basic construction recurs, and definiteness was sitting underneath coordination, the zero object
+relative, and the identity copula's redundancy at once.
+
+### Correction
+
+Definiteness was described earlier today as "a root cause with four symptoms". The plain NP fixes
+coordination and the zero object relative but **not** the adverb/copula case — that one's cause is
+the adverb's own category, established separately. Three symptoms, not four; the fourth was folded
+in on resemblance rather than evidence.
