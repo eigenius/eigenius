@@ -613,8 +613,31 @@ pub fn coordinate_np(
         conn_name.into(),
         vec![],
     );
-    let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
-    let group_cat = Exp::InductiveCtor(cat_decl, "cat_group".into(), vec![c, conn, pl]);
+    // AGREEMENT IS CONNECTIVE-DEPENDENT. `and` is plural whatever its conjuncts; `or` takes
+    // PROXIMITY agreement — the verb agrees with the NEAREST conjunct ("the gene or the proteins
+    // affect", "the proteins or the gene affects"). Both were hardcoded `pl`, which inverts the
+    // `or` case exactly. Measured 2026-10-26 before the fix:
+    //
+    //   «The gene or the protein affects cells.»  GAP    (grammatical)
+    //   «The gene or the protein affect cells.»   parses (ungrammatical)
+    //   «The gene or the protein is essential.»   GAP    (grammatical)
+    //   «The gene or the protein are essential.»  parses (ungrammatical)
+    //
+    // `and` was right already and is untouched — «The gene and the protein affects cells.»
+    // correctly fails. A neutral `conn_list` (a bare comma) also stays plural: it is not yet
+    // finalized, and the trailing `and`/`or` re-enters here with the nearest conjunct in hand.
+    let pl = || Exp::InductiveCtor(num_decl.clone(), "pl".into(), vec![]);
+    let num = if conn_name == "conn_or" {
+        // The right conjunct is always a single NP (left-branching — a group never sits on the
+        // right), so its number IS the nearest conjunct's.
+        is_ctor(r_cat, "cat_np")
+            .and_then(|a| a.get(1))
+            .cloned()
+            .unwrap_or_else(pl)
+    } else {
+        pl()
+    };
+    let group_cat = Exp::InductiveCtor(cat_decl, "cat_group".into(), vec![c, conn, num]);
     Some((group_cat, list_term(&all)))
 }
 

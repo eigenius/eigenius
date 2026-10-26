@@ -1731,3 +1731,53 @@ to-infinitive complement (×2: `wants to`, ECM `showed … to be`) · free relat
 object) · there-existential · `or`-coordination with definites (`and` now works) · perfect passive
 (`has been`) · gerund subject · `Neither gene …` · `'s` possessive (OOV) · predicative `very` ·
 superlative `most` · fronted adverb · `when`.
+
+## `or`-coordination: the agreement was inverted (2026-10-26)
+
+Not a missing construction — a CORRECTNESS defect. `coordinate_np` built every group as
+`cat_group(C, conn, pl)`, hardcoding plural for both connectives. `and` is plural whatever its
+conjuncts, so that half was right; `or` takes PROXIMITY agreement in English — the verb agrees with
+the nearest conjunct — so the `or` half was inverted exactly. Measured grid, before:
+
+| | verb | |
+|---|---|---|
+| `The gene and the protein affect cells.` | pl | parses ✓ |
+| `The gene and the protein affects cells.` | sg | fails ✓ (correctly — ungrammatical) |
+| `The gene or the protein affects cells.` | sg | **fails** ✗ — grammatical |
+| `The gene or the protein affect cells.` | pl | **parses** ✗ — ungrammatical |
+| `… or … is essential.` / `… are essential.` | sg / pl | fails / parses — same inversion |
+
+The grammar rejected the grammatical form and accepted the ungrammatical one, consistently across
+verbs and the copula. Fixed by taking the group's number from the RIGHT conjunct for `conn_or`
+(left-branching, so the right conjunct is always the nearest single NP); `and` and the neutral
+comma-list are untouched.
+
+After: `or … affects` and `or … is` parse, `or … affect` and `or … are` do not, every `and` case
+unchanged, `HeLa or the gene affects cells.` now parses.
+
+**A pinned test encoded the defect.** `disjunctive_np_coordination_distributes_with_or` asserted on
+`"HeLa or BRCA1 affect HeLa"` — two singular names, `or`, plural verb. Ungrammatical, and the fix
+correctly rejects it. The input is now `affects`; what the test asserts (an `or`-group distributes
+into one `logic:Or` disjunct per member) is unchanged. That is the third time today a test or tool
+had built ON a defect rather than around it, after `value_first` hardcoding `pretty_term`'s `<term>`
+elision and two scripts parsing the hardcoded "WRN first page" banner.
+
+Measured: battery 75 → **76** of 89, exactly one sentence, zero regressions. Suite 220 ok. **The
+XIAP page is byte-identical on every metric including readings** — this corpus has no
+`or`-coordination of singular NPs in either agreement, so the stricter rule removed no real
+coverage.
+
+*Not fixed:* `A gene or a protein affect cells.` still parses. Indefinite conjuncts reach a plural
+reading by some other route; the inversion is corrected for definites, names and the copula.
+
+### Three fixes, and the yield pattern
+
+| fix | battery | XIAP units |
+|---|---:|---:|
+| plain definite NP | +2 | **+8** |
+| fronted subordinators | +3 | 0 |
+| `or` proximity agreement | +1 | 0 |
+
+Two consecutive zeros, both correct English, and the third is a defect no coverage metric could
+see — the corpus does not exercise it in either direction. Under yield-ranking none of the last two
+would have been built.

@@ -4886,12 +4886,20 @@ fn distributive_np_coordination_parses() {
 
 #[test]
 fn disjunctive_np_coordination_distributes_with_or() {
-    // "HeLa or BRCA1 affect HeLa": an `or`-group distributes with ∨ →
+    // "HeLa or BRCA1 affects HeLa": an `or`-group distributes with ∨ →
     // affects(hela, hela) ∨ affects(hela, brca1) : Prop.
-    assert_parses_to_prop("HeLa or BRCA1 affect HeLa");
+    //
+    // The verb is SINGULAR. This test pinned the plural `affect` until 2026-10-26, which is
+    // ungrammatical for `or` over singular conjuncts — English gives `or` PROXIMITY agreement, so
+    // the verb agrees with the nearest conjunct. `coordinate_np` hardcoded the group's number to
+    // `pl` for every connective, which inverted the `or` case exactly: it accepted this plural and
+    // rejected the grammatical singular. Fixing the agreement made the old input fail, correctly.
+    // What the test asserts — that an `or`-group distributes into one `logic:Or` per member — is
+    // unchanged.
+    assert_parses_to_prop("HeLa or BRCA1 affects HeLa");
 
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa or BRCA1 affect HeLa", &Identity);
+    let forest = index.parse("HeLa or BRCA1 affects HeLa", &Identity);
     assert_eq!(
         forest.len(),
         1,
