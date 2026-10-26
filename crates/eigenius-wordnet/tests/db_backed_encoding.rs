@@ -4973,7 +4973,7 @@ fn wrn_first_page_over_full_lexicon() {
         }
     }
 
-    summarize(&report);
+    summarize(&report, &page_path);
 
     // Persist the selection decisions and print the SELECTION summary line BEFORE the replay
     // asserts (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
@@ -5964,7 +5964,12 @@ fn tag(o: &Outcome) -> &'static str {
     }
 }
 
-fn summarize(report: &[UnitReport]) {
+/// `page` is the file actually measured. It is a PARAMETER because the banner used to hardcode
+/// "WRN first page", which stopped being true the moment `--page` existed: every run in
+/// `experiments/parsing/results/` since then has been labelled as a WRN measurement whatever corpus
+/// it read. A run log that misnames its own input is worse than one that says nothing, because the
+/// archived log is all a later reader has.
+fn summarize(report: &[UnitReport], page: &str) {
     let (mut enc, mut amb, mut miss, mut gap, mut scale, mut open) = (0, 0, 0, 0, 0, 0);
     let mut non_prose = 0;
     let mut oov: BTreeSet<String> = BTreeSet::new();
@@ -6085,11 +6090,15 @@ fn summarize(report: &[UnitReport]) {
         );
     }
     eprintln!(
-        "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
+        "\n=== {} over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}, \
          scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
          total-skeletons {total_skeletons} (sense× {:.2}), \
          expected-hits {exp_hits}, expected-curated {exp_total} ===",
+        std::path::Path::new(page)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| page.to_string()),
         report.len(),
         total_readings as f32 / total_skeletons.max(1) as f32
     );
@@ -8987,6 +8996,47 @@ fn probe_identity_copula() {
         eprintln!("\n=== {s}   closed={}", closed.len());
         for (i, it) in closed.iter().enumerate() {
             eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+        // `retain_distinct_sems` keys on `format!("{:?}", sem)`, so THAT is the comparison that
+        // decides whether two readings are the same term. `pretty_term` is lossy by design (it
+        // labels big variants rather than inlining them), so two readings printing alike proves
+        // nothing. Report the Debug comparison directly: equal means the dedup was bypassed
+        // somewhere after it ran; unequal means the terms genuinely differ and the duplication is
+        // inherent.
+        if closed.len() >= 2 {
+            let a = format!("{:?}", closed[0].sem());
+            let b = format!("{:?}", closed[1].sem());
+            // `subsume_duplicates` keys on (cat, sem) — so a sem-identical pair survives when the
+            // CATEGORIES differ. Print both to say which half of that key is doing the work.
+            eprintln!(
+                "  DEBUG-EQ sem [0]vs[1]: {}  (len {} vs {})",
+                a == b,
+                a.len(),
+                b.len()
+            );
+            eprintln!("    cat[0] = {}", pretty_term(closed[0].cat()));
+            eprintln!("    cat[1] = {}", pretty_term(closed[1].cat()));
+            eprintln!(
+                "    cat-eq: {}   prov: {:?} vs {:?}",
+                format!("{:?}", closed[0].cat()) == format!("{:?}", closed[1].cat()),
+                closed[0].prov(),
+                closed[1].prov()
+            );
+            if a != b {
+                let at: Vec<char> = a.chars().collect();
+                let bt: Vec<char> = b.chars().collect();
+                let k = at.iter().zip(&bt).take_while(|(x, y)| x == y).count();
+                let lo = k.saturating_sub(60);
+                eprintln!("  first divergence @{k}:");
+                eprintln!(
+                    "    a: …{}",
+                    at[lo..(k + 90).min(at.len())].iter().collect::<String>()
+                );
+                eprintln!(
+                    "    b: …{}",
+                    bt[lo..(k + 90).min(bt.len())].iter().collect::<String>()
+                );
+            }
         }
     }
 }

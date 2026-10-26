@@ -35,7 +35,9 @@ def main():
     if not units:
         sys.exit("no `[unit …]` lines in the log — the run did not reach the sweep")
 
-    summary = re.search(r"=== WRN first page over FULL lexicon: (\d+) units", log)
+    # The banner names the measured page since 2026-10-25 ("WRN first page" was hardcoded and
+    # wrong for every `--page` run). `.*?` matches both spellings, so archived logs still parse.
+    summary = re.search(r"=== .*? over FULL lexicon: (\d+) units", log)
     if summary and int(summary.group(1)) != len(units):
         sys.exit(f"summary says {summary.group(1)} units, log has {len(units)} lines")
 

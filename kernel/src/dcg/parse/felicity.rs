@@ -50,16 +50,34 @@ impl Parser {
     /// local segment and could false-merge two distinct senses. O(n²) over the pre-cap forest, which the
     /// felicity gate has already bounded to the classify-candidate count.
     pub(super) fn subsume_duplicates(forest: &mut Vec<Item>) {
-        let mut out: Vec<Item> = Vec::with_capacity(forest.len());
+        // Key on the category's DENOTATION, not its syntax. A reading is a (type, term) pair, and
+        // `⟦cat_s(dcl, fin)⟧` and `⟦cat_s(dcl, fin_any)⟧` are BOTH `Prop` — so two full-span
+        // readings carrying the identical proposition are the same reading even though their top
+        // categories differ in a feature.
+        //
+        // Measured 2026-10-25 on «The cutoff was 5.5 Å.» with a plain definite NP available:
+        //
+        //   [0] has_quantity(the(n13759014), u"m", mk_quantity(11/20000000000, 0))  cat_s(dcl, fin)      BackwardApp
+        //   [1] has_quantity(the(n13759014), u"m", mk_quantity(11/20000000000, 0))  cat_s(dcl, fin_any)  ForwardApp
+        //
+        // — byte-identical sems (321 bytes each) from two routes: the plain NP applying backward to
+        // the VP, and the type-raised subject applying forward. Keying on `cat()` kept both, so the
+        // unit reported AMBIGUOUS with one proposition. `retain_distinct_sems` upstream cannot catch
+        // it either: it runs on PRE-felicity sems, and these two converge only once felicity
+        // normalises them.
+        let key = |it: &Item| {
+            denote_cat(it.cat())
+                .map(|d| format!("{d:?}"))
+                .unwrap_or_else(|_| format!("{:?}", it.cat()))
+        };
+        let mut out: Vec<(String, Item)> = Vec::with_capacity(forest.len());
         for it in forest.drain(..) {
-            if !out
-                .iter()
-                .any(|k| k.cat() == it.cat() && k.sem() == it.sem())
-            {
-                out.push(it);
+            let k = key(&it);
+            if !out.iter().any(|(ok, oi)| *ok == k && oi.sem() == it.sem()) {
+                out.push((k, it));
             }
         }
-        *forest = out;
+        *forest = out.into_iter().map(|(_, it)| it).collect();
     }
 
     /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one (D64), or reject it.

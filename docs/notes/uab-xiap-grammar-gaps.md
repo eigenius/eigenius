@@ -1616,3 +1616,68 @@ Definiteness was described earlier today as "a root cause with four symptoms". T
 coordination and the zero object relative but **not** the adverb/copula case — that one's cause is
 the adverb's own category, established separately. Three symptoms, not four; the fourth was folded
 in on resemblance rather than evidence.
+
+## Three instruments that were saying something untrue (2026-10-25)
+
+Chasing the plain definite NP's skeleton cost turned up three defects in the measuring apparatus
+itself. In two of the three, something downstream had built on the untruth rather than around it.
+
+### 1. `subsume_duplicates` keyed on category SYNTAX
+
+«The cutoff was 5.5 Å.» returned two readings whose sems were **byte-identical** — 321 bytes each,
+by `format!("{:?}", …)`, the exact key the dedup uses:
+
+```
+cat[0] = cat_s(dcl, fin)       prov: BackwardApp     (plain NP, backward application)
+cat[1] = cat_s(dcl, fin_any)   prov: ForwardApp      (type-raised subject, forward application)
+```
+
+`⟦cat_s(dcl, fin)⟧` and `⟦cat_s(dcl, fin_any)⟧` are both `Prop`, so these are one reading. The key
+is now the category's DENOTATION. `retain_distinct_sems` upstream cannot catch it: it runs on
+PRE-felicity sems, and the two converge only once felicity normalises them.
+
+Measured. On the BASE grammar the defect is nearly dormant — readings 40,932 → 40,911, skeletons
+unchanged, every outcome identical — because it needs a SECOND ROUTE to the same proposition and the
+base grammar rarely offers one. With the plain definite NP it bites: readings 42,911 → 40,146,
+one `ENCODED` recovered.
+
+**Prediction corrected:** the +50% skeleton growth was expected to be mostly duplication and shrink.
+Skeletons did not move at all (5,078 either way). Duplicate readings SHARE a skeleton, so collapsing
+them cannot reduce the count — the growth is genuine new sem shapes from having a second NP form,
+and it is inherent to the fix.
+
+Net for definiteness + dedup against baseline: grammar-gap 499 → 477, covered 419 → 439, units
+51 → 59, and **786 FEWER total readings than baseline**. More coverage at lower reading cost.
+
+### 2. `pretty_term` elided nine `Exp` variants as `<term>`
+
+`Exp` has 46 variants; the printer special-cased 37 and sent the rest to a bounded label, `<term>`.
+`LitRat`, `LitUnit` and `Refine` were among them — so every measured-quantity sem read this session
+was partly invisible, and the two readings above printed identically only because the parts that
+could differ were the parts being erased. `LitRat` and `LitUnit` now print their contents (a
+rational and a unit are small, so the bounded-output argument never reached them); `Refine` prints
+its base; the remaining five are named rather than left to the generic label.
+
+**A test depended on the defect.** `value_first` in `quantities_in_the_parser.rs` searched for the
+literal string `{rel}(<term>, ` — hardcoding the elision. Six tests failed on the printer fix, and
+the first reading of that red suite ("the dedup change removed a reading") was wrong: the failures
+were the printer's. The helper now skips the unit argument generically; its assertion is unchanged.
+
+### 3. The measurement banner misnamed its own input
+
+`=== WRN first page over FULL lexicon: …` was HARDCODED. It stopped being true the moment `--page`
+existed, so every run in `experiments/parsing/results/` — including every measurement in this note —
+is labelled a WRN measurement whatever corpus it actually read. It now names the page
+(`=== cnl-page.txt over FULL lexicon: …`).
+
+**Two consumers parsed the old string**: `scripts/eval-parse-rate.sh`, which documents it as a
+contract ("`grammar-gap` MUST come from the … summary line"), and `experiments/parsing/
+uab-xiap-score.py`. Both patterns now match either spelling, verified against an archived log, so
+old runs still parse.
+
+### The shape of all three
+
+Each was a tool reporting something untrue about its own output, and none surfaced from READING
+output — only from checking what the output was made of. Two had downstream consumers built on the
+untruth, which is what makes this class expensive: the defect propagates into things that look like
+independent confirmation.

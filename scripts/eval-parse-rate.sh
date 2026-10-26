@@ -21,7 +21,9 @@
 # Why this exists as a separate, scripted step: reading these numbers by eye is how they get read
 # WRONG. Three specific traps, each of which has silently produced a false result:
 #
-#   1. `grammar-gap` MUST come from the `=== WRN first page over FULL lexicon: … ===` summary line.
+#   1. `grammar-gap` MUST come from the `=== <page> over FULL lexicon: … ===` summary line. The
+#      banner NAMES the measured page since 2026-10-25; it used to say "WRN first page" whatever
+#      corpus was read. The pattern below matches both spellings so archived logs still parse.
 #      The per-unit listing enumerates only AMBIG units and OMITS grammar gaps — counting from it
 #      reports 0 gaps on a run that had many.
 #   2. A run that never printed a summary line DID NOT COMPLETE (stack overflow / abort / SKIP).
@@ -65,7 +67,7 @@ done
 [[ -f "$LOG" ]] || { echo "error: no such log: $LOG" >&2; exit 2; }
 
 # ── Trap 2: did the run COMPLETE? ────────────────────────────────────────────
-summary_of() { grep -m1 -E '^=== WRN first page over FULL lexicon' "$1" || true; }
+summary_of() { grep -m1 -E '^=== .* over FULL lexicon' "$1" || true; }
 
 SUMMARY="$(summary_of "$LOG")"
 if [[ -z "$SUMMARY" ]]; then

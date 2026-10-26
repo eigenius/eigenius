@@ -130,6 +130,17 @@ pub fn pretty_term(e: &Exp) -> String {
         Exp::LitInt(i) => i.to_string(),
         Exp::LitFloat(f) => f.to_string(),
         Exp::LitBool(b) => b.to_string(),
+        // A rational and a unit are SMALL, so the bounded-output argument for `exp_kind` does not
+        // reach them — and eliding them made every measured-quantity sem partly unreadable. Found
+        // 2026-10-25 while asking whether two derivations of «The cutoff was 5.5 Å.» denote the
+        // same thing: both printed `has_quantity(the(n13759014), <term>, mk_quantity(<term>, 0))`,
+        // identical only because the parts that could differ were the parts being erased.
+        Exp::LitRat(r) => r.to_string(),
+        Exp::LitUnit(u) => format!("u\"{u}\""),
+        // The refinement's BASE is what a reader needs; the constraint set is named by arity so the
+        // output stays bounded. `Refine` is the shape a determiner's `DetRefine` route produces, so
+        // eliding it hid exactly the distinction between a refined and an unrefined definite.
+        Exp::Refine(base, cs) => format!("{}|{}|", pretty_term(base), cs.len()),
         // Bounded fallback for any variant not special-cased: the variant kind, never
         // the full Debug (which would inline inductive declarations).
         other => exp_kind(other).to_string(),
@@ -157,6 +168,13 @@ fn exp_kind(e: &Exp) -> &'static str {
         Exp::Construct(_, _) => "<construct>",
         Exp::Map(_, _) => "<map>",
         Exp::Reduce(_, _, _) => "<reduce>",
+        // Named rather than left to the generic `<term>`: a diagnostic that cannot tell these
+        // apart cannot say why two readings differ. Bounded — a label, never the contents.
+        Exp::Checked(_) => "<checked>",
+        Exp::Record(_) => "<record>",
+        Exp::Match { .. } => "<match>",
+        Exp::InductiveRec { .. } => "<inductive-rec>",
+        Exp::InstitutionInvoke { .. } => "<institution-invoke>",
         _ => "<term>",
     }
 }
