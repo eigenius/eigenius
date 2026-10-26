@@ -124,6 +124,23 @@ mkdir -p "$OUT"
 docker run --rm -v "$VOLUME":/src:ro -v "$(readlink -f "$OUT")":/dst alpine \
   sh -c "cp -a /src/. /dst/ && chown -R $(id -u):$(id -g) /dst"
 
+# STAMP WHAT WAS ADDED. `cp -a` carries the base's PROVENANCE across verbatim, so without this the
+# new snapshot does not merely fail to mention its layers — it ASSERTS it is the base, down to the
+# base's git rev and build time. Every probe snapshot in ../db-snapshot built before 2026-10-26 is
+# anonymous in exactly that way, and on 2026-10-26 three of them were read as a cumulative stack
+# when each was an independent A/B on the same base. The reseed's own PROVENANCE comment names this
+# failure mode ("a store is anonymous: scope, drops and overrides are invisible to anyone who later
+# measures against it"); build-alignment-snapshot.sh fixed its half on 2026-08-20 after a staged
+# aligned store reported "raw reseed". This is the generic half.
+if [[ -f "$OUT/PROVENANCE" ]]; then
+  layer_names=("${LAYERS[@]##*/}")
+  {
+    echo "layered_from    : $(basename "$BASE")"
+    echo "layers          : ${layer_names[*]}"
+    echo "layered_at      : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >> "$OUT/PROVENANCE"
+fi
+
 echo
 echo "================================================================"
 echo "done. base (untouched): $BASE"
