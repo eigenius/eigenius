@@ -1,0 +1,94 @@
+// ════════════════════════════════════════════════════════════════════
+// FRONTED SUBORDINATORS — «Because X, Y» alongside the committed «Y because X».
+//
+// ADDITIVE. New IRIs only; every `*_subord` entry is untouched.
+//
+// MEASURED GAP (core-en battery, 2026-10-25). «The study failed because the gene affects cells.»
+// parses; «Because the gene affects cells, the study failed.» does not, and adding the comma does
+// not help — so it is the fronted POSITION, not the subordinator or the punctuation.
+//
+// THE CAUSE IS ONE SLASH. Every committed subordinator is `(S\S)/S`: it takes its clause on the
+// RIGHT, yielding `S\S`, which then attaches to a matrix clause on its LEFT. Fronted, the matrix
+// is on the right, so the category needed is `(S/S)/S` — and `S/S` is exactly what
+// `category::is_sentence_premodifier` names and what the `AbsorbComma` fronted-modifier comma
+// already consumes. The machinery is in place; only the entries were missing.
+//
+// THE SEM IS UNCHANGED, which is why this is 8 entries and not a design. `because_sem` is
+// `λs2. λs1. Because(s1, s2, hypothesis_of(s1), hypothesis_of(s2))` — it takes the SUBORDINATE
+// clause first in both orders, so the fronted entry reuses the committed sem verbatim and only the
+// outer slash flips `bwd` → `fwd`.
+//
+// `but` is deliberately EXCLUDED: «But Y, X» is a discourse connective, not a fronted subordinator.
+// `when` has no subordinator entry at all, so «When X, Y» is a separate (missing-entry) gap.
+//
+// KILL CRITERION. «Because the gene affects cells, the study failed.» and the `although` variant
+// must parse, no battery sentence may regress, and the XIAP page's encoded+ambiguous must not fall.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace core      = "urn:eigenius:core";
+
+resource lexicon:if_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('if the assay works, the study fails').";
+    lexicon:form     = "if";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "if";
+}
+resource lexicon:because_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('because the assay works, the study fails').";
+    lexicon:form     = "because";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:because_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "because";
+}
+resource lexicon:although_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('although the assay works, the study fails').";
+    lexicon:form     = "although";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "although";
+}
+resource lexicon:while_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('while the assay works, the study fails').";
+    lexicon:form     = "while";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "while";
+}
+resource lexicon:though_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('though the assay works, the study fails').";
+    lexicon:form     = "though";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "though";
+}
+resource lexicon:whilst_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whilst the assay works, the study fails').";
+    lexicon:form     = "whilst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whilst";
+}
+resource lexicon:unless_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('unless the assay works, the study fails').";
+    lexicon:form     = "unless";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:unless_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "unless";
+}
+resource lexicon:whereas_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whereas the assay works, the study fails').";
+    lexicon:form     = "whereas";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whereas";
+}

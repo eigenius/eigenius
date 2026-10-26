@@ -1681,3 +1681,53 @@ Each was a tool reporting something untrue about its own output, and none surfac
 output — only from checking what the output was made of. Two had downstream consumers built on the
 untruth, which is what makes this class expensive: the defect propagates into things that look like
 independent confirmation.
+
+## Fronted subordinators: +3 basic constructions, +0 units (2026-10-26)
+
+Every committed subordinator (`if`, `because`, `although`, `while`, `though`, `whilst`, `unless`,
+`whereas`) is `(S\S)/S` — it takes its clause on the RIGHT, yielding `S\S`, which attaches to a
+matrix clause on its LEFT. So «The study failed because the gene affects cells.» parses and
+«Because the gene affects cells, the study failed.» does not. Adding the comma does not help: it is
+the fronted POSITION.
+
+The fronted category is `(S/S)/S`, and `S/S` is exactly what `category::is_sentence_premodifier`
+names and what the `AbsorbComma` fronted-modifier comma already consumes. **The machinery was in
+place; only the entries were missing.** The sem needs no change either — `because_sem` is
+`λs2. λs1. Because(s1, s2, …)`, taking the SUBORDINATE clause first in both orders — so each fronted
+entry reuses the committed sem verbatim and only the outer slash flips `bwd` → `fwd`.
+
+Eight entries (`experiments/parsing/probes/fronted-subordinators.esl`). `but` is excluded — «But Y,
+X» is a discourse connective, not a fronted subordinator. `when` has no subordinator entry at all
+AND no temporal relation to give one a sem, so «When X, Y» stays a separate gap rather than being
+closed by inventing semantics.
+
+Measured, stacked on the plain definite NP:
+
+| | before | after |
+|---|---:|---:|
+| battery (89 basic constructions) | 72 | **75** |
+| XIAP page — every metric | — | **byte-identical** |
+| source units | 59 | **59** |
+
+Fronted and comma-less both parse, and both postposed controls still parse. Battery set diff: three
+sentences gap → PARSES, nothing else moved.
+
+**The page result is zero, and that is the point.** Readings are identical too, so the entries never
+fire: this document never fronts a subordinate clause. Compare the two fixes:
+
+| fix | battery | units |
+|---|---:|---:|
+| plain definite NP | +2 | **+8** |
+| fronted subordinators | **+3** | 0 |
+
+Both are correct basic English. Only one matters to this corpus. Under the old yield-ranking the
+second would never have been built — and a CNL rewrite steering around fronted `Because …` would
+have been steering around a parser defect rather than a domain constraint. That is the whole case
+for ranking by basic-grammar coverage and treating corpus yield as a progress metric.
+
+### Remaining battery failures (14)
+
+to-infinitive complement (×2: `wants to`, ECM `showed … to be`) · free relative (×2: subject,
+object) · there-existential · `or`-coordination with definites (`and` now works) · perfect passive
+(`has been`) · gerund subject · `Neither gene …` · `'s` possessive (OOV) · predicative `very` ·
+superlative `most` · fronted adverb · `when`.
