@@ -1487,3 +1487,66 @@ was asserting it from the seam key; the right order was to build this probe firs
 Both probes share a lesson worth keeping: each had a systematic bias that produced a confident
 top signal — misparse-inflated blocks for the seam, generic determiner repair for the ablation —
 and in both cases the bias was found by INSPECTING the top group rather than by reading the counts.
+
+## Basic grammatical coverage, measured against core-en's families (2026-10-25)
+
+Everything above ranks fixes by XIAP unit-yield, which is a property of ONE DOCUMENT. A construction
+worth 1 unit there can still be core English, and that ranking cannot see it. core-en is the right
+yardstick — 54 families, ~45 of them syntactic (the rest are intonation and punctuation) — and it
+had never been measured against.
+
+`experiments/parsing/battery/core-en-families.txt` is one minimal sentence per family, invented
+vocabulary so it is committable and OOV-free. Run without page augmentation: this measures the
+GRAMMAR, not a document's glossary.
+
+**38 of 50 parse. 11 fail** (plus one OOV).
+
+| construction | measured cause |
+|---|---|
+| NP coordination | fails **iff a conjunct is DEFINITE** |
+| fronted subordinate clause (`Because X, Y`) | the fronted POSITION; comma irrelevant |
+| fronted adverb (`Slowly, X`) | the fronted POSITION; comma irrelevant |
+| `very` + predicative adjective | degree works ATTRIBUTIVELY, not predicatively |
+| there-existential | missing (`There is a gene.`, `There are genes.`) |
+| free relative, subject and object | missing |
+| zero object relative | missing — core-en HAS it (`rrel`); only the subject-gap half was taken |
+| to-infinitive complement | missing |
+| `'s` possessive | OOV — the clitic is not lexicalized |
+| superlative `most` | missing |
+
+### Definiteness is a root cause with four symptoms
+
+The coordination row is the one that changes the work order. One-variable grid:
+
+| | |
+|---|---|
+| `A gene and a protein affect cells.` | **parses** |
+| `Genes and proteins affect cells.` | **parses** |
+| `The gene and the protein affect cells.` | fails |
+| `The gene and the protein affects cells.` | fails — so NOT number agreement |
+| `The gene and proteins …` / `Genes and the protein …` | fail — one definite suffices |
+
+Indefinites coordinate, bare plurals coordinate, definites do not. That is the same impoverishment
+found three other ways today: a definite has only TYPE-RAISED forms and no plain `cat_np`. Its
+symptoms so far:
+
+1. the identity copula's redundant derivation (needs definiteness to narrow — its own comment)
+2. the adverb/copula adjacency (the raised definite selects an adjacent `VP/NP`)
+3. `UnaryKind::IdentityPredicate` never firing (definites arrive raised)
+4. **basic NP coordination**
+
+Earlier in this session the definiteness feature was priced at "≈148 sites, ZERO measured coverage
+value" — on the evidence then available, which was the identity copula's redundancy alone. That
+pricing is **withdrawn**. It is the root of a basic-grammar failure, and the ≈148 sites buy four
+symptoms rather than a ranking improvement.
+
+### What this reorders
+
+A construction that fails here fails in EVERY document, whereas a XIAP one-away singleton may never
+recur. So basic-grammar coverage is the work order, and corpus unit-yield is a progress metric, not
+a priority metric. The CNL rewrite rides on top of this: a CNL shaped to avoid `There is …`,
+fronted `Because …`, free relatives and definite coordination is a CNL shaped by the parser's
+defects rather than by what the domain needs to express.
+
+The battery is also the artifact the top-down method needs — 50 sentences whose intended analysis is
+known BY CONSTRUCTION, which is what neither probe built today had.
