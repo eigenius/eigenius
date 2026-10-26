@@ -15,11 +15,42 @@ any detour.
 > out of band.
 >
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
-> OOV closure. Branch `uab-step5-document-model`, 20 commits ahead of `main`, not yet a PR.**
+> OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-12-cc`** (reseeded `2026-10-12` for the
-> closed-class batch; provenance reproduced again — 38,391 / 20,533 / 864 — and the CNL baseline
-> page measured IDENTICALLY for the third consecutive store).
+> **Store: `wordnet-umls-hpo-aligned-2026-10-26-basic`** (reseeded `2026-10-26` at `292dc5ab` for
+> the basic-grammar batch; 53 min for all four steps, and all three provenance counts reproduced —
+> 38,391 merge rows, 20,533 HPO resources, 864 equivalences).
+>
+> **The basic-grammar batch (`2026-10-26`): 13 entries, measured one variable at a time.** The order
+> is core-en's 54 families, not XIAP unit-yield — basic grammatical coverage before the CNL rewrite.
+> Battery `experiments/parsing/battery/core-en-families.txt`, 89 sentences, one per family:
+>
+> | fix | battery | XIAP units | kind |
+> |---|---:|---:|---|
+> | plain definite NP (2 entries) | +2 | **+8** | missing category |
+> | fronted subordinators (8) | +3 | 0 | missing entries |
+> | `or` proximity agreement (0) | +1 | 0 | **correctness defect** |
+> | bare demonstratives (3) | 0 | 0 | missing category |
+>
+> Battery **70 → 76 of 89**. The `or` fix is the one no coverage metric could have found:
+> `coordinate_np` hardcoded `cat_group(C, conn, pl)` for both connectives, so «The gene or the
+> protein **affects**» was refused and «… **affect**» accepted. One pinned test had encoded the
+> defect.
+>
+> **Reseed verification.** Predicted before measuring: battery 76 (the battery's only demonstrative
+> is a determiner), grammar-gap 477 → 473–475, encoded/ambiguous unchanged, units ≥ 59. Measured:
+> battery **76**, grammar-gap **474**, encoded **18**, ambiguous **421**, readings **40,146** — all
+> three byte-identical — units **59**, open 140 → **143**, skeletons 5,078 → **5,119**. Exactly 3
+> units moved, all GRAMMAR-GAP → OPEN: units 249 and 877 are the target construction (bare `This` /
+> `Those` as subject), unit 1017 (`Finding 9 reports those scores`) closes through the KNOWN
+> compound-rule defect — a pronoun NP is eligible as a noun-compound modifier, so `those scores`
+> also builds `cat_n(Σx. compound(x, $anaphor$), pl)`. Readings held because `unit_readings` is 0
+> for an `Open` unit while `unit_skeletons` counts it, so those 3 units hold all 41 new skeletons.
+>
+> **13 battery failures remain:** to-infinitive (×2), free relative (×2), there-existential,
+> perfect passive `has been`, gerund subject, `Neither gene…`, `'s` possessive, predicative `very`,
+> superlative `most`, fronted adverb, `when` (no subordinator entry in either order, and no temporal
+> relation to denote one with).
 >
 > **Item 3 of step 3's order, the closed-class batch: ZERO units converted.** 44 entries over three
 > bootstrap edits — 20 possessive determiners, `unless`/`whereas`, 22 indefinite pronouns. XIAP page
