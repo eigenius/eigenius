@@ -31,8 +31,9 @@ any detour.
 > | fronted subordinators (8) | +3 | 0 | missing entries |
 > | `or` proximity agreement (0) | +1 | 0 | **correctness defect** |
 > | bare demonstratives (3) | 0 | 0 | missing category |
+> | short passive + `neither` (4) | +2 | **+4** | incomplete paradigm |
 >
-> Battery **70 → 76 of 89**. The `or` fix is the one no coverage metric could have found:
+> Battery **70 → 78 of 89**. The `or` fix is the one no coverage metric could have found:
 > `coordinate_np` hardcoded `cat_group(C, conn, pl)` for both connectives, so «The gene or the
 > protein **affects**» was refused and «… **affect**» accepted. One pinned test had encoded the
 > defect.
@@ -47,10 +48,28 @@ any detour.
 > also builds `cat_n(Σx. compound(x, $anaphor$), pl)`. Readings held because `unit_readings` is 0
 > for an `Open` unit while `unit_skeletons` counts it, so those 3 units hold all 41 new skeletons.
 >
-> **13 battery failures remain:** to-infinitive (×2), free relative (×2), there-existential,
-> perfect passive `has been`, gerund subject, `Neither gene…`, `'s` possessive, predicative `very`,
-> superlative `most`, fronted adverb, `when` (no subordinator entry in either order, and no temporal
-> relation to denote one with).
+> **PENDING a reseed (`experiments/parsing/probes/short-passive-neither.esl`, measured, NOT in
+> `closed-class.esl`):** 4 entries — `be`/`been` short passive + `neither`. Merging them moves the
+> manifest and strands `wordnet-umls-hpo-aligned-2026-10-26-basic`, so they wait for the next
+> batch. On the probe store: grammar-gap 474 → 466, claim units 59 → **63**, 8 units gained, 0 lost.
+> SEVEN of the eight are the short passive, which was reachable only under a FINITE auxiliary —
+> «The gene may be affected.» had no parse at all for any verb, while the LONG passive's
+> non-finite entry (`be_passive_by`) made «…may be affected by HeLa.» parse.
+>
+> **11 battery failures remain:** to-infinitive (×2), free relative (×2), there-existential,
+> gerund subject, `'s` possessive, predicative `very`, superlative `most`, fronted adverb, `when`
+> (no subordinator entry in either order, and no temporal relation to denote one with).
+>
+> **Where the remaining 11 live**, which is the axis that prices them — 4 are missing closed-class
+> entries (`there`, `when`, `very`, `'s`), 5 are wrong categories on forms that already have
+> entries (`most`, free relative ×2, fronted adverb, gerund subject), and **2 are an IMPORTER
+> change**: the to-infinitive pair. `convert.rs::classify` returns `None` for frames 24/25/28/30/
+> 32/33/35 (control / raising), a documented deferral with a test pinning `classify(32) == None`,
+> and the importer emits no `Control` FrameKind. So an infinitival
+> `to : (S[inf]\NP)/(S[bse]\NP)` — core-en's real `To-Infinitive` family, `indexRel="*NoSem*"` —
+> would be INERT: no verb selects an infinitival complement. That is a reseed and a reopened design
+> decision, not a lexical entry. The ECM half needs a third thing the boundary instrument named:
+> `be`'s only `bse` category is the passive auxiliary, so it cannot take an adjective predicate.
 >
 > **Item 3 of step 3's order, the closed-class batch: ZERO units converted.** 44 entries over three
 > bootstrap edits — 20 possessive determiners, `unless`/`whereas`, 22 indefinite pronouns. XIAP page
