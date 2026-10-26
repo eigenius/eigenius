@@ -83,12 +83,14 @@ store as silent lexicon corruption.
 with *by content hash*, so an edited bootstrap makes the old store unresumable (`ManifestDrift`,
 fail-closed). Pre-production posture is drop-and-reseed.
 
-**Including comments.** `current_manifest()` hashes the raw source bytes —
-`Sha256::digest(spec.source.as_bytes())` (`kernel/src/bootstrap/mod.rs`) — not the compiled
-resources. So a typo fix or a clarifying comment in a bootstrapped `.esl`/`.json` invalidates every
-snapshot exactly as a semantic change would. Near-missed on 2026-08-03: a two-line comment
-correction to `ontologies/justification/justification.esl` would have cost the hour-long reseed that was
-running at the time. Documentation about a bootstrap ontology is cheaper to put in `docs/notes/`.
+**Comments and formatting are free.** `content_hash()` (`kernel/src/bootstrap/mod.rs`) reduces each
+source to a presentation-insensitive form before hashing: ESL to its **token kinds** in order (the
+lexer drops comments and whitespace, and `Token::pos` is deliberately excluded), JSON to
+`eigon_json::canonicalize` per resource in declaration order. So rewording a comment, reindenting,
+or reflowing a line does **not** invalidate a snapshot; every semantic edit still does. This
+replaced raw-byte hashing, which charged a ~40-minute reseed for a comment reword and for a
+`json.dumps(indent=2)` reflow on 2026-08-22. Rationale for a bootstrap ontology can therefore live
+beside the entries it explains.
 
 ## 3. Measure, and evaluate
 
