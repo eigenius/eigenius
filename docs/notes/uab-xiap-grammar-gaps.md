@@ -1429,3 +1429,61 @@ the surrounding chart instead of guessing it.
 
 Until that is run, the size of the remaining grammar work is UNKNOWN — not zero, and not the 3 the
 contaminated key suggested.
+
+### Top-down: the token-ablation probe, and the re-test
+
+The seam key was contaminated, so the census was re-run on a causal key. `probe_token_ablation`
+deletes one token at a time and re-parses: if the sentence closes without token *i*, then *i* is
+what the grammar could not use. That names a WORD rather than a chart position, which is the
+property the seam key structurally could not have.
+
+Validated on five sentences whose answers were already known from tracing:
+
+| sentence | seam probe | ablation |
+|---|---|---|
+| `…is still the strongest evidence.` | seam AFTER `still` | **3:still** |
+| `…is also the strongest evidence.` | seam AFTER `also` | **3:also** |
+| `The claim is very strong.` | — | **3:very** |
+| `This is the gene.` | cut at 1 | **none** — no deletion rescues it |
+| `…is that it behaves…` | cut at 4 | **none** |
+
+The three adverb sentences land in ONE ablation group where the seam gave three. The two negative
+controls return nothing rather than inventing a repair, which is what makes the positives readable.
+
+### The re-test gives the same answer
+
+Over the 94 blockers:
+
+| implicated tokens | sentences |
+|---:|---:|
+| **0** | **39** |
+| 1 | 36 |
+| 2 | 17 |
+| 3 | 2 |
+
+**39 of 94 have no single token at fault** — those need a RULE, not a lexical entry, and rules have
+measured at 0–2 units apiece across five previous constructions.
+
+The other 55 implicate 76 tokens over 54 distinct surfaces. The top surface is `the` ×7 — and it is
+an ARTIFACT. Inspecting those seven: in five, `the` is implicated alongside a more plausible culprit
+(`slightly`, `Only`, an OOV hyphenated compound), and deleting ANY determiner gives its noun a
+bare-NP reading with far more flexible categories. Determiner deletion is a generic repair, the same
+kind of systematic bias the seam key had. Removing the 8 determiner tokens:
+
+| group size | count |
+|---:|---:|
+| 3 | 3 (`both`, `not`, `through`) |
+| 2 | 10 |
+| **1** | **39** |
+
+**The largest defensible group is 3** — the same figure the contaminated seam census produced, now
+from an independent key with a causal basis. Two instruments with different biases, different
+failure modes, and the same answer.
+
+So the conclusion stands and the earlier reasoning for it does not. The grammar route on this corpus
+offers groups of 3 at best, with 41% of blockers needing rules rather than entries. What was wrong
+was asserting it from the seam key; the right order was to build this probe first.
+
+Both probes share a lesson worth keeping: each had a systematic bias that produced a confident
+top signal — misparse-inflated blocks for the seam, generic determiner repair for the ablation —
+and in both cases the bias was found by INSPECTING the top group rather than by reading the counts.

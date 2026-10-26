@@ -9068,3 +9068,112 @@ fn probe_gap_boundary() {
     std::env::remove_var("EIGENIUS_GAP_BOUNDARY");
     eprintln!("\n==== {gapped} of {} gapped ====", sentences.len());
 }
+
+/// TOP-DOWN gap localization: which TOKEN obstructs the parse, and what categories does it already
+/// have? The complement of `probe_gap_boundary`, and the fix for that probe's bias.
+///
+/// A seam is a SYMPTOM. A chart's maximal derivable spans are inflated by misparses — each block
+/// grows as far as *some* derivation reaches, including a wrong one — so the seam lands where
+/// spurious coverage ran out, not where the missing rule is. Measured twice on 2026-10-25: «The
+/// claim is still the strongest evidence.» put its seam AFTER `still`, because `still` had been
+/// swallowed into a complete `cat_s(dcl, fin_any)` as the predicative adjective "motionless"; and
+/// «Finding 9 reports those scores.» grew a three-deep `compound_kind` pile over `reports`. Keying a
+/// census on the seam's categories therefore hashes each sentence's accidental lexical ambiguity,
+/// which is why it returned 61 singletons over 76 blockers.
+///
+/// This asks the question grammar engineering asks instead — which step of the intended derivation
+/// is unlicensed — in the cheapest form that needs no gold trees: **delete one token and re-parse**.
+/// If the sentence closes without token `i`, then `i` is what the grammar could not use. That names
+/// a WORD and its existing categories, which groups across sentences; a seam does not.
+///
+/// Reports `ABLATE <n-implicated> <surfaces>` per sentence. A sentence with exactly one implicated
+/// token has an unambiguous culprit; several means the obstruction is structural rather than
+/// lexical, and none means deletion never rescues it (the gap is not one token's fault).
+///
+///     EIGENIUS_DB_SNAPSHOT=… EIGENIUS_PROBE_PAGE=/abs/page.txt EIGENIUS_PROBE_FILE=/abs/gaps.txt \
+///         cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_token_ablation -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_token_ablation() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+    eprintln!(
+        "probe page: {} lines  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+
+    let sentences: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            // The validation case: `still` has no adverb category, so deleting it must rescue the
+            // sentence — and the seam probe pointed past `still` instead. Invented, not corpus.
+            vec![
+                "The claim is still the strongest evidence.".to_string(),
+                "The claim is the strongest evidence.".to_string(),
+            ]
+        });
+
+    let parses = |s: &str| -> bool {
+        let (c, o) = index.parse_open(s, &lem);
+        !c.is_empty() || !o.is_empty()
+    };
+
+    for s in &sentences {
+        if !index.unknown_words(s, &lem).is_empty() {
+            eprintln!("ABLATE\tOOV\t-\t{s:?}");
+            continue;
+        }
+        if parses(s) {
+            eprintln!("ABLATE\tPARSES\t-\t{s:?}");
+            continue;
+        }
+        // Detach sentence-final punctuation so deleting the LAST word does not also delete the
+        // period. Measured: without this, «The claim is very strong.» reported `strong.` as
+        // implicated, because what actually parsed was the unpunctuated «The claim is very» — a
+        // different grammar question than the one being asked.
+        let trimmed = s.trim_end();
+        let (body, tail) = match trimmed.char_indices().last() {
+            Some((k, c)) if matches!(c, '.' | '?' | '!') => (&trimmed[..k], &trimmed[k..]),
+            _ => (trimmed, ""),
+        };
+        let toks: Vec<&str> = body.split_whitespace().collect();
+        let mut implicated: Vec<String> = Vec::new();
+        for i in 0..toks.len() {
+            let mut rest: Vec<&str> = toks.clone();
+            rest.remove(i);
+            if rest.is_empty() {
+                continue;
+            }
+            if parses(&format!("{}{tail}", rest.join(" "))) {
+                implicated.push(format!("{i}:{}", toks[i]));
+            }
+        }
+        eprintln!(
+            "ABLATE\t{}\t{}\t{s:?}",
+            implicated.len(),
+            if implicated.is_empty() {
+                "-".to_string()
+            } else {
+                implicated.join(",")
+            },
+        );
+    }
+}
