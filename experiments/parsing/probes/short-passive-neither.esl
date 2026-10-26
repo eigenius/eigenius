@@ -1,0 +1,100 @@
+// ════════════════════════════════════════════════════════════════════
+// TWO MISSING CLOSED-CLASS FORMS — `been` (perfect passive) and `neither` (negative determiner).
+//
+// ADDITIVE. Three new IRIs; no existing entry is shadowed. Both forms have ZERO entries in
+// `closed-class.esl` today, so these are missing-entry gaps and not wrong categories.
+//
+// ── `been` / `be` — COMPLETING THE SHORT-PASSIVE PARADIGM ───────────
+// «The gene has been reported.» and «The gene may be reported.»
+//
+// FIRST ATTEMPT, AND WHY IT WAS WRONG (measured 2026-10-26). `been` was written as
+// `(S[pss]\NP)/(S[pass]\NP)`, mirroring `be_passive_by`. It loaded, and the boundary instrument
+// showed «The gene has been» composing correctly to `S[fin]/(S[pass]\NP)` — then refusing every
+// one of the 26 pairs at the next seam. `pass` is NOT the category a participle has here: it is
+// produced by `short_passive_participial_lifts` for PARTICIPIAL POST-MODIFIERS, and its subject is
+// the lifted verb's own OBJECT slot, typed at that verb's selectional type. `match_cat` is exact,
+// so `cat_np(n07218470, pl)` never meets `cat_np(Entity, num_any)`.
+//
+// WHAT THE PARADIGM ACTUALLY DOES. `is_passive` / `are_passive` / `was_passive` / `were_passive`
+// take the **unsaturated** transitive participle `(S[dcl,pss]\NP)/NP` — object slot still open —
+// and close the agent with `passive_sem`. Taking the TV as a functor argument is what blocks
+// `*BRCA1 is affected HeLa`: once the object is supplied the entry no longer matches.
+//
+// THE GAP IS EXACTLY THE NON-FINITE CELLS. All four committed entries are FINITE. There is no
+// `be` and no `been`, so the short passive is unreachable under a modal and under the perfect,
+// for every verb — «The gene may be affected.» has NO parse at all (0 tokens rescue it), while
+// «The gene may be affected by HeLa.» parses, because the LONG passive has its non-finite entry
+// (`be_passive_by`). These two complete the paradigm by mirroring `is_passive` at `bse` and `pss`,
+// with `num_any` subjects since a non-finite auxiliary carries no agreement.
+//
+// ── `neither` ───────────────────────────────────────────────────────
+// «Neither gene affects cells.» Mirrors `no_subj` / `no_obj` verbatim — SINGULAR negative
+// determiner, `no_sem` / `obj_no_sem`.
+//
+// THE PRESUPPOSITION IS DROPPED, and that is the CONSISTENT choice rather than a shortcut.
+// `neither` presupposes a two-element domain; `no_sem` is ∀x:T. ¬P(x), which is the right truth
+// condition over such a domain but says nothing about its size. The committed `both_subj` /
+// `both_obj` — `neither`'s positive counterpart, with the identical two-ness presupposition —
+// already denote with the plain plural existential. Giving `neither` a cardinality presupposition
+// the lexicon cannot state for `both` would make the pair inconsistent, so both stay first-cut
+// until there is a mechanism for cardinality presuppositions, and then both move together.
+//
+// `neither` is SINGULAR where `both` is plural (`neither gene`, `both genes`), so the `sg` cat of
+// `no_*` is the one to copy, not `both_*`'s `pl`.
+//
+// KILL CRITERION. «The gene has been reported.» and «Neither gene affects cells.» must parse, no
+// battery sentence may regress, and the XIAP page's encoded + ambiguous must not fall.
+//
+// MEASURED (2026-10-26, cap-only, --units-per-line, on wordnet-umls-hpo-aligned-2026-10-26-basic):
+// battery 76 -> 78 of 89; grammar-gap 474 -> 466; encoded 18 UNCHANGED, ambiguous 421 -> 427,
+// open 143 -> 145; claim units 59 -> 63. EIGHT units gained, ZERO lost.
+//
+// SEVEN of the eight are the SHORT PASSIVE, and only one is `neither` — «has been formally
+// assessed», «has now been settled», «must be read», «cannot be mapped», «must be constrained»,
+// «could not be done», «could therefore not be checked». The battery exercised only `has been`;
+// the modal half came out of diagnosing it and was worth six more units on the real page. Note
+// that the adverbs intervene (`formally`, `now`, `therefore not`) and the entries take them
+// through composition without further work.
+//
+// OVER-GENERATION CONTROL, checked and CLEAR. «BRCA1 is affected HeLa.» parses both with and
+// without this layer, which does NOT contradict `is_passive`'s claim to block it: its four
+// readings are all the IDENTITY COPULA over a modified named nominal
+// (`X = the(ΣG#0:C0001721. named(G#0, HeLa)).1`), so the passive entry never fires. The control
+// does not discriminate; the route had to be read off the readings dump.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon = "urn:eigenius:lexicon";
+namespace core    = "urn:eigenius:core";
+
+resource lexicon:been_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: past participle of BE — SHORT passive under the perfect ('has been reported').";
+    lexicon:form     = "been";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:be_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: base form of BE — SHORT passive under a modal ('may be reported').";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:neither_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('neither gene affects cells').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:no_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "neither";
+}
+resource lexicon:neither_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('affects neither gene').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_no_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "neither";
+}
