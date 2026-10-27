@@ -1,0 +1,69 @@
+// ════════════════════════════════════════════════════════════════════
+// THERE-EXISTENTIAL, measured as an APPROXIMATION — «There is a gene.» (core-en
+// `ThereExistential` + `ExplNP`). This layer exists to PRICE the approximation, not to ship it.
+//
+// WHAT CORE-EN DOES, and why it is not this. `there` is `np_expl` — a DISTINCT atomic category with
+// a `lex` feature (`there` / `here` / `it`), `indexRel="*NoSem*"`, so it carries no semantics — and
+// the existential sits on the VERB: `there-be.np` is `S[dcl] \ np_expl[there] / NP[nom]`. The
+// distinct category is the whole point: an expletive cannot fill an ordinary subject slot, and an
+// ordinary NP cannot fill the expletive slot. We have no `cat_np_expl` constructor, and adding one
+// is a `lexicon:Cat` change (bootstrap ⇒ reseed) plus a `denote_cat` denotation for a category that
+// denotes nothing.
+//
+// THE APPROXIMATION, and why its TRUTH CONDITION is right. `there` is given `something_subj`'s
+// category and sem verbatim — type-raised `S/(S\NP)` over `exists_entity_sem` (`λV. ∃x:Entity. V(x)`).
+// Composed with the identity copula and an indefinite object it yields
+// `∃x. ∃y. gene(y) ∧ x = y`, which is logically equivalent to `∃y. gene(y)`. So this is not a wrong
+// meaning; it is a right meaning reached by a route that also licenses wrong SENTENCES.
+//
+// THE PREDICTED COST, which is what the measurement is for. Categorially `there` becomes
+// `something`, so «There affects cells.» should parse as `∃x. affects(x, cells)` — expletive
+// `there` outside the existential, which no grammar of English licenses. That is exactly what
+// core-en's distinct category rules out, and no guard on top would be a fix rather than a
+// Band-Aid: the category is wrong, not the input.
+//
+// MEASURED 2026-10-27 — REJECTED. NOT merged into `closed-class.esl`.
+//
+// Battery 78 -> 79 of 89 (the one battery sentence). Page: grammar-gap 466 -> 465, ambiguous
+// 427 -> 428, encoded 18 and open 145 UNCHANGED, claim units 63 -> 63. **One page unit, zero
+// claim units.**
+//
+// The over-generation is real and entirely this layer's. On the base NONE of the seven `there`
+// sentences parses; with the layer all seven do — the four grammatical ones AND «There affects
+// cells.», «There reported genes.», «There is essential.», where the expletive stands as an
+// ordinary subject. That is precisely what core-en's distinct `np_expl` rules out, and `match_cat`
+// is exact, so there is no subsumption trick that narrows it: the category is wrong, not the input.
+// One unit against three ungrammatical forms is not a trade worth making.
+//
+// WHY THE YIELD IS SO LOW, which is the finding worth keeping. The page carries only FOUR
+// existential-`there` units and ALL FOUR are «There is NO ...»:
+//   u222 «There is no regional constraint here.»                                    (the 1 win)
+//   u349 «There is no middle category here when each tool is scored by its own call.»
+//   u509 «There is no second allele for a mutant product to act against.»
+//   u637 «There is therefore no deep mutational scan to fall back on.»
+// The three that stay gapped fail on their OTHER constructions (a `when`-clause, a `for`-infinitive,
+// a fronted `therefore`), not on the existential. So a CORRECT `cat_np_expl` would also have to
+// carry the `no`-pivot to be worth anything on this corpus, and even then it tops out near four
+// units. The there-existential is a core-en family that this corpus barely exercises — worth
+// doing for basic-grammar coverage, not worth a reseed on its own.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon = "urn:eigenius:lexicon";
+namespace core    = "urn:eigenius:core";
+
+resource lexicon:there_expl_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: existential `there` — APPROXIMATED as an indefinite subject ('there is a gene').";
+    lexicon:form     = "there";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "there_expl";
+}
+resource lexicon:there_expl_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: existential `there` with a plural pivot ('there are genes').";
+    lexicon:form     = "there";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "there_expl";
+}
