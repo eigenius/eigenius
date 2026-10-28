@@ -356,6 +356,46 @@ yields members, not classes.
 **(ii) is the recommendation**, with (i) later resolving the hole where a partitive supplies the
 class. It is the shape that makes the two cases one mechanism instead of two entries.
 
+**DECIDED (`2026-10-28`, maintainer): the class is CONTEXTUAL, resolved in the document being
+processed** — the same stage that resolves a demonstrative's antecedent, not a sentence-local device.
+
+**The precedent is already in the grammar, and it is the comparative's own.** The ATTRIBUTIVE
+comparative opens with a contextual hole today: «cells affect a stronger gene» has no `than`-phrase,
+and its reading is an OPEN parse `gt(deg_X(x), deg_X($anaphor$))` — the standard is
+`lexicon:anaphor`, resolved from context (`verify_attributive_comparative_at_scale`, pinned at
+scale). So "a degree operator whose comparison target is supplied by the discourse" is not a new
+idea here; it is how the attributive comparative already works.
+
+**What the superlative needs beyond it is one thing: the hole is a CLASS, not an entity.** The
+comparative's hole is `lexicon:anaphor : Entity` — an inhabitant. A superlative quantifies over a
+class, so its hole stands at `A → Prop`:
+
+```
+axiom lexicon:comparison_class_of : forall (A : Set) => (A -> Prop)
+most_deg     : (S[adj]\NP) / cat_measure
+most_deg_sem : λμ. λx. forall (y : A) => (comparison_class_of(A)(y) -> ge(μ(x), μ(y)))
+```
+
+`ge` rather than `gt` is deliberate: `x` is trivially `≥` itself, so no `y ≠ x` clause is needed.
+
+**The cost is in `dcg/holes.rs`, and it is a shape change rather than a line.** The two gate holes
+are freshened in ONE traversal "because they have the same shape — a one-argument axiom whose
+argument IS the hole's type". A class hole breaks that: its argument `A` is the restrictor but the
+hole stands at `A → Prop`, so `GateHole.ty` becomes `Arrow(A, Prop)`, and the `is_proof: bool`
+discriminator has to become a three-way kind. Both the felicity gate and the D64 resolver read that
+struct.
+
+**A cheaper ATTRIBUTIVE slice exists and needs no hole at all.** Where the superlative modifies a
+noun, the restrictor IS the class: «the most useful piece of evidence» is `∀(y : piece_of_evidence).
+ge(deg(x), deg(y))`, which is faithful and sentence-local. It needs a dependent category
+(`cat_forall`, as the determiners use) but no new hole kind, and covers roughly 3 of the 7 corpus
+units. The predicative-plus-partitive cases («SIFT is the most alarming **of the three dissenters**»)
+still want the contextual hole.
+
+Order, then: the attributive slice first (no hole machinery, faithful, ~3 units), the class hole
+second (reaches the rest, and subsumes the attributive case once the resolver can fill it from the
+head noun).
+
 **Corpus support**: 7 units on the CNL page contain `most X`, and ALL SEVEN are grammar-gaps —
 «the most alarming of the three dissenters», «the most deleterious 1% of the genome», «the single
 most useful piece of evidence», «the function most relevant to…», «the most dangerous of these
