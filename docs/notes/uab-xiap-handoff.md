@@ -106,11 +106,12 @@ base `wordnet-umls-2026-10-26-basic` (3.5 GB) beside it.
 
 Either copy it (fastest, one `rsync`), or rebuild it. Rebuilding is step 1 (`reseed-lexicon-db.sh`,
 **~30 minutes** — not the ~3 h older notes assumed) followed by the four-step chain, whose recipe is
-preserved in `reseed-logs/chain.sh`: `build-alignment-snapshot.sh` (expect **38,391** merges) →
-`obograph-import` on `references/hpo/hp.json` → `add-layer-to-snapshot.sh` (expect **20,533** HPO
-resources) → `build-hpo-alignment-snapshot.sh` (expect **864** equivalences). All four scripts are
-tracked. Those three counts are the provenance check: if they differ, the snapshot is not the one
-the recorded numbers were taken on.
+**`scripts/reseed-chain.sh <date-tag>`**, which runs all four steps and CHECKS the three
+provenance counts rather than printing them — 38,391 merge rows, 20,533 HPO resources, 864
+equivalences — exiting non-zero on a mismatch, because a differing count means an input changed and
+measurements are not comparable. (It was `reseed-logs/chain.sh`, which lives OUTSIDE the repo and
+so is absent on a fresh checkout; the recipe was reconstructed from prose twice in one week before
+being tracked on 2026-10-28.)
 
 Match the baseline on **every** axis, UMLS scope included (`--umls-all`) — the reseed default is a
 subset and the mismatch is silent.
