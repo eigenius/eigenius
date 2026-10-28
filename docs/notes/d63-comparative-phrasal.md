@@ -385,16 +385,41 @@ hole stands at `A → Prop`, so `GateHole.ty` becomes `Arrow(A, Prop)`, and the 
 discriminator has to become a three-way kind. Both the felicity gate and the D64 resolver read that
 struct.
 
-**A cheaper ATTRIBUTIVE slice exists and needs no hole at all.** Where the superlative modifies a
-noun, the restrictor IS the class: «the most useful piece of evidence» is `∀(y : piece_of_evidence).
-ge(deg(x), deg(y))`, which is faithful and sentence-local. It needs a dependent category
-(`cat_forall`, as the determiners use) but no new hole kind, and covers roughly 3 of the 7 corpus
-units. The predicative-plus-partitive cases («SIFT is the most alarming **of the three dissenters**»)
-still want the contextual hole.
+**The ATTRIBUTIVE slice needs no hole — but it is a RULE, not an entry.** Where the superlative
+modifies a noun the restrictor IS the class, so «the most useful piece of evidence» is
+`∀(y : piece_of_evidence). ge(deg(x), deg(y))`: faithful and sentence-local, no contextual hole.
+An earlier revision of this section called that "a dependent category but no new machinery". **That
+was wrong, and the type checker says so.** Tried (`2026-10-28`):
 
-Order, then: the attributive slice first (no hole machinery, faithful, ~3 units), the class hole
-second (reaches the rest, and subsumes the attributive case once the resolver can fill it from the
-head noun).
+```
+most_attr     : (Num·∀T:Set. N[T,n]) / cat_measure
+most_attr_sem : λμ. λT. Σ(x : T). ∀(y : T). ge(μ(x), μ(y))
+  ⇒ TermIllTyped: type mismatch: Var("TC#1") ≠ EigonClass(lexicon:Entity)
+```
+
+The scale is `⟦cat_measure⟧ = Entity → float`, fixed. Coercive subtyping takes a CONCRETE class to
+`Entity`, but a universally-quantified `T : Set` is not a subtype of anything — so `μ(x)` with
+`x : T` cannot type-check in a lexical entry, however the category is shaped.
+
+Two consequences:
+
+- The class must be concrete where the sem is built, which is what a **`RefineKind`** rule does (§2's
+  table: trigger pair → restrictor added to `Σx:C. _`). `Attrib` already adds `adj(x)` that way, and
+  conjoins flat when `C` is itself a Σ. The superlative is another row: restrictor
+  `∀(y : C). ge(μ(x), μ(y))`, with `μ` carried by a seed-time `most <adj>` item.
+- Staying at `Entity` and restricting with `is_a` DOES type-check —
+  `Σ(x:Entity). is_a(x,T) ∧ ∀(y:Entity). is_a(y,T) → ge(μ(x), μ(y))` — and is rejected anyway: it
+  makes the Σ's base `Entity` rather than `C`, so `sigma_base` (apposition felicity) and the
+  `cat_n(Σ_)` shape that `cat_shape` erases would both see a second normal form. One normal form for
+  refined nouns is worth more than one cheap entry.
+
+So slice 1 costs: a seed-time 2-token item for `most <adj>` carrying the scale, a way to mark it
+superlative that survives to the rule (a distinct category rather than a provenance tag — a tag
+guards the leaf only), and one `RefineKind` row. Slice 2 (the class hole) then reaches the
+predicative-plus-partitive cases and subsumes slice 1 once the resolver can fill the class from the
+head noun.
+
+Order stands — attributive first — but it is rule-level work, not a lexical addition.
 
 **Corpus support**: 7 units on the CNL page contain `most X`, and ALL SEVEN are grammar-gaps —
 «the most alarming of the three dissenters», «the most deleterious 1% of the genome», «the single
