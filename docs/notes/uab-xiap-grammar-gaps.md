@@ -1781,3 +1781,57 @@ reading by some other route; the inversion is corrected for definites, names and
 Two consecutive zeros, both correct English, and the third is a defect no coverage metric could
 see — the corpus does not exercise it in either direction. Under yield-ranking none of the last two
 would have been built.
+
+## The one-away census: no construction on this page is worth more than 2 units (2026-10-28)
+
+`blockers.py` emits the 88 sentences that are each the LAST failing sentence of their unit — the
+only gaps that convert a unit when fixed. Ablating all 88 (full lexicon, page augmentation
+attached) gives the first complete census of what is left:
+
+| implicated tokens | sentences |
+|---|---:|
+| 1 (a SOLE blocker) | 34 |
+| 2 | 15 |
+| 3 | 2 |
+| none isolable | 37 |
+
+Grouped by CONSTRUCTION rather than by token — a token histogram splits one construction across
+spellings and merges unrelated ones under a shared word:
+
+| construction | units convertible |
+|---|---:|
+| free relative (`what` as a headless NP argument) | 2 |
+| embedded interrogative (wh-determiner clause as a PP complement) | 2 |
+| hyphenated nominal compounds | 2 |
+| `who` relativizer | 1 |
+| notation / identifier forms | 2 |
+| prepositions, singly | 5 (1 each) |
+| remaining sole blockers, singly | 1 each |
+
+**Nothing exceeds 2.** This is the §"What it says about the work order" claim, now measured over the
+whole remaining page instead of inferred from five fixes: a corpus-specific patch is worth 0–2 units
+because the pattern occurs 0–2 times. Ranking the rest of step 5 by page yield would spend a
+construction's work for one or two units, every time, with no larger item waiting behind them.
+
+**Two candidates were priced and dropped before being built, on this census.**
+
+- The POST-NOMINAL AP (`reduced_relative` widened to `fin = adj`, §7b of
+  `d63-comparative-phrasal.md`) — kernel-only, no reseed, and it does block a `most` unit. It
+  appears among the 88 one-away blockers **0 times**, so its page yield is 0.
+- The superlative's own partitive (slice 2) — 1 one-away sentence, and that one is blocked by the
+  bare demonstrative pronoun, a 2026-10-25 settled rejection. Also 0.
+
+**`who` is a one-line DATA addition, not a construction.** `lexicon:rc_who` is simply absent from
+the reserved-construct table beside `rc_that` and `rc_which`; the table's own comment states that
+adding a relativizer there needs no code change. Measured: «The study found the reviewer who
+distrusts the evidence.» gaps on `who` while the same sentence with `that` parses. `rk_relativizer`
+rather than `rk_wh_relativizer` is the faithful kind — the only behavioural difference between them
+is that the wh- kind also keys pied-piping (`prep which`), and `who` does not pied-pipe (`whom`
+does). It needs a reseed or a layer, which is why it is not folded into a kernel-only change.
+
+### What ranks next, on BOTH metrics
+
+The battery (basic-grammar coverage) is the ranking this note already argued for. Of the 8 remaining
+battery failures, exactly one also tops the page census: the **free relative**, worth 2 battery
+lines and 2 page units. It is the only candidate that is highest on both rankings, and it is basic
+English rather than a corpus artefact.

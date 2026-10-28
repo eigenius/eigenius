@@ -480,6 +480,65 @@ family, and the page needs slice 2 (partitive / predicative) before any `most` u
 
 Order stands — attributive first — but it is rule-level work, not a lexical addition.
 
+### 7b. Slice 2 as specified is REFUTED: the class hole blocks no corpus unit
+
+The recommendation above — route (ii), the contextual class hole, "and it reaches all 7" — was a
+forward claim this section never derived. Laddered (`2026-10-28`, same snapshot), it reaches 0 of 7.
+
+| probe | result |
+|---|---|
+| «The trap is the most dangerous trap.» | PARSES (slice 1) |
+| «The trap is the most dangerous one.» | PARSES |
+| «The trap is the most dangerous.» | gap, no single implicated token |
+| «The trap is the most dangerous of the traps.» | gap, no single implicated token |
+| «The study reported some of the traps.» | PARSES |
+| «The study reported one of the traps.» | gap, `4:of` |
+| «The study reported the function relevant to the disease.» | gap, `5:relevant` |
+| «The study reported the gene responsible for the disease.» | gap, `5:responsible` |
+
+The class hole serves the BARE predicative — a superlative whose class is stated nowhere, so
+discourse must supply it. That construction occurs in **zero** of the 7 units. Both partitive units
+(342, 855) state their class explicitly, in the `of`-phrase sitting next to the adjective; there is
+nothing contextual to resolve. What blocks them is the **fused head**: `the most <adj>` with no
+noun. Removing `most` leaves «the dangerous of the traps», which is ungrammatical and also gaps, so
+the superlative is not the implicated token and the ablation reports none.
+
+**PARSES is not the reading, and three of these rungs are false positives.** Traced:
+
+- «two of the traps» → `kind_of(ΣG:n13743269. prep_of(G, the(trap)))` — `n13743269` is the NOUN
+  *two*. A noun with a PP, not a partitive.
+- «the most dangerous one» → `Σx:n13742573. ∀y:n13742573. ge(…)` — `n13742573` is the NUMBER one.
+  The superlative is structurally right over a nonsense class; `one` has no pro-form entry.
+- «the gene present in the cells» → `compound_kind(G, gene)` over `n15119536`, *the present* (the
+  time), with `in the cells` conjoined as a matrix adverbial. A noun-noun compound, not a
+  post-nominal AP.
+
+Only «some of the traps» is a real partitive: `has_proportion(the(trap), λy. …, q)`.
+
+**Why the partitive superlative is not a cheap entry.** `has_proportion` and `median_over` both take
+the group as a `lexicon:Entity` and keep it OPAQUE — the ontology has no membership relation, by the
+same decision that keeps `card` opaque. Slice 1's restrictor is `∀(y : C)` over a TYPE; a partitive
+supplies a group ENTITY, and there is nothing to range over. Two shapes, and the choice is the
+ontology's to make, not this note's:
+
+- **(A)** an opaque `argmax_over : (Entity → float) → Entity → Entity`, exactly `median_over`'s
+  shape. One axiom, no holes, no felicity or resolver change — and the same English superlative then
+  has two normal forms, `Σ`-with-`∀` from a head noun and an opaque application from a partitive.
+- **(B)** a `member_of : Entity → Entity → Prop`, which unifies the two at the cost of the group
+  opacity the ontology currently holds everywhere.
+
+Either needs a bootstrap axiom, hence a reseed, which slice 1 did not.
+
+**519 is not a superlative gap at all.** «The study reported the function relevant to the disease.»
+gaps on `relevant` with no `most` present, as does «the gene responsible for the disease» on
+`responsible`. The missing construction is the POST-NOMINAL AP. `reduced_relative`
+(`constructions.rs`) maps a subject-gapped `S[dcl,fin]\NP` to `cat_pp` for `fin ∈ {pass, ger}`; a
+predicative AP is `fin = adj`, and it is not in that set. Widening it is kernel-only and needs no
+reseed, and the bare post-nominal adjective it would otherwise over-generate («the gene essential»)
+is excluded structurally: a `UnaryShift` never sees a one-token cell, so a lone adjective is never
+shifted while `relevant to the disease` at a 4-token span is. That widening is the same move that
+`ger` was, and `ger` measured the best per-construction yield on this page (2 units).
+
 ## 8. Implementation Order
 
 ## [x] Phase A — Demo mechanism (no reseed; experiments/lexicon/lexicon.esl + kernel/tests) — DONE + committed (`2026-07-07`)
