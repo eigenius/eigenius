@@ -9201,7 +9201,7 @@ fn probe_token_ablation() {
         // different grammar question than the one being asked.
         let trimmed = s.trim_end();
         let (body, tail) = match trimmed.char_indices().last() {
-            Some((k, c)) if matches!(c, '.' | '?' | '!') => (&trimmed[..k], &trimmed[k..]),
+            Some((k, '.' | '?' | '!')) => (&trimmed[..k], &trimmed[k..]),
             _ => (trimmed, ""),
         };
         let toks: Vec<&str> = body.split_whitespace().collect();
