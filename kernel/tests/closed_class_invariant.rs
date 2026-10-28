@@ -78,12 +78,16 @@ fn closed_class_surfaces_stay_known() {
     //         under negation: "not any" is none, not "not some".
     //   nor   denies BOTH conjuncts. The reserved table offers `rk_coord_and`/`rk_coord_or`, and
     //         mapping `nor` to either asserts something the sentence denies; it wants its own kind.
-    //   been  a past participle, so it needs a participle category, not the finite copula's.
     //
-    // `am` and `then` were the two that needed no decision and are fixed: `am` is the copula
-    // paradigm's missing first-person form, and `then` left the withholding list because it is an
-    // adverb WordNet supplies.
-    const KNOWN_GAPS: &[&str] = &["any", "been", "nor"];
+    // `am`, `then` and `been` are fixed. `am` is the copula paradigm's missing first-person form;
+    // `then` left the withholding list because it is an adverb WordNet supplies; and `been`
+    // (2026-10-28) got the participle category this note asked for — `lexicon:been_passive_short`,
+    // `(S[dcl,pss]\NP)/((S[dcl,pss]\NP)/NP)` over `passive_sem`, taking the UNSATURATED transitive
+    // participle exactly as the finite `is`/`was` paradigm does, rather than the finite copula's
+    // category. It came out of a measured paradigm hole, not a copied entry: all four committed
+    // short-passive entries were finite, so «The gene has been reported.» and «The gene may be
+    // affected.» had no parse for any verb.
+    const KNOWN_GAPS: &[&str] = &["any", "nor"];
     assert_eq!(
         unknown, KNOWN_GAPS,
         "the set of closed-class surfaces with no reading changed; withheld from every importer and \

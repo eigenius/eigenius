@@ -1,3 +1,6 @@
+// MERGED 2026-10-28 into `ontologies/lexicon/closed-class.esl`. These entries are now in the
+// bootstrap; this file is kept for the measurement record only. DO NOT layer it onto a
+// post-2026-10-28 snapshot — the IRIs are already there.
 // ════════════════════════════════════════════════════════════════════
 // `when` — the temporal/generic subordinator, in BOTH orders.
 //

@@ -169,6 +169,21 @@ pub enum Combinator {
     /// ("carrying the variant") saturates over >= 2 tokens and reaches the shift unaided, so this
     /// does not fire on it.
     GerParticipial,
+    /// A **seed-time SENTENCE-INITIAL adverb lift** (`adv_initial_lifts`): the forward VP
+    /// pre-modifier `VP/VP` lifted to a modifier of the TYPE-RAISED SUBJECT,
+    /// `(S/(S\NP))/(S/(S\NP))`, so a fronted adverb can attach left of the subject.
+    ///
+    /// `S/S` is the usual CCG category here (core-en's `Adverb`/Initial) and is NOT available
+    /// event-free: `⟦S⟧ = Prop`, while `ADV` is `(Entity -> Prop) -> (Entity -> Prop)` and needs the
+    /// predicate and its subject separately. `sentence_modifier_cats` does build `S/S`, but with the
+    /// identity sem — right for discourse adverbs, and for a manner adverb it would make the
+    /// sentence parse while MEANING the unmodified proposition. Modifying the raised subject keeps
+    /// the predicate in reach: `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`, and `lexicon:adv_initial_sem`
+    /// (`λA. λQ. λV. Q(A(V))`) has exactly that category's denotation while reusing `ADV` verbatim.
+    ///
+    /// Seed-time for the same mechanical reason as the participial lifts: both chart drivers run the
+    /// `UnaryShift` table inside `for len in 2..=n`, and an adverb is one token.
+    AdvInitial,
     /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
     /// (sentential negation `not`, the modals, do-support). Set once at seeding by
     /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the

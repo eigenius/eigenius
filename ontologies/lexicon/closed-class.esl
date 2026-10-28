@@ -676,6 +676,38 @@ resource lexicon:passive_sem : lexicon:SemTerm {
           : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
+
+// ── SENTENCE-INITIAL adverb, event-free (core-en `Adverb`/Initial) ──────────────
+// «Slowly the gene affects cells.» The adverb sits LEFT of the subject while the VP it modifies
+// sits right of it, so the position is a COMBINATORIAL problem, not a semantic one: the fronted
+// and medial readings are truth-conditionally identical for a manner adverb.
+//
+// WHY NOT `S/S`. `sentence_modifier_cats` builds `S/S` already, but with the IDENTITY sem, which is
+// right for discourse adverbs (`also`, `thus`) and WRONG for a manner adverb: `⟦S⟧ = Prop`, and
+// Luo & Shi's `ADV` is `(Entity -> Prop) -> (Entity -> Prop)` — it takes the PREDICATE and its
+// SUBJECT separately, which a saturated `Prop` no longer has. Giving `slowly` the transparent
+// `S/S` would make the sentence parse and MEAN the unmodified proposition, silently dropping the
+// adverb. That is a false reading, not a missing one.
+//
+// THE ROUTE THAT WORKS, and it needs no event variable. Modify the TYPE-RAISED SUBJECT instead:
+//   `(S/(S\NP)) / (S/(S\NP))`,   and `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`
+// so this term has exactly that category's denotation and reuses `ADV` verbatim:
+//   `λA. λQ. λV. Q(A(V))`
+// «Slowly the gene» is then `S/(S\NP)`, which applies to «affects cells» to give
+// `affects(gene, cells) ∧ adv_slowly(λx. affects(x, cells), gene)` — the medial reading exactly.
+//
+// Resolved from the chain by `adv_initial_lifts` (`kernel/src/dcg/rules/combinators.rs`) and applied
+// to the adverb's own sem, so the lift and this definition cannot drift apart — the same discipline
+// `passive_sem` above follows for the short passive.
+resource lexicon:adv_initial_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) =>
+          fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+          fun (V : lexicon:Entity -> Prop) => Q(A(V))
+          : ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) ->
+            (((lexicon:Entity -> Prop) -> Prop) -> ((lexicon:Entity -> Prop) -> Prop)) )
+    );
+}
 resource lexicon:is_passive : lexicon:LexicalEntry {
     core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
@@ -704,6 +736,30 @@ resource lexicon:were_passive : lexicon:LexicalEntry {
     core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+
+// ── The SHORT passive's NON-FINITE cells (measured 2026-10-26) ──────────────────
+// The four entries above are all FINITE, so until these the short passive was unreachable under a
+// modal and under the perfect, for EVERY verb: «The gene may be affected.» had no parse at all,
+// while «The gene may be affected by HeLa.» parsed, because the LONG passive does have its
+// non-finite entry (`be_passive_by`). One paradigm was complete and its twin stopped at `is`/`was`.
+// Same `passive_sem`, same unsaturated-TV argument; `num_any` subjects, since a non-finite
+// auxiliary carries no agreement. Seven of the eight page units this batch gained are these.
+resource lexicon:been_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: past participle of BE — SHORT passive under the perfect ('has been reported').";
+    lexicon:form     = "been";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:be_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: base form of BE — SHORT passive under a modal ('may be reported').";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -1171,6 +1227,37 @@ resource lexicon:whereas_subord_fronted : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:but_sem;
     lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
     lexicon:sense    = "whereas";
+}
+
+// ── `when` — temporal/generic, BOTH orders (measured 2026-10-28) ────────────────
+// No new axiom: `if_sem` is `λs2. λs1. (s2 -> s1)`, which is what generic `when` means here.
+//
+// CONDITIONAL, NOT FACTIVE, and the corpus makes the choice asymmetric. Four of the five `when`
+// units on the CNL page are generic and one is episodic. A factive treatment (`Because`'s shape)
+// would ASSERT the subordinate clause, which is FALSE on the four — «Efficiency is high when the
+// locus cooperates.» does not claim the locus cooperates. The conditional under-commits on the one
+// episodic unit but asserts nothing untrue; losing a fact is recoverable, asserting a falsehood is
+// not.
+//
+// DROPPED, and stated: temporality. Generic `when` quantifies over OCCASIONS and the event-free
+// design has no occasion variable to bind, so `when` denotes identically to `if` and
+// `lexicon:sense` keeps the surfaces apart — as `whereas` reuses `but_sem` and `though` reuses
+// `although_sem`. If the design acquires occasions, `when` and `if` separate there, together.
+resource lexicon:when_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/generic subordinator ('the study fails when the assay works').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
+}
+resource lexicon:when_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED temporal/generic subordinator ('when the assay works, the study fails').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
 }
 
 // ── Indefinite pronouns (paradigm completion) ────────────────────────────────
@@ -3447,6 +3534,29 @@ resource lexicon:no_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:obj_no_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "no";
+}
+
+// `neither` — the same SINGULAR negative determiner, over a two-element domain. The two-ness
+// presupposition is DROPPED, and that is the consistent choice rather than a shortcut: the
+// committed `both` — `neither`'s positive counterpart, with the identical presupposition — already
+// denotes with the plain plural existential. Giving `neither` a cardinality presupposition the
+// lexicon cannot state for `both` would make the pair inconsistent. Both move together when there
+// is a mechanism for cardinality presuppositions.
+resource lexicon:neither_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('neither gene affects cells').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:no_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "neither";
+}
+resource lexicon:neither_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('affects neither gene').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_no_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "neither";
 }
 
 // ── the / this / that — definite + demonstrative determiners (D62 P2.2a) ──────

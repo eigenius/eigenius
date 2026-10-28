@@ -841,6 +841,18 @@ impl Parser {
                 )
                 .ok()
             });
+        // ONE definition of what a FRONTED adverb means: `lexicon:adv_initial_sem`, applied to the
+        // adverb's own `ADV` term by `adv_initial_lifts`. Resolved here for the same reason
+        // `passive_sem` is — so the lift and the lexicon cannot drift apart.
+        let adv_initial_sem: Option<Exp> = Iri::parse("urn:eigenius:lexicon:adv_initial_sem")
+            .ok()
+            .and_then(|i| {
+                super::super::lexicon::resolve_sem_value(
+                    &self.grammar.layer,
+                    &crate::ontology::resource::Value::String(i.as_str().to_string()),
+                )
+                .ok()
+            });
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = self.grammar.raise_nps(&row[i]);
             row[i].extend(raised);
@@ -917,6 +929,17 @@ impl Parser {
                     })
                     .collect::<Vec<_>>(),
             );
+            // SENTENCE-INITIAL adverb lift — the forward VP pre-modifier lifted to a modifier of
+            // the TYPE-RAISED SUBJECT, so «Slowly the gene affects cells.» can attach the adverb
+            // left of the subject. Leaf-time for the same reason as the participial lifts above:
+            // the shift table only runs over spans of length >= 2, and an adverb is one token.
+            if let Some(asem) = adv_initial_sem.as_ref() {
+                let lifted: Vec<Item> = row[i]
+                    .iter()
+                    .flat_map(|it| super::super::rules::combinators::adv_initial_lifts(it, asem))
+                    .collect();
+                mods.extend(lifted);
+            }
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).

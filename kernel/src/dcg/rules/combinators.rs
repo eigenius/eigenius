@@ -1697,6 +1697,88 @@ fn is_saturated_ger_vp(cat: &Exp) -> bool {
         && matches!(voice, Exp::InductiveCtor(_, n, _) if n == "ger")
 }
 
+/// SENTENCE-INITIAL adverb lift — `VP/VP` → `(S/(S\NP))/(S/(S\NP))`, so a fronted adverb can
+/// attach to the LEFT of the subject («Slowly the gene affects cells.»).
+///
+/// The position is a COMBINATORIAL problem, not a semantic one: fronted and medial are
+/// truth-conditionally identical for a manner adverb, and the adverb's own `ADV` term is reused
+/// unchanged. What blocks the usual CCG category `S/S` is that `⟦S⟧ = Prop` while `ADV` is
+/// `(Entity -> Prop) -> (Entity -> Prop)` — it needs the predicate and its subject separately, and a
+/// saturated `Prop` has neither. (`category::sentence_modifier_cats` does build `S/S`, with the
+/// IDENTITY sem; that is right for discourse adverbs and would make a manner adverb parse while
+/// MEANING the unmodified proposition.) Modifying the TYPE-RAISED SUBJECT keeps the predicate in
+/// reach, since `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`.
+///
+/// `lexicon:adv_initial_sem` (`λA. λQ. λV. Q(A(V))`) is RESOLVED FROM THE CHAIN and applied to the
+/// adverb's sem, so this and the lexicon cannot drift apart — the discipline
+/// [`short_passive_participial_lifts`] follows for `lexicon:passive_sem`.
+///
+/// Seed-time: both chart drivers run the `UnaryShift` table inside `for len in 2..=n`, and an
+/// adverb is one token.
+pub(crate) fn adv_initial_lifts(it: &Item, adv_initial_sem: &Exp) -> Vec<Item> {
+    let Some(cat) = adv_initial_cat(it.cat()) else {
+        return Vec::new();
+    };
+    let sem = Exp::App(
+        Box::new(adv_initial_sem.clone()),
+        Box::new(it.sem().clone()),
+    );
+    vec![Item::from_parts(
+        cat,
+        sem,
+        Combinator::AdvInitial,
+        it.cost(),
+    )]
+}
+
+/// `VP/VP` → `(S/(S\NP))/(S/(S\NP))`, or `None` for any other category.
+///
+/// Only the FORWARD pre-modifier lifts. The backward VP modifier already attaches after the verb,
+/// and lifting it too would give every adverb a second route to the same reading.
+///
+/// The result's type and feature slots are free `Exp::Var`s, which is what lets one category meet
+/// every raised subject: after `DepApply` a raised subject is a concrete
+/// `fwd(cat_s(dcl,f1), bwd(cat_s(dcl,f2), cat_np(C,n)))`, and `cat_np` unifies as
+/// `unify_type` on the class and `unify_feat` on the number, so a `Var` binds in both.
+fn adv_initial_cat(cat: &Exp) -> Option<Exp> {
+    use super::super::category::{is_ctor, slash_parts};
+    let (m, res, arg) = slash_parts(cat, "fwd")?;
+    // A MODIFIER: result and argument are the same category.
+    if res != arg {
+        return None;
+    }
+    // …and that category is a VP, `cat_s(dcl, _) \ cat_np(_, _)`.
+    let (_vm, sent, subj) = slash_parts(arg, "bwd")?;
+    let sargs = is_ctor(sent, "cat_s")?;
+    let mood = sargs.first()?;
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    is_ctor(subj, "cat_np")?;
+
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return None;
+    };
+    let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(decl.clone(), n.to_string(), args);
+    let var = |n: &str| Exp::Var(n.to_string());
+    let raised = ctor(
+        "fwd",
+        vec![
+            m.clone(),
+            ctor("cat_s", vec![mood.clone(), var("ADVI#f1")]),
+            ctor(
+                "bwd",
+                vec![
+                    m.clone(),
+                    ctor("cat_s", vec![mood.clone(), var("ADVI#f2")]),
+                    ctor("cat_np", vec![var("ADVI#T"), var("ADVI#n")]),
+                ],
+            ),
+        ],
+    );
+    Some(ctor("fwd", vec![m.clone(), raised.clone(), raised]))
+}
+
 /// `(S[dcl,pss]\NP)/cat_pp_arg(P)` → `cat_pp/cat_pp_arg(P)`, or `None` for any other category.
 /// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
 /// preposition-agnostic PP frames) still has to be matched by whatever fills it.
@@ -3813,6 +3895,58 @@ mod dispatch_tests {
     // These three tests are the WITNESS that the mode machinery does what the lattice says, and they
     // are deliberately written BEFORE any lexical entry is tightened to `m_app`: the migration ships
     // with every slash at `m_all`, so without them nothing would exercise a non-permissive mode.
+
+    // ── the sentence-initial adverb lift's CATEGORY transform ───────────────────────────────────
+    //
+    // The behavioural test needs an adverb, which comes from WordNet and so from a snapshot; this
+    // pins the pure category function instead, including the two shapes it must REFUSE.
+
+    #[test]
+    fn adv_initial_lifts_the_forward_vp_premodifier() {
+        let vp = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("fin", vec![])]),
+                ct("cat_np", vec![ct("Entity", vec![]), ct("num_any", vec![])]),
+            ],
+        );
+        let premod = ct("fwd", vec![vp.clone(), vp.clone()]);
+        let lifted = super::adv_initial_cat(&premod).expect("the forward VP pre-modifier lifts");
+
+        // `X/X` over a RAISED subject, and the two X's are the same category.
+        let (_m, res, arg) = super::super::super::category::slash_parts(&lifted, "fwd")
+            .expect("the lift is a forward slash");
+        assert_eq!(res, arg, "the lift is a modifier: result == argument");
+
+        // …and that X is `S/(S\NP)`, not a VP.
+        let (_m2, s_res, s_arg) = super::super::super::category::slash_parts(res, "fwd")
+            .expect("the modified category is itself a forward slash (a raised subject)");
+        assert!(
+            super::super::super::category::is_ctor(s_res, "cat_s").is_some(),
+            "a raised subject yields S, got {s_res:?}"
+        );
+        assert!(
+            super::super::super::category::slash_parts(s_arg, "bwd").is_some(),
+            "a raised subject takes a VP, got {s_arg:?}"
+        );
+    }
+
+    #[test]
+    fn adv_initial_refuses_the_backward_modifier_and_non_modifiers() {
+        let vp = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("fin", vec![])]),
+                ct("cat_np", vec![ct("Entity", vec![]), ct("num_any", vec![])]),
+            ],
+        );
+        // The BACKWARD VP modifier already attaches after the verb; lifting it too would give every
+        // adverb a second route to the same reading.
+        assert!(super::adv_initial_cat(&ct("bwd", vec![vp.clone(), vp.clone()])).is_none());
+        // A forward slash whose result and argument differ is a functor, not a modifier.
+        let other = ct("cat_np", vec![ct("Entity", vec![]), ct("sg", vec![])]);
+        assert!(super::adv_initial_cat(&ct("fwd", vec![vp, other])).is_none());
+    }
 
     #[test]
     fn application_only_slash_refuses_composition() {
