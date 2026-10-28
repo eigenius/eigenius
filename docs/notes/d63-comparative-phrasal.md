@@ -310,6 +310,59 @@ derivation from the adjective/nominalization; the hypernymic relation between di
 eventuality). Faithful *enough to commit as a graded claim*, insulated from full compositional degree
 semantics — the D61 faithfulness line.
 
+## 7a. The SUPERLATIVE, localized (`2026-10-28`)
+
+§5.5 lists *superlative* (`most`) as part of option **(a)**, the "eventual structure". This records
+what is actually built, what is missing, and what the missing piece costs — measured, not estimated.
+
+**Built, and more than §5.5 assumed.** Option (a)'s premise — "the adjective supplies `deg_A :
+Entity → float` (a `cat_measure`)" — is already true at scale, and `more` already consumes it:
+
+```
+more_deg     : ((S[adj]\NP) / cat_pp_than) / cat_measure
+more_deg_sem : λμ. λy. λx. gt(μ(x), μ(y))
+```
+
+«The gene is more essential than the protein.» and the bare «more essential» both parse on
+`wordnet-umls-hpo-aligned-2026-10-28-advfold`. The positive is live too — a gradable adjective
+encodes as `gt(deg_A(x), std_A)`.
+
+**Not built, and it is one thing: the COMPARISON CLASS.** «The gene is the most essential protein.»
+fails with `most` as the sole implicated token. The two `most` entries in `closed-class.esl` are the
+QUANTIFIER (`cat_forall(pl, …)` over `exists_sem`, "most genes") — a homograph, not a wrong category,
+so the superlative has no entry at all. `degree_adverb_items` (`dcg/parse/seed.rs`) does handle
+`more`/`most`/`less` but only over ADVERBS, and transparently (identity sem), which is right for
+adverbs under D62 and wrong for an adjective: `most essential` ≠ `essential`.
+
+A maximum needs `∀y ∈ C. ge(μ(x), μ(y))` — `stats:ge` exists, and using `ge` rather than `gt` removes
+any need for a `y ≠ x` clause. `C` is the whole difficulty, and it is a SET where `more` needs only a
+single standard entity: `⟦cat_pp_than⟧ = Entity`, and `⟦cat_np(T, num)⟧ = T`, so the NP machinery
+yields members, not classes.
+
+**Two routes, both real.**
+
+- **(i) Explicit class via a partitive.** Mirror `more_deg` with an `of`-phrase supplying the class —
+  but the class is the NP's TYPE `T`, so the entry is dependent (`cat_forall` + `DepApply`) rather
+  than a plain slash. Covers «the most alarming **of the three dissenters**» and «the most dangerous
+  **of these traps**»; 2 of the 7 corpus units.
+- **(ii) Comparison class as a HOLE**, by analogy with D64's demonstratives: an axiom
+  `comparison_class : Entity → Prop`, left unresolved, giving an OPEN parse. This is semantically
+  honest — a superlative *does* mean "maximal in a contextually given class", and that class being
+  unresolved is a discourse fact, not a weakness — and it reaches all 7. Cost: hole freshening is
+  keyed per IRI (`ANAPHOR_IRI`, `ANAPHOR_OF_IRI`, `ANAPHOR_OF_COUNT_IRI`, `HYPOTHESIS_OF_IRI` in
+  `dcg/holes.rs`), each with `GateHole` handling, so this adds a fourth to machinery the felicity
+  gate and the D64 resolver both read.
+
+**(ii) is the recommendation**, with (i) later resolving the hole where a partitive supplies the
+class. It is the shape that makes the two cases one mechanism instead of two entries.
+
+**Corpus support**: 7 units on the CNL page contain `most X`, and ALL SEVEN are grammar-gaps —
+«the most alarming of the three dissenters», «the most deleterious 1% of the genome», «the single
+most useful piece of evidence», «the function most relevant to…», «the most dangerous of these
+traps». One of the seven («the single suggestion that I would most want taken») is `most` over a
+VERB, which neither route reaches. Expect fewer than 7 to convert: «This trap is the most dangerous
+of these traps.» has 0 implicated tokens, so it carries a second gap beyond `most`.
+
 ## 8. Implementation Order
 
 ## [x] Phase A — Demo mechanism (no reseed; experiments/lexicon/lexicon.esl + kernel/tests) — DONE + committed (`2026-07-07`)
