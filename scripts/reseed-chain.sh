@@ -91,7 +91,10 @@ docker compose down >/dev/null 2>&1 || true
 # ── the provenance gate ───────────────────────────────────────────────
 step "provenance"
 got_merges=$(grep -oE "merge rows *: *[0-9]+" "$LOG" | tail -1 | grep -oE "[0-9]+" || echo 0)
-got_hpo=$(grep -oE "Loaded [0-9]+ resource\(s\)" "$LOG" | sed 's/[^0-9]//g' | sort -rn | head -1 || echo 0)
+# The HPO load is the `Loaded` line that FOLLOWS its own layer line — not the largest in the log.
+# Taking the maximum instead found a 361,101-resource UMLS chunk and reported it as the HPO count,
+# which made this check unable to fail. Caught on the 2026-10-28 run.
+got_hpo=$(grep -A 2 "hpo.eigon.json" "$LOG" | grep -oE "Loaded [0-9]+ resource" | grep -oE "[0-9]+" | head -1 || echo 0)
 got_equiv=$(grep -oE "declared equivalent \(§11\) *: *[0-9]+" "$LOG" | grep -oE "[0-9]+$" || echo 0)
 fail=0
 chk() { # name got want
@@ -99,9 +102,8 @@ chk() { # name got want
   else printf "  %-22s %-8s MISMATCH (expected %s)\n" "$1" "$2" "$3"; fail=1; fi
 }
 chk "merge rows"      "$got_merges" "$EXPECT_MERGES"
+chk "HPO resources"    "$got_hpo"    "$EXPECT_HPO"
 chk "HPO equivalences" "$got_equiv" "$EXPECT_EQUIV"
-echo "  (largest layer load: $got_hpo — HPO resources expected $EXPECT_HPO)"
-[[ "$got_hpo" == "$EXPECT_HPO" ]] || true   # informational: the HPO load is not always the largest
 
 OUT="$S/wordnet-umls-hpo-aligned-$D"
 echo
