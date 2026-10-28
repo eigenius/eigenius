@@ -1,0 +1,73 @@
+// ════════════════════════════════════════════════════════════════════
+// `when` — the temporal/generic subordinator, in BOTH orders.
+//
+// ADDITIVE. Two new IRIs. `when` has ZERO closed-class entries today, so this is a missing-entry
+// gap, and it needs NO new axiom: it reuses `if_sem` verbatim.
+//
+// WHY CONDITIONAL AND NOT FACTIVE — the corpus decides, and the two choices are not symmetric.
+// Of the five `when` units on the CNL page, FOUR are generic («That broadening happens when ABE9
+// is fused to Cas9 variants…», «Efficiency is high when the locus cooperates.», «Ile380 is
+// reported to become buried when the UBA domain self-associates.», «There is no middle category
+// here when each tool is scored by its own call.») and ONE is episodic and factive («You flagged
+// your own read on this when you wrote to me.»).
+//
+// A FACTIVE treatment — `Because`'s shape, `When(s1, s2, hyp(s1), hyp(s2))` — would ASSERT the
+// subordinate clause. On the four generic units that is FALSE: «Efficiency is high when the locus
+// cooperates.» does not claim the locus cooperates. The conditional `s2 -> s1` instead
+// UNDER-COMMITS on the one episodic unit: it fails to record that the writing happened, but it
+// asserts nothing untrue. Losing a fact is recoverable; asserting a falsehood is not.
+//
+// WHAT IS DROPPED, stated rather than hidden: temporality. A generic `when` universally quantifies
+// over OCCASIONS, and material implication over two propositions is the closest the event-free
+// design reaches — there is no occasion or event variable to bind. `when` therefore denotes
+// IDENTICALLY to `if`, and the `lexicon:sense` field ("when") is what keeps the surfaces apart.
+// There is precedent: `whereas` reuses `but_sem` and `though` reuses `although_sem`, each for the
+// same reason — one definition of what the connective means, used at several surfaces. If the
+// design ever acquires occasions, `when` and `if` separate there, together.
+//
+// BOTH ORDERS, since `when` is at least as common fronted as medial — the fronted category is the
+// one flipped slash the 2026-10-26 subordinator batch established: `(S\S)/S` becomes `(S/S)/S`,
+// which `category::is_sentence_premodifier` names and `AbsorbComma` already feeds.
+//
+// KILL CRITERION. «When the gene affects cells the study fails.» and the medial “…fails when…”
+// must parse, no battery sentence may regress, and the page's encoded + ambiguous must not fall.
+//
+// MEASURED 2026-10-28 on probe-passive (cap-only, --units-per-line). Battery 78 -> 79 of 89.
+// Page: grammar-gap 466 -> 464, ambiguous 427 -> 428, open 145 -> 146, encoded 18 UNCHANGED.
+// TWO units gained, ZERO lost — and both are GENERIC `when`, the reading the conditional is right
+// for: u682 «Efficiency is high when the locus cooperates.» and u667 «That broadening happens when
+// ABE9 is fused to Cas9 variants with expanded PAM compatibility.»
+//
+// Claim units 63 -> 63. The other three `when` units stay gapped on OTHER constructions, none of
+// them `when`: u88 «Ile380 is reported to become buried when…» needs the to-infinitive (deferred
+// importer frames), u349 «There is no middle category here when…» needs the there-existential, and
+// u427 «You flagged your own read on this when you wrote to me.» is multiply blocked (no single
+// token deletion rescues it). The grid confirms the entries themselves are complete: fronted with
+// and without the comma, medial, and the real corpus sentence all parse, while «When did the gene
+// affect cells.» correctly does NOT — that is the wh-question family, which these do not license.
+//
+// THE PATTERN, now seen three times (short passive, there-existential, `when`): a construction fix
+// moves PAGE units but not CLAIM units, because a claim unit needs ALL its sentences covered and a
+// gapped sentence usually carries two or three distinct gaps. Of the whole 2026-10-26/28 batch only
+// the short passive moved claim units (59 -> 63); `there` and `when` are +0 each.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon = "urn:eigenius:lexicon";
+namespace core    = "urn:eigenius:core";
+
+resource lexicon:when_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/generic subordinator ('the study fails when the assay works').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
+}
+resource lexicon:when_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED temporal/generic subordinator ('when the assay works, the study fails').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
+}
