@@ -1835,3 +1835,74 @@ The battery (basic-grammar coverage) is the ranking this note already argued for
 battery failures, exactly one also tops the page census: the **free relative**, worth 2 battery
 lines and 2 page units. It is the only candidate that is highest on both rankings, and it is basic
 English rather than a corpus artefact.
+
+## The free relative: +2 battery, +2 units, and no rule (2026-10-28)
+
+The item the one-away census ranked first, built. `experiments/lexicon/free-relative.esl` — three
+resources, **no kernel code**.
+
+**It needs no rule, and the reason is worth keeping.** `relativize` has to be a rule because a
+HEADED relative's result TYPE is built from the body's sem (`cat_n(Σx:C. body(x), num)`), and a
+lexical entry's category is static. A free relative has no head to refine, so its category is the
+fixed `cat_np(Entity, sg)` — only the SEM depends on the body, and a sem is a λ-term. Since
+`⟦S\NP⟧ = ⟦S/NP⟧ = Entity → Prop`, ONE term serves both gap positions and the two entries differ
+only in the slash. The object-gap body `S[dcl]/NP` needed nothing new: it is the category
+`relativize` already takes for a headed object relative.
+
+**It is the declarative twin of an entry that was already there.** `what` has been in
+`closed-class.esl` as an interrogative since D63 §8.5:
+
+| | body | result | sem |
+|---|---|---|---|
+| `what_subj` | `S[dcl]\NP` | `cat_q(Entity)` | `λV.λx. V(x)` — the answer-property |
+| `what_free_rel_subj` | `S[dcl]\NP` | `cat_np(Entity, sg)` | `λV. the(Σx:Entity. V(x)).1` |
+
+Same surface, same body, different result and meaning — so a distinct `sense`, not a shared one
+(cf. the `do`-support note, where a question and a declarative differ in CATEGORY only and
+therefore share a sense). DEFINITE, not existential: a free relative is maximal, so it takes the ι
+operator over the Σ and projects — `the(Σ).1`, the shape `the_plain_np` builds over a refined noun.
+
+**MEASURED** as a layer on `wordnet-umls-hpo-aligned-2026-10-28-advfold` (base untouched; the
+A/B is one variable):
+
+| | before | after |
+|---|---|---|
+| battery | 81 of 89 | **83 of 89** |
+| page grammar-gap | 460 | **458** |
+| claim units | 64 | **66** |
+| encoded / ambiguous / open | 18 / 431 / 147 | 18 / 431 / **149** |
+| readings | 41,381 | 41,381 |
+| skeletons | 5,294 | 5,305 |
+| one-away blockers | 88 | 86 |
+
+The census predicted 2 battery lines and 2 units; both came in. A per-unit disposition diff shows
+**exactly two** units changed, both `GRAMMAR-GAP → OPEN`, both containing `what` — no other unit
+moved in either direction.
+
+Two figures need reading, not reporting. The units land OPEN rather than ENCODED because each
+corpus sentence also carries a demonstrative, whose referent hole is what keeps the parse open —
+the free relative itself contributes no hole. And `total-readings` is unchanged **by definition**:
+`unit_readings` scores Open at 0 (`db_backed_encoding.rs`), so two gap→open conversions cannot move
+it. The +11 skeletons are those two units' OPEN structural forms.
+
+Encodings verified rather than assumed:
+
+```
+The study reported what affects cells.
+  → v00965035_t(the(ΣG#0:Entity. v00137313_t(kind_of(n02991711), G#0)).1, the(n00644503))
+What affects cells is the gene.
+  → the(ΣG#0:Entity. v00137313_t(kind_of(n02991711), G#0)).1 = the(n05436752)
+```
+
+The second is an IDENTITY, which is the right reading of a specificational copula — the free
+relative is the subject of an equation, not a predication.
+
+**Not promoted.** The entries' home is `closed-class.esl`, and putting them there trips
+`bootstrap_manifest_is_pinned`: every persisted store becomes unresumable, so promotion costs a
+reseed plus the alignment/HPO/advfold chain. Batch it with the other pending bootstrap data — the
+`who` relativizer (1 unit, above) is the obvious co-passenger — rather than paying the chain twice.
+
+### Remaining battery failures (6)
+
+ECM (`showed the gene to be essential`), there-existential, `'s` possessive, predicative `very`,
+to-infinitive control, gerund subject. The free relative's two lines are gone.
