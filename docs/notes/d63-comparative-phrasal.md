@@ -419,14 +419,66 @@ guards the leaf only), and one `RefineKind` row. Slice 2 (the class hole) then r
 predicative-plus-partitive cases and subsumes slice 1 once the resolver can fill the class from the
 head noun.
 
-Order stands — attributive first — but it is rule-level work, not a lexical addition.
+**BUILT (`2026-10-28`), and it needed NO reseed.** The design above held, with one correction and
+one omission.
 
-**Corpus support**: 7 units on the CNL page contain `most X`, and ALL SEVEN are grammar-gaps —
-«the most alarming of the three dissenters», «the most deleterious 1% of the genome», «the single
-most useful piece of evidence», «the function most relevant to…», «the most dangerous of these
-traps». One of the seven («the single suggestion that I would most want taken») is `most` over a
-VERB, which neither route reaches. Expect fewer than 7 to convert: «This trap is the most dangerous
-of these traps.» has 0 implicated tokens, so it carries a second gap beyond `most`.
+- `cat_sup_mod` — nullary, carrying the adjective's scale in its sem. **Rust-only**, on `cat_mod`'s
+  precedent (`combinators.rs`: "categories are name-keyed on the shared `list_decl`"), so the
+  "distinct category" this slice needs costs no ontology edit and no reseed. The earlier estimate
+  that slice 1 required a bootstrap change was wrong.
+- A seed-time 2-token item for `most <adj>` (`seed.rs::superlative_mod_items`), taking the scale from
+  the adjective's own `cat_measure` — the same `deg_A` `more_deg` consumes, so it fires exactly where
+  «more <adj>» already parses. A SECOND pass over the chart: the main loop reaches `[i][i+1]` before
+  it reaches the adjective's leaf cell `[i+1][i+1]`.
+- The `sup_apply` rule row + `refine_sup_apply`, building `Σx:C. ∀(y:C). ge(μ(x), μ(y))`.
+
+**What the design missed: this restrictor is not order-invariant.** It MENTIONS ITS OWN COMPARISON
+CLASS, which no other modifier's does. `[most useful] [piece of evidence]` quantifies over pieces OF
+EVIDENCE and `[[most useful] piece] of evidence` over pieces, and `conjoin_canonical`'s canonical
+conjunct order cannot collapse two Σ that differ inside a binder — so both survive, and the second
+is a strictly stronger claim than the sentence makes. A superlative-refined noun therefore takes no
+further modifier: `is_superlative_refined` + `Guard::NotSuperlativeRefined` on `pp_mod`, and
+`is_adjective_refined` reports a superlative too, which keeps it out of the compound rules without a
+second guard on each. This is the adjective-outside-compound normal form (§3.3) one level up.
+
+**MEASURED** on `wordnet-umls-hpo-aligned-2026-10-28-advfold` (cap-only, `--units-per-line`):
+
+| | before | after |
+|---|---|---|
+| battery | 80 of 89 | **81 of 89** |
+| page grammar-gap | 460 | 460 |
+| encoded / ambiguous / open | 18 / 431 / 147 | 18 / 431 / 147 |
+| readings / skeletons | 41,381 / 5,294 | 41,381 / 5,294 |
+| claim units | 64 | 64 |
+
+The battery gain is exactly this slice's target — «The gene is the most essential protein.», `4:most`
+→ PARSES — and no other battery line moved. The page is byte-identical: nothing lost, nothing gained.
+
+**Corpus support, corrected.** 7 units on the CNL page contain `most X` and all 7 are grammar-gaps,
+but only ONE is the construction this slice builds:
+
+| unit | surface | needs |
+|---|---|---|
+| 501 | «the single most useful piece of evidence» | **slice 1** — the only attributive-prenominal case |
+| 342 | «the most alarming of the three dissenters» | slice 2 (partitive, no head noun) |
+| 855 | «the most dangerous of these traps» | slice 2 |
+| 377 | «the most deleterious 1% of the genome» | a PERCENTAGE head, not a `cat_n` |
+| 519 | «the function most relevant to…» | POST-nominal superlative |
+| 106 | «I would most want taken» | `most` over a VERB |
+| 986 | «do the most work» | `most` + noun — the quantifier, already parsing |
+
+501 does not convert, and the reason is not the superlative. The ladder isolates it: «The study
+reported the single most useful piece of evidence on this allele.» **PARSES** — the full NP, both
+PPs and `single` — while «That is the piece of evidence.» is a gap. The blocker is the bare
+demonstrative pronoun `that`, which `demonstrative-pronouns-no-that.esl` DROPPED on 2026-10-25 after
+measuring it: with `that_pron` in, gaps fell 499 → 486 but seven sentences went closed → OPEN (`That
+<noun> …`, where the bare NP builds a spurious pronoun+appositive) and skeletons rose 3,542 → 3,895.
+So 501's second gap is a settled rejection, not an open item.
+
+Slice 1 is therefore complete and corpus-neutral: it converts the construction and the battery
+family, and the page needs slice 2 (partitive / predicative) before any `most` unit moves.
+
+Order stands — attributive first — but it is rule-level work, not a lexical addition.
 
 ## 8. Implementation Order
 

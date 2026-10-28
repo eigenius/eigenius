@@ -671,6 +671,36 @@ impl Parser {
             .collect()
     }
 
+    /// Seed the ATTRIBUTIVE SUPERLATIVE `most <adj>` as a two-token `cat_sup_mod` item carrying the
+    /// adjective's SCALE (`docs/notes/d63-comparative-phrasal.md` §7a, slice 1).
+    ///
+    /// `most` has no superlative entry in `closed-class.esl` at all: its two entries there are the
+    /// QUANTIFIER (`most genes`) — a homograph, not a wrong category. [`Self::degree_adverb_items`]
+    /// does take `most <adverb>`, but TRANSPARENTLY (identity sem), which is right for an adverb under
+    /// D62 and wrong for an adjective: `most essential` is not `essential`.
+    ///
+    /// The scale is the adjective's own `cat_measure` sem — the same `deg_A` the comparative
+    /// `more_deg` consumes — so this fires exactly where «more <adj>» already parses. One item per
+    /// surviving sense, each seeding its own reading, as the comparative does.
+    ///
+    /// The span is deliberately NOT protected (`multiword_spans`): `most` is also the quantifier
+    /// determiner, so `most genes` has to keep its compositional parse.
+    fn superlative_mod_items(&self, w0: &str, adj_cell: &[Item]) -> Vec<Item> {
+        if w0.trim().to_lowercase() != "most" {
+            return Vec::new();
+        }
+        adj_cell
+            .iter()
+            .filter(|it| is_ctor(it.cat(), "cat_measure").is_some())
+            .map(|it| {
+                Item::new(
+                    super::super::rules::combinators::cat_sup_mod_cat(),
+                    it.sem().clone(),
+                )
+            })
+            .collect()
+    }
+
     /// Seed the LEAF cells of a CKY chart — the shared front-end of both the unpacked path
     /// ([`Self::parse_at_cap`]) and the packed forest (D63 blueprint §11 3c.3). Multi-span MWE
     /// [`Self::lookup_span`] + hole-freshening (`$anaphor$`/`$quant$`) + `-ly`/degree adverbs +
@@ -788,6 +818,23 @@ impl Parser {
                     }
                 }
             }
+        }
+
+        // Attributive superlative (`most <adj>`, D63 §7a slice 1) — a SECOND pass, because the
+        // adjective's leaf cell `[i+1][i+1]` carries the scale and the loop above reaches `[i][i+1]`
+        // BEFORE it reaches `[i+1][i+1]`.
+        let sups: Vec<(usize, usize, Vec<Item>)> = (0..n.saturating_sub(1))
+            .map(|i| {
+                (
+                    i,
+                    i + 1,
+                    self.superlative_mod_items(tokens[i].surface(), &chart[i + 1][i + 1]),
+                )
+            })
+            .filter(|(_, _, items)| !items.is_empty())
+            .collect();
+        for (i, j, items) in sups {
+            chart[i][j].extend(items);
         }
 
         // RNR head distribution (D63, `docs/notes/d63-rnr-head-distribution.md`): a coordinated

@@ -1122,6 +1122,14 @@ enum Guard {
     /// [`super::constructions::appose_group`] has enforced this since 2026-07-26; the singular rule did
     /// not, so "[Germline mutations in the MMR gene] [MSH2]" still captured the designator — traced live
     /// as `cat_n(Σ__cmp_x:n07425011. … prep_in …, sg)` reaching this rule.
+    /// The named operand must NOT be a **superlative-refined** noun ([`is_superlative_refined`]).
+    ///
+    /// Carried by `pp_mod` alone, and it cannot be folded into [`Self::NotAdjectiveRefined`]: an
+    /// ORDINARY adjective-refined noun may take a PP, because both bracketings of "the large cell in
+    /// humans" flatten to the byte-identical Sigma. A superlative's restrictor quantifies over the
+    /// class, so the two bracketings state different things and only the PP-inside one is the
+    /// sentence's.
+    NotSuperlativeRefined(Operand),
     NotPpRefined(Operand),
 }
 
@@ -1162,6 +1170,7 @@ impl Guard {
             Guard::ProperName(_) => "ProperName",
             Guard::NotDerivedIndividual(_) => "NotDerivedIndividual",
             Guard::NotPlural(_) => "NotPlural",
+            Guard::NotSuperlativeRefined(_) => "NotSuperlativeRefined",
             Guard::NotPpRefined(_) => "NotPpRefined",
         }
     }
@@ -1170,6 +1179,7 @@ impl Guard {
     fn side(&self) -> &'static str {
         match self {
             Guard::NotCompoundRefined(o)
+            | Guard::NotSuperlativeRefined(o)
             | Guard::NotAdjectiveRefined(o)
             | Guard::NotKindRaised(o)
             | Guard::NotPronoun(o)
@@ -1188,6 +1198,7 @@ impl Guard {
         match self {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
+            Guard::NotSuperlativeRefined(op) => !is_superlative_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
             Guard::NotPronoun(op) => op.pick(left, right).prov != Combinator::Pronoun,
             Guard::NotDerivedIndividual(op) => {
@@ -1238,6 +1249,19 @@ fn refine_rules() -> &'static [CatRule] {
                 right_pat: cat_n(Var("C"), Var("num")),
                 guards: &[],
                 build: refine_mod_apply,
+            },
+            // ATTRIBUTIVE SUPERLATIVE `[cat_sup_mod] [cat_n]` (`docs/notes/d63-comparative-phrasal.md`
+            // §7a, slice 1): `most <adj>` + head noun. Where a superlative modifies a noun the
+            // restrictor IS the comparison class, so this slice is sentence-local and needs no
+            // contextual hole — unlike the PREDICATIVE superlative ("the most alarming of the three"),
+            // whose class is supplied by the discourse (slice 2). No guards: an adjective-refined or
+            // compound head is a perfectly good comparison class ("the most useful piece of evidence").
+            CatRule {
+                name: "sup_apply",
+                left_pat: Ctor("cat_sup_mod", Vec::new()),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[],
+                build: refine_sup_apply,
             },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
             // not itself be a compound result. Adjective-outside NF (§3.3): nor an adjective-refined
@@ -1296,6 +1320,12 @@ fn refine_rules() -> &'static [CatRule] {
                     // removes spurious ambiguity, it does not choose a meaning. Found by
                     // `grammar_rule_guard_matrix` (this rule had no guards at all).
                     Guard::NotCompoundRefined(Operand::Left),
+                    // A SUPERLATIVE-refined head takes no PP: its restrictor quantifies over the
+                    // comparison class, so "[[most useful] piece] of evidence" would compare against
+                    // every piece rather than every piece of evidence. Forcing the PP inside leaves
+                    // "[most useful] [piece of evidence]" as the single derivation, with the class the
+                    // sentence means. See [`is_superlative_refined`].
+                    Guard::NotSuperlativeRefined(Operand::Left),
                 ],
                 build: refine_pp_mod,
             },
@@ -1325,6 +1355,23 @@ pub(crate) fn cat_mod_cat() -> Exp {
     Exp::InductiveCtor(
         crate::nbe::term::list_decl().iri.clone(),
         "cat_mod".into(),
+        Vec::new(),
+    )
+}
+
+/// The **superlative modifier** category `cat_sup_mod` — a maximality operator awaiting its head
+/// noun, carrying the adjective's SCALE in its sem (`deg_A : Entity -> core:float`, what a gradable
+/// adjective's `cat_measure` supplies and what the comparative `more_deg` already consumes). Nullary
+/// and Rust-only, exactly like [`cat_mod_cat`], so no ontology edit and no reseed.
+///
+/// DISTINCT from `cat_mod` rather than a provenance tag on one: the comparison class is the head
+/// noun's own type, which only the refine rule has, so superlativity must survive composition to
+/// reach it — and a provenance tag guards the leaf only (`docs/notes/d63-comparative-phrasal.md`
+/// §7a, slice 1).
+pub(crate) fn cat_sup_mod_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_mod".into(),
         Vec::new(),
     )
 }
@@ -1869,6 +1916,54 @@ fn refine_mod_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Lay
     })
 }
 
+/// `[cat_sup_mod] [cat_n]` — the attributive superlative. The scale `mu` rides on the left item's
+/// sem; the comparison class is the head noun's type `C`, bound by the trigger.
+///
+/// **This is a rule and not a lexical entry because `C` has to be CONCRETE where the sem is built.**
+/// The scale is fixed at `Entity -> core:float`, and coercive subtyping (Luo 2012) reaches `Entity`
+/// from a concrete class only — a universally quantified `T : Set` is a subtype of nothing. A
+/// `(Num·forall T:Set. N[T,n]) / cat_measure` entry was tried on 2026-10-28 and the checker rejected
+/// it (`TermIllTyped: Var("TC#1") != EigonClass(lexicon:Entity)`), however the category was shaped.
+/// Here `C` arrives concrete, so `mu(x)` checks.
+///
+/// `ge` rather than `gt`: `x` is trivially `>=` itself, so the maximum needs no `y != x` clause.
+fn refine_sup_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let mu = left.sem().clone();
+    let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        // forall (y : C). ge(mu(x), mu(y)) — x is maximal on the adjective's scale among C.
+        //
+        // `C` is the noun type as it ARRIVES, which is what makes this non-circular: the Sigma being
+        // built here is not its own comparison class. When `C` is already refined its `y` is a PAIR,
+        // so the scale reads the witness (`fst y`) — the projection a definite description takes for
+        // the same reason (`the(Sigma ...).1`), landing on a concrete class that coerces to `Entity`.
+        // `x` needs no projection: when `C` is refined, `refine_conjoin` binds it at the Sigma's
+        // BASE. (That branch is conditional on `logic:And` resolving on the chain, which it always
+        // does in a seeded store; the same assumption every sibling refine builder makes when it
+        // applies an `Entity -> Prop` restrictor to `x`.)
+        let y = SUPERLATIVE_Y;
+        let y_scaled = match &c {
+            Exp::Sig(_, _, _) => Exp::Fst(Box::new(Exp::Var(y.into()))),
+            _ => Exp::Var(y.into()),
+        };
+        Exp::Pi(
+            Patt::Var(y.into()),
+            Box::new(c.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(
+                        crate::ontology::iri::Iri::parse("urn:eigenius:measurements:ge")
+                            .expect("static ge IRI"),
+                    )),
+                    Box::new(scale(Exp::Var(x.into()))),
+                )),
+                Box::new(scale(y_scaled)),
+            )),
+        )
+    })
+}
+
 /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
 fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
@@ -2382,6 +2477,11 @@ pub fn apply_core(
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
 pub(crate) const COMPOUND_X: &str = "__cmp_x";
 
+/// The superlative restrictor's universally quantified variable. Canonical for the same reason
+/// [`COMPOUND_X`] is: two derivations that reach the same claim must produce the BYTE-IDENTICAL
+/// restrictor, or they survive packing as alpha-variants.
+const SUPERLATIVE_Y: &str = "__sup_y";
+
 /// The head a composed determiner's modifier refines while the head noun is still to come (D95 slice
 /// 7d, decision 14): the variable the determiner's type is abstracted over.
 const DETMOD_HEAD: &str = "__dm_H";
@@ -2684,6 +2784,47 @@ fn is_compound_refined(cat: &Exp) -> bool {
 /// meaning-distinct adjective-inside compound (`red blood cell`) is licensed by the lexicon as a
 /// multiword unit (§4), never rebuilt here. Intersective adjectives in compounds are not yet in scope
 /// (absent from this corpus's residual). The adequacy battery witnesses no reading lost.
+/// Whether `cat` is a common noun refined by an ATTRIBUTIVE SUPERLATIVE — a restrictor conjunct
+/// `forall (y : C). ge(mu(x), mu(y))`, what [`refine_sup_apply`] builds.
+///
+/// This restrictor MENTIONS ITS OWN COMPARISON CLASS, which no other modifier's does, and that makes
+/// it the one restrictor that is NOT order-invariant: `[most useful] [piece of evidence]` quantifies
+/// over pieces OF EVIDENCE while `[[most useful] piece] of evidence` quantifies over pieces, and
+/// `conjoin_canonical`'s canonical conjunct order cannot collapse two Sigma that differ inside a
+/// binder. Those are different claims — the second is strictly stronger and is not what the sentence
+/// says — so a superlative-refined noun takes no further modifier: the superlative sits OUTSIDE every
+/// one of them. That is the adjective-outside-compound normal form (D63 nominal modification §3.3)
+/// applied one level up, which is why [`is_adjective_refined`] reports a superlative too.
+pub(super) fn is_superlative_refined(cat: &Exp) -> bool {
+    let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
+        return false;
+    };
+    fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+                flatten_and(args[0], out);
+                flatten_and(args[1], out);
+                return;
+            }
+        }
+        out.push(e);
+    }
+    let mut conjuncts = Vec::new();
+    flatten_and(body, &mut conjuncts);
+    conjuncts.iter().any(|c| {
+        // The conjunct is the quantifier itself, so match the binder before the spine — `ge` sits in
+        // its BODY, not at the conjunct's head.
+        let Exp::Pi(_, _, inner) = c else {
+            return false;
+        };
+        let mut head = &**inner;
+        while let Exp::App(f, _) | Exp::Ann(f, _) = head {
+            head = f;
+        }
+        matches!(head, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:measurements:ge")
+    })
+}
+
 pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
     let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
         return false;
@@ -2755,7 +2896,7 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
             if iri.as_str() == "urn:eigenius:measurements:gt"
                 || iri.as_str() == "urn:eigenius:measurements:lt")
             || mentions_verb_frame(c)
-    })
+    }) || is_superlative_refined(cat)
 }
 
 /// The **number** argument of a `cat_n(_, num)` category (`sg` / `pl` / `mass` / `num_any`), or
@@ -3472,6 +3613,120 @@ mod dispatch_tests {
     /// built a whole declaration to name one.
     fn and_decl() -> Iri {
         Iri::parse("urn:eigenius:logic:And").unwrap()
+    }
+
+    #[test]
+    fn superlative_refines_a_plain_noun_with_a_maximality_restrictor() {
+        // `most useful` + `cell` -> `Sigma x:Cell. forall y:Cell. ge(deg(x), deg(y))`. The scale rides
+        // on the `cat_sup_mod` sem; the comparison class is the HEAD NOUN's type, which is why this is
+        // a rule (there `C` is concrete and `deg : Entity -> float` applies) and not a lexical entry.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Cell");
+        let l = mk_item(cat_sup_mod_cat(), mu.clone());
+        let r = mk_item(n(head.clone()), head.clone());
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_sup_mod + cat_n -> refined noun");
+
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let expected = Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            Box::new(head.clone()),
+            Box::new(Exp::Pi(
+                Patt::Var(SUPERLATIVE_Y.into()),
+                Box::new(head),
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        // `ge`, not `gt`: x is trivially >= itself, so no `y != x` clause is needed.
+                        Box::new(ax("urn:eigenius:measurements:ge")),
+                        Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+                    )),
+                    Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+                )),
+            )),
+        );
+        assert_eq!(got.cat(), &n(expected.clone()));
+        assert_eq!(got.sem(), &expected);
+    }
+
+    #[test]
+    fn a_superlative_refined_noun_takes_no_pp_but_an_adjective_refined_one_does() {
+        // The superlative's restrictor quantifies over the comparison class, so the two bracketings of
+        // "the most useful piece of evidence" are DIFFERENT claims and `conjoin_canonical` cannot
+        // collapse them. `pp_mod` therefore refuses a superlative-refined head, leaving
+        // "[most useful] [piece of evidence]" — the reading with the class the sentence means.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Piece");
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let sup_restr = Exp::Pi(
+            Patt::Var(SUPERLATIVE_Y.into()),
+            Box::new(head.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:measurements:ge")),
+                    Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+                )),
+                Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+            )),
+        );
+        let sup = sigma_cmp(head.clone(), sup_restr);
+        assert!(is_superlative_refined(&n(sup.clone())));
+        // …and the adjective-outside normal form reports it, which is what keeps it out of the
+        // compound rules without a second guard on each of them.
+        assert!(is_adjective_refined(&n(sup.clone())));
+
+        let pp = mk_item(
+            ct("cat_pp", vec![]),
+            Exp::Lam(
+                Patt::Var("w".into()),
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:ontology:prep_of")),
+                    Box::new(Exp::Var("w".into())),
+                )),
+            ),
+        );
+        let sup_noun = mk_item(n(sup.clone()), sup);
+        assert!(
+            apply(
+                &sup_noun,
+                &pp,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_none(),
+            "a superlative-refined noun takes no PP"
+        );
+
+        // CONTROL: an ordinary gradable-adjective refinement still does — both of ITS bracketings
+        // flatten to the same Sigma, so there is nothing to collapse.
+        let adj_restr = Exp::App(
+            Box::new(ax("urn:eigenius:measurements:gt")),
+            Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+        );
+        let adj = sigma_cmp(head, adj_restr);
+        assert!(!is_superlative_refined(&n(adj.clone())));
+        let adj_noun = mk_item(n(adj.clone()), adj);
+        assert!(
+            apply(
+                &adj_noun,
+                &pp,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_some(),
+            "an adjective-refined noun still takes a PP"
+        );
+    }
+
+    #[test]
+    fn superlative_does_not_refine_a_noun_phrase() {
+        // The trigger is `[cat_sup_mod] [cat_n]`. A full NP is already determined — "most useful the
+        // cell" is not English, and letting the rule see `cat_np` would build a comparison class out
+        // of a referring expression.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Cell");
+        let l = mk_item(cat_sup_mod_cat(), mu);
+        let r = mk_item(np(head.clone()), head);
+        assert!(apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none());
     }
 
     #[test]
