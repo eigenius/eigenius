@@ -17,7 +17,28 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-26-basic`** (reseeded `2026-10-26` at `292dc5ab` for
+> **Store: `wordnet-umls-hpo-aligned-2026-10-28-advfold`** (reseeded `2026-10-28` at `a23e4e12`
+> via the now-tracked `scripts/reseed-chain.sh`, which GATES on the three provenance counts rather
+> than printing them — 38,391 / 20,533 / 864, all reproduced). Batch: the six folded entries
+> (short passive ×2, `neither` ×2, `when` ×2) plus the fronted-adverb lift. Battery **80 of 89**,
+> page grammar-gap **460**, encoded 18, ambiguous 431, open 147, claim units **64**.
+>
+> The fronted adverb is a KERNEL LIFT, not an entry, and needs no event variable: `S/S` is
+> unavailable event-free (`⟦S⟧ = Prop`, while `ADV` needs the predicate and its subject separately),
+> so it modifies the TYPE-RAISED SUBJECT instead — `(S/(S\NP))/(S/(S\NP))` over
+> `lexicon:adv_initial_sem` = `λA. λQ. λV. Q(A(V))`, reusing the adverb's own `ADV` term. Productive,
+> not lexicalised: «Carefully the study reported genes.» and «Genes slowly affect cells.» (a
+> kind-raised subject) both parse.
+>
+> **Its page yield is 3 focus particles and 1 `such`** — «Only an assay will resolve it.», «Only the
+> hemizygous allele count exists.», «Only one pattern is safe.», «Such a sub-region is depleted…».
+> The fronted and medial readings of `only` are BYTE-IDENTICAL, so the lift introduced no new reading
+> shape; but `And(V(s), adv(V,s))` is the intersective form, and §"What this does not settle" of
+> `event-free-modification.md` says focus particles are not VP-predicate modifiers and that the
+> encoding "says nothing about them". The lift makes that known-imperfect treatment reachable in the
+> position focus particles most often occupy. **Focus particles are now the visible follow-up.**
+>
+> Superseded store: `wordnet-umls-hpo-aligned-2026-10-26-basic` (reseeded `2026-10-26` at `292dc5ab` for
 > the basic-grammar batch; 53 min for all four steps, and all three provenance counts reproduced —
 > 38,391 merge rows, 20,533 HPO resources, 864 equivalences).
 >
