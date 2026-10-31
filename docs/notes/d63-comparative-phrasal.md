@@ -515,19 +515,55 @@ the superlative is not the implicated token and the ablation reports none.
 
 Only «some of the traps» is a real partitive: `has_proportion(the(trap), λy. …, q)`.
 
-**Why the partitive superlative is not a cheap entry.** `has_proportion` and `median_over` both take
-the group as a `lexicon:Entity` and keep it OPAQUE — the ontology has no membership relation, by the
-same decision that keeps `card` opaque. Slice 1's restrictor is `∀(y : C)` over a TYPE; a partitive
-supplies a group ENTITY, and there is nothing to range over. Two shapes, and the choice is the
-ontology's to make, not this note's:
+**The partitive superlative needs no new axiom (`2026-10-29`).** Slice 1's restrictor is `∀(y : C)`
+over a TYPE, and a partitive supplies a group ENTITY that `has_proportion` and `median_over` both
+keep opaque. That framed the problem as a choice between two new axioms — an opaque
+`argmax_over : (Entity → float) → Entity → Entity` on `median_over`'s shape, or a
+`member_of : Entity → Entity → Prop`. Both were to be a bootstrap change, hence a reseed, which
+slice 1 was not. Neither is needed.
 
-- **(A)** an opaque `argmax_over : (Entity → float) → Entity → Entity`, exactly `median_over`'s
-  shape. One axiom, no holes, no felicity or resolver change — and the same English superlative then
-  has two normal forms, `Σ`-with-`∀` from a head noun and an opaque application from a partitive.
-- **(B)** a `member_of : Entity → Entity → Prop`, which unifies the two at the cost of the group
-  opacity the ontology currently holds everywhere.
+`has_proportion(g, P, 1)` IS universal quantification over an opaque group's members: it is the
+encoding of `all of` and `each of` (`closed-class.esl:6192`, `:6218`). So
 
-Either needs a bootstrap axiom, hence a reseed, which slice 1 did not.
+```
+the most dangerous of the traps  →  Σx:T. has_proportion(g, λy. ge(μ(x), μ(y)), 1)
+```
+
+with `T` the partitive NP's type and `g` its group entity.
+
+The objection against `argmax_over` — that the superlative would then have two normal forms — does
+not survive either: the ontology already takes that split for the UNIVERSAL, deliberately. Bare
+`every`/`all` quantify over the type through `forall_sem` (`closed-class.esl:3305`); `all of`
+quantifies over the entity through `has_proportion`. The superlative inherits the determiner
+family's split rather than opening a new one.
+
+`Σx:T` drops the `x ∈ g` conjunct that only `member_of` could state. That UNDER-claims (`x` is still
+a trap) where §7a's route (i), quantifying over `T` alone, OVER-claims — it reads the sentence as
+maximal among traps in general and discards the definite restriction the text states. Route (i) as
+written is the one shape to reject; slice 1 does not have its problem, because there the comparison
+class IS the head noun.
+
+What `member_of` would buy is one conjunct, against making the group transparent in the superlative
+while `card`, `median_over` and `has_proportion` keep it opaque everywhere else — the inconsistency
+it was proposed to remove, unless the whole partitive quantifier family is rewritten through it.
+That is not an argument the superlative's 2 units can settle.
+
+**Both halves measured** (`combinators.rs`, DB-free):
+
+| claim | test |
+|---|---|
+| the definite plural NP carries the class TYPE in its category and the group ENTITY in its sem, at ONE node | `a_definite_plural_np_carries_its_class_type_and_its_group_entity_at_one_node` |
+| `cat_forall`+`DepApply` consumes `cat_n` ONLY, so no ESL entry can bind that class | `a_dependent_entry_cannot_bind_the_class_off_a_determined_np` |
+
+`the` + `cat_n(Gene, pl)` gives category `cat_np(Gene, pl)` and sem `the_plain_sem(Gene)` — the
+group entity is built FROM the category's own type index, so the two are not independently sourced.
+A `CatPat` reads the type off that category, which `name` already does with `Var("namety")`.
+
+The partitive superlative is therefore a RULE and not three resources, unlike the free relative: the
+result category `Σx:T. …` is built from the operand's type and the adjective's `μ`, and `cat_forall`
+cannot reach a determined NP. It needs no reseed. The existing `of_proportion_*` entries are not the
+route — their NP argument is a type-raised GQ over `lexicon:Entity` (`closed-class.esl:6141`), which
+erases `T` before `of` sees it; the rule takes the plain `cat_np(T, num)` instead.
 
 **519 is not a superlative gap at all.** «The study reported the function relevant to the disease.»
 gaps on `relevant` with no `most` present, as does «the gene responsible for the disease» on
@@ -538,6 +574,78 @@ reseed, and the bare post-nominal adjective it would otherwise over-generate («
 is excluded structurally: a `UnaryShift` never sees a one-token cell, so a lone adjective is never
 shifted while `relevant to the disease` at a 4-token span is. That widening is the same move that
 `ger` was, and `ger` measured the best per-construction yield on this page (2 units).
+
+### 7c. Built: partitive + post-nominal superlative, and TWO designs the page refused (`2026-10-29`)
+
+All measured on `wordnet-umls-hpo-aligned-2026-10-28-advfold`, against the §7a baseline (page
+grammar-gap 460, readings 41,381, skeletons 5,294, claim units 64, one-away 88; battery 81 of 89).
+No ontology edit and no reseed in any of it.
+
+**The unit index is 0-based: `[unit N]` is page LINE N+1.** §7b's unit numbers were read one off.
+The superlative units are **518** (post-nominal, `most <relational-adj> to …`), **341** (partitive
+over a NUMERAL-quantified group) and **854** (partitive over a DEMONSTRATIVE group).
+
+| step | grammar-gap | readings | skeletons | units changed | verdict |
+|---|---|---|---|---|---|
+| partitive superlative alone | 460 | 41,381 | 5,294 | 0 | byte-identical — **free**, keep |
+| `reduced_relative` + `adj` | 458 | 41,405 | 5,380 | 4, one of them WRONG | **refused** |
+| + functor + bare post-nominal | 458 | 41,433 | 5,302 | 2, one of them WRONG | **refused** |
+| + functor + **relational** post-nominal | 459 | 41,393 | 5,297 | **1 — unit 518, correct** | **ships** |
+
+The last row is the whole result: the per-unit disposition diff against baseline is a single line,
+518 `GRAMMAR-GAP → AMBIG`, for +3 skeletons and +12 readings. Both refused designs' mis-analyses
+return to honest gaps (the resultative at `1 failing`, the adverbial `most` at `2 failing`), battery
+holds at 81 of 89 with an unchanged failure set, and claim units and one-away are untouched at 64
+and 88.
+
+**Refusal 1 — the generic `adj` shift.** Licensing a saturated predicative AP in
+`reduced_relative` looks like the move `ger` was: same `Entity → Prop` denotation, same slot. It
+reached no post-nominal AP on the page, and the one unit it converted outright is a RESULTATIVE
+small clause (`make <NP> <AP>`, as in «the study made the gene worse than the protein»), for which
+the grammar has no route at all. All 24 of its new readings attach the AP as a post-nominal
+restrictor on the object — "produce a gene THAT IS worse", not "make the gene worse". An honest gap
+became readings of a construction the sentence is not. Reverted; `constructions.rs` records the
+measurement so the analogy is not retried.
+
+**Refusal 2 — the post-nominal slot keyed on plain `cat_sup_mod`.** This DID convert 518, at only
++8 skeletons. It also converted a unit where `most` is ADVERBIAL over a verb («the trap that I
+would most want removed»): 40 readings, every one maximizing `deg_a02023430` — WordNet's
+*destitute/indigent/needy*. The lexicon has an adjective sense for that verb, so `most <verb>`
+composed as a bare superlative and the post-nominal rule gave it somewhere to land.
+
+**What ships instead.** English draws the distinction the fix needs: a bare post-nominal adjective
+is ungrammatical (*«the gene essential»), and the licensed post-nominal AP carries a COMPLEMENT.
+518's scale is relational and saturated (`<adj> to <NP>`, a `cat_measure/cat_pp_arg(to)`); the
+refused case's is a bare one-token `cat_measure`. So `most` gets a second, relational category
+
+```
+most : (cat_sup_mod_post / cat_pp_arg(P)) / (cat_measure / cat_pp_arg(P))
+```
+
+and `sup_apply_post` keys on `cat_sup_mod_post` alone. A complement-less scale cannot reach it, so
+that derivation does not EXIST rather than being filtered — the same reason `cat_sup_mod` is a
+category and not a provenance tag (§7a slice 1). `P` is a feature VARIABLE, not `prep_any`, so the
+adjective's governed preposition survives: «most dependent on x» composes, *«most dependent to x»
+does not.
+
+Slice 1's two-token `most <adj>` seed is replaced by a LEAF functor
+`most : cat_sup_mod / cat_measure`. The seed read the scale out of the adjective's one-token cell
+`[i+1][i+1]`, which is why 518 — where the scale is three tokens wide — was a gap; as a functor,
+ordinary forward application reaches a `cat_measure` of any span and subsumes the two-token case
+exactly.
+
+**Claim units stay 64 throughout.** Every gain here is sentence-level reach. The units that would
+move are elsewhere: 341 needs the partitive to accept a numeral-quantified group and 854 a
+demonstrative one — and 854's ablation now implicates neither `most` nor `of`, so its superlative
+may already be working.
+
+**Two silent failure modes found, each costing a debugging session.** A Rust-built category or
+feature on `list_decl` matches only where matching is by ctor NAME (`match_cat`); in an argument
+slot or a feature it must come off the layer's own `lexicon:Cat` / `lexicon:Num` declaration,
+because `unify_into` ends in `slot == arg` and `feat_meets` is structural equality. Both times the
+rule fired, the item looked correct in a debug print, and the forest came back empty with no error —
+and the unit tests stayed green, because they call `apply` with hand-built operands and never go
+through the seed. One end-to-end `Parser::parse_open` test per construction is what catches it.
 
 ## 8. Implementation Order
 

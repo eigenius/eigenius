@@ -1585,6 +1585,28 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// saturated is a finite-LOOKING active VP, so shifting it builds "*the man ate the food" for "the
 /// man that ate", while `carrying` has no finite homograph at all.
 ///
+/// **`adj` is REFUSED, measured (`2026-10-29`, D63 §7b).** A post-nominal AP ("the function
+/// relevant to the disease") is `cat_s(dcl, adj)\\NP` over the same `Entity → Prop` denotation, so
+/// licensing it here looks like the same move `ger` was. It is not, and the page says so:
+///
+/// ```text
+///                        page         readings   skeletons   claim units
+///   base                 gap 460       41,381      5,294          64
+///   + `adj`              gap 458       41,405      5,380          64
+/// ```
+///
+/// Four units changed disposition and NONE of them is a post-nominal AP. The one that converted
+/// outright is a RESULTATIVE small clause — `make <NP> <AP>`, as in «the study made the gene worse
+/// than the protein» — for which the grammar has no route at all. The shift gave it 24 readings
+/// that all attach the AP as a post-nominal restrictor on the OBJECT: "produce a gene THAT IS
+/// worse", not "make the gene worse". That is a different claim, so the widening converts an honest
+/// gap into readings of a construction the sentence is not.
+///
+/// It also does not reach what it was added for. The page's post-nominal AP is SUPERLATIVE —
+/// "the function **most** relevant to …" — which needs `most` over a phrasal scale and a
+/// post-nominal attachment, neither of which this shift supplies. Both are keyed on `most`
+/// ([`super::combinators::cat_sup_mod_cat`]), so they cannot touch `make X worse than Y`.
+///
 /// Before this, the active participial had NO route, and the gap counts UNDERSTATED it — three probe
 /// sentences appeared to parse, and the sems say what they parsed as (2026-10-14):
 ///
@@ -1688,6 +1710,46 @@ mod tests {
     }
     fn decl_s() -> Exp {
         ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])])
+    }
+
+    // ── reduced_relative: which finiteness features shift to a post-nominal modifier ──
+
+    /// A test layer with no declarations — `reduced_relative` reads none (its `layer` argument is
+    /// discarded), so the bare builder is enough to exercise the feature set.
+    fn bare_layer() -> Arc<Layer> {
+        Arc::new(
+            crate::layer::LayerBuilder::new("constructions-reduced-relative-test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        )
+    }
+    fn subject_gapped(fin: &str) -> Exp {
+        ctor(
+            "bwd",
+            vec![
+                ctor("cat_s", vec![ctor("dcl", vec![]), ctor(fin, vec![])]),
+                np(cls("urn:eigenius:lexicon:Entity")),
+            ],
+        )
+    }
+
+    /// `pass` and `ger` shift; `adj` and `pss` do NOT. `adj` is the measured refusal (see the doc
+    /// comment): licensing a bare predicative AP here gave a RESULTATIVE small clause 24
+    /// post-nominal-modifier readings and reached no post-nominal AP on the page.
+    #[test]
+    fn the_shift_licenses_pass_and_ger_and_refuses_adj_pss_and_fin() {
+        let layer = bare_layer();
+        for fin in ["pass", "ger"] {
+            assert!(
+                reduced_relative(&subject_gapped(fin), &layer).is_some(),
+                "{fin} must shift"
+            );
+        }
+        for fin in ["adj", "pss", "fin"] {
+            assert!(
+                reduced_relative(&subject_gapped(fin), &layer).is_none(),
+                "{fin} must NOT shift"
+            );
+        }
     }
 
     // ── coordinate_np: a bare-KIND conjunct is realised as an entity via `kind_of` ──

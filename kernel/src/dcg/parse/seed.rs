@@ -30,7 +30,7 @@
 
 use super::super::category::{
     governs_named_preposition, inductive_iri, is_adjective_cat, is_binary_relation_cat, is_ctor,
-    is_vp_adjunct_prep, kind_of, slash_parts,
+    is_vp_adjunct_prep, kind_of, slash_parts, MODE_ALL,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::derivation::Derivation;
@@ -671,22 +671,105 @@ impl Parser {
             .collect()
     }
 
-    /// Seed the ATTRIBUTIVE SUPERLATIVE `most <adj>` as a two-token `cat_sup_mod` item carrying the
-    /// adjective's SCALE (`docs/notes/d63-comparative-phrasal.md` §7a, slice 1).
+    /// Seed the SUPERLATIVE `most` as a LEAF functor `cat_sup_mod / cat_measure`, carrying the
+    /// adjective's scale through once it applies (`docs/notes/d63-comparative-phrasal.md` §7a slice 1,
+    /// generalized §7b `2026-10-29`).
     ///
     /// `most` has no superlative entry in `closed-class.esl` at all: its two entries there are the
     /// QUANTIFIER (`most genes`) — a homograph, not a wrong category. [`Self::degree_adverb_items`]
     /// does take `most <adverb>`, but TRANSPARENTLY (identity sem), which is right for an adverb under
     /// D62 and wrong for an adjective: `most essential` is not `essential`.
     ///
-    /// The scale is the adjective's own `cat_measure` sem — the same `deg_A` the comparative
-    /// `more_deg` consumes — so this fires exactly where «more <adj>» already parses. One item per
-    /// surviving sense, each seeding its own reading, as the comparative does.
+    /// **A slash, not a two-token item.** Slice 1 seeded `most <adj>` at `[i, i+1]` by reading the
+    /// adjective's scale out of the LEAF cell `[i+1][i+1]`. That reaches a one-token adjective and
+    /// nothing else, so "the function most **relevant to** …" — where the scale is a saturated
+    /// `cat_measure/cat_pp_arg(to)` spanning three tokens — stayed a gap. As a functor the item is
+    /// seeded at the leaf and ordinary forward application composes it with a `cat_measure` of ANY
+    /// span, which subsumes the two-token case exactly.
     ///
-    /// The span is deliberately NOT protected (`multiword_spans`): `most` is also the quantifier
-    /// determiner, so `most genes` has to keep its compositional parse.
-    fn superlative_mod_items(&self, w0: &str, adj_cell: &[Item]) -> Vec<Item> {
+    /// The sem is the IDENTITY on the scale: `cat_sup_mod`'s sem IS `deg_A`, and the maximality lives
+    /// in the refine rule where the comparison class is (`refine_sup_apply`).
+    fn superlative_functor_items(&self, w0: &str) -> Vec<Item> {
         if w0.trim().to_lowercase() != "most" {
+            return Vec::new();
+        }
+        // The ARGUMENT slot must be built on the layer's own `lexicon:Cat` declaration, not on
+        // `list_decl`. `cat_sup_mod_cat` may sit on `list_decl` because it is only ever matched by
+        // ctor NAME (`match_cat`), but an argument slot is unified against a real item's category,
+        // and `unify_into`'s atom fallback is `slot == arg` — structural equality, IRI included.
+        let cat_decl = match inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat") {
+            Some(iri) => iri,
+            None => return Vec::new(),
+        };
+        let Some(m_all) = super::super::category::mode_value(&self.grammar.layer, MODE_ALL) else {
+            return Vec::new();
+        };
+        let m_all_rel = m_all.clone();
+        let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat_decl.clone(), n.into(), args);
+        let cat = ctor(
+            "fwd",
+            vec![
+                m_all,
+                super::super::rules::combinators::cat_sup_mod_cat(),
+                ctor("cat_measure", Vec::new()),
+            ],
+        );
+        let ident = Exp::Lam(
+            Patt::Var("__sup_mu".into()),
+            Box::new(Exp::Var("__sup_mu".into())),
+        );
+
+        // The RELATIONAL form: `(cat_sup_mod_post/cat_pp_arg(P)) / (cat_measure/cat_pp_arg(P))`,
+        // which takes a complement-governing adjective ("relevant" as
+        // `cat_measure/cat_pp_arg(to)`) and yields a POST-NOMINAL superlative still awaiting that
+        // complement. `P` is threaded as a feature VARIABLE rather than `prep_any` so the
+        // adjective's own governed preposition survives: "most dependent ON x" composes and
+        // "*most dependent TO x" does not. Its sem is the identity for the same reason the plain
+        // form's is — applying the result to the PP object yields the scale.
+        let prep = Exp::Var("SUP#prep".into());
+        let relational = ctor(
+            "fwd",
+            vec![
+                m_all_rel.clone(),
+                ctor(
+                    "fwd",
+                    vec![
+                        m_all_rel.clone(),
+                        super::super::rules::combinators::cat_sup_mod_post_cat(),
+                        ctor("cat_pp_arg", vec![prep.clone()]),
+                    ],
+                ),
+                ctor(
+                    "fwd",
+                    vec![
+                        m_all_rel,
+                        ctor("cat_measure", Vec::new()),
+                        ctor("cat_pp_arg", vec![prep]),
+                    ],
+                ),
+            ],
+        );
+        vec![Item::new(cat, ident.clone()), Item::new(relational, ident)]
+    }
+
+    /// Seed the PARTITIVE SUPERLATIVE `most <adj> of` as a THREE-token `cat_sup_part` item, carrying
+    /// the same scale as [`Self::superlative_mod_items`] (§7b).
+    ///
+    /// The partitive is a FUSED HEAD — "the most dangerous **of the traps**" has no noun for
+    /// `sup_apply` to read a comparison class off, and dropping `most` leaves "*the dangerous of the
+    /// traps", which is why token ablation implicates nothing and the gap looked unlocalized.
+    ///
+    /// `of` is keyed HERE, on the surface, for the same reason `most` is: a `CatRule` triggers on
+    /// categories, and every preposition reaches the same `cat_pp / cat_np` shape, so a
+    /// category-triggered rule could not tell `of the traps` from `in the cells`. Keying it at seed
+    /// time needs no reserved construct and so no ontology edit — unlike `rc_*`, which is bootstrap
+    /// data.
+    ///
+    /// The span is NOT protected (`multiword_spans`), exactly as the two-token item is not: `most`
+    /// is also the quantifier determiner and `of` the ordinary preposition, so every competing
+    /// reading of these three tokens survives and the forest decides.
+    fn superlative_partitive_items(&self, w0: &str, adj_cell: &[Item], w2: &str) -> Vec<Item> {
+        if w0.trim().to_lowercase() != "most" || w2.trim().to_lowercase() != "of" {
             return Vec::new();
         }
         adj_cell
@@ -694,7 +777,7 @@ impl Parser {
             .filter(|it| is_ctor(it.cat(), "cat_measure").is_some())
             .map(|it| {
                 Item::new(
-                    super::super::rules::combinators::cat_sup_mod_cat(),
+                    super::super::rules::combinators::cat_sup_part_cat(),
                     it.sem().clone(),
                 )
             })
@@ -820,20 +903,29 @@ impl Parser {
             }
         }
 
-        // Attributive superlative (`most <adj>`, D63 §7a slice 1) — a SECOND pass, because the
-        // adjective's leaf cell `[i+1][i+1]` carries the scale and the loop above reaches `[i][i+1]`
-        // BEFORE it reaches `[i+1][i+1]`.
-        let sups: Vec<(usize, usize, Vec<Item>)> = (0..n.saturating_sub(1))
+        // Superlative `most` as a leaf functor (§7a slice 1, generalized §7b) — forward application
+        // then reaches a `cat_measure` of any span, where the two-token seed reached only a leaf.
+        for i in 0..n {
+            let items = self.superlative_functor_items(tokens[i].surface());
+            chart[i][i].extend(items);
+        }
+
+        // Partitive superlative (`most <adj> of`, §7b) — the same second pass over a 3-token span.
+        let parts: Vec<(usize, usize, Vec<Item>)> = (0..n.saturating_sub(2))
             .map(|i| {
                 (
                     i,
-                    i + 1,
-                    self.superlative_mod_items(tokens[i].surface(), &chart[i + 1][i + 1]),
+                    i + 2,
+                    self.superlative_partitive_items(
+                        tokens[i].surface(),
+                        &chart[i + 1][i + 1],
+                        tokens[i + 2].surface(),
+                    ),
                 )
             })
             .filter(|(_, _, items)| !items.is_empty())
             .collect();
-        for (i, j, items) in sups {
+        for (i, j, items) in parts {
             chart[i][j].extend(items);
         }
 

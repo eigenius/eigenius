@@ -1263,6 +1263,34 @@ fn refine_rules() -> &'static [CatRule] {
                 guards: &[],
                 build: refine_sup_apply,
             },
+            // PARTITIVE SUPERLATIVE `[cat_sup_part] [cat_np]` (§7b): `most <adj> of` + the group NP
+            // — "the most dangerous of the traps". The right operand is a DETERMINED NP, not a head
+            // noun, and both halves the restrictor needs are on it: the comparison class in its
+            // CATEGORY's type index and the group entity in its SEM. No guards — `cat_sup_part` is
+            // seeded only over `most <adj> of`, so the trigger is already the construction.
+            // POST-NOMINAL SUPERLATIVE `[cat_n] [cat_sup_mod]` (§7b, 2026-10-29): "the function
+            // [most relevant to X]". Head noun is the LEFT. Same restrictor and same comparison
+            // class as `sup_apply` — only the surface order differs, which is why it shares
+            // `refine_sup_apply`'s builder through an operand flag rather than duplicating it.
+            //
+            // Keyed on `cat_sup_mod_post`, which only the RELATIONAL `most` produces, so neither a
+            // bare post-nominal adjective ("*the gene essential") nor a bare superlative one
+            // ("*the suggestion most want") can reach it — see `cat_sup_mod_post_cat` for the
+            // measurement that made this a separate category instead of a guard.
+            CatRule {
+                name: "sup_apply_post",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: Ctor("cat_sup_mod_post", Vec::new()),
+                guards: &[Guard::NotSuperlativeRefined(Operand::Left)],
+                build: refine_sup_apply_post,
+            },
+            CatRule {
+                name: "sup_partitive",
+                left_pat: Ctor("cat_sup_part", Vec::new()),
+                right_pat: Ctor("cat_np", vec![Var("T"), Var("num")]),
+                guards: &[],
+                build: refine_sup_partitive,
+            },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
             // not itself be a compound result. Adjective-outside NF (§3.3): nor an adjective-refined
             // one — an adjective on the head attaches OUTSIDE the compound, not before it.
@@ -1372,6 +1400,49 @@ pub(crate) fn cat_sup_mod_cat() -> Exp {
     Exp::InductiveCtor(
         crate::nbe::term::list_decl().iri.clone(),
         "cat_sup_mod".into(),
+        Vec::new(),
+    )
+}
+
+/// The **partitive superlative** category `cat_sup_part` — `most <adj> of`, a maximality operator
+/// awaiting the GROUP its comparison class is, carrying the same scale in its sem as
+/// [`cat_sup_mod_cat`]. Nullary and Rust-only, so no ontology edit and no reseed.
+///
+/// Distinct from `cat_sup_mod` because what it consumes is distinct: `cat_sup_mod` takes a head noun
+/// and quantifies over that noun's TYPE, while this takes a determined `cat_np` and quantifies over
+/// the group ENTITY its sem denotes. The two cannot share a category without `sup_apply` also firing
+/// on "most useful the cell", which
+/// [`dispatch_tests::superlative_does_not_refine_a_noun_phrase`] pins as refused.
+pub(crate) fn cat_sup_part_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_part".into(),
+        Vec::new(),
+    )
+}
+
+/// The **post-nominal superlative** category `cat_sup_mod_post` — what `most <relational-adj>`
+/// becomes once its complement is consumed ("most relevant **to** X"). Nullary and Rust-only.
+///
+/// Distinct from [`cat_sup_mod_cat`] because English distinguishes them: a bare post-nominal
+/// adjective is ungrammatical (*"the gene essential"), and the licensed post-nominal AP is the one
+/// carrying a COMPLEMENT. Only the relational `most`
+/// (`(cat_sup_mod_post/cat_pp_arg(P)) / (cat_measure/cat_pp_arg(P))`, seeded in
+/// `parse::seed`) produces it, so a scale that takes no complement can never reach the post-nominal
+/// slot.
+///
+/// Measured, and this is why it is a separate category rather than a guard on `cat_sup_mod`
+/// (`2026-10-29`): with [`sup_apply_post`](refine_sup_apply_post) keyed on plain `cat_sup_mod`, a
+/// page sentence where `most` is ADVERBIAL over a verb — «the trap that I would most want removed»
+/// — acquired 40 readings, every one of them maximizing `deg_a02023430`, WordNet's
+/// *destitute/indigent/needy*. The lexicon carries an adjective sense for that verb, so
+/// `most <verb>` composed as a bare superlative and this rule gave it somewhere to land. A
+/// complement-less scale cannot reach `cat_sup_mod_post`, so the derivation does not exist rather
+/// than being filtered out.
+pub(crate) fn cat_sup_mod_post_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_mod_post".into(),
         Vec::new(),
     )
 }
@@ -1928,8 +1999,21 @@ fn refine_mod_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Lay
 ///
 /// `ge` rather than `gt`: `x` is trivially `>=` itself, so the maximum needs no `y != x` clause.
 fn refine_sup_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
-    let (decl, c, noun_num) = noun_parts(right, binds);
-    let mu = left.sem().clone();
+    sup_refine(binds, right, left.sem(), layer)
+}
+
+/// POST-NOMINAL superlative `[cat_n] [cat_sup_mod]` — "the function most relevant to X". The head
+/// noun is the LEFT operand and the scale the RIGHT one; the restrictor built is identical to
+/// [`refine_sup_apply`]'s, so both go through [`sup_refine`].
+fn refine_sup_apply_post(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    sup_refine(binds, left, right.sem(), layer)
+}
+
+/// `Σx:C. ∀(y : C). ge(μ(x), μ(y))` over the head `noun` and the scale `mu` — the superlative's one
+/// restrictor, shared by the pre- and post-nominal rules.
+fn sup_refine(binds: &CatSubst, noun: &Item, mu: &Exp, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(noun, binds);
+    let mu = mu.clone();
     let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
     refine_conjoin(&decl, &c, &noun_num, layer, |x| {
         // forall (y : C). ge(mu(x), mu(y)) — x is maximal on the adjective's scale among C.
@@ -1962,6 +2046,110 @@ fn refine_sup_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Lay
             )),
         )
     })
+}
+
+/// **Partitive superlative** `[cat_sup_part] [cat_np(T, num)]` → the fused-head noun
+/// `Σx:T. has_proportion(g, λy. ge(μ(x), μ(y)), 1)` — "the most dangerous **of the traps**"
+/// (`docs/notes/d63-comparative-phrasal.md` §7b).
+///
+/// The comparison class arrives as a GROUP ENTITY, which the ontology keeps opaque (`card`,
+/// `median_over`, `has_proportion`), so slice 1's `∀(y : C)` over a type has nothing to range over.
+/// `has_proportion(g, P, 1)` IS that quantification — it is the encoding of `all of` and `each of`
+/// (`closed-class.esl`) — so the maximum needs no new axiom and no reseed.
+///
+/// `y` is an `Entity`: `has_proportion`'s predicate ranges over the group's members, which are
+/// opaque entities, so unlike [`refine_sup_apply`] no `Fst` projection is needed on it. `x` is bound
+/// by `refine_conjoin` at the Σ's base exactly as there.
+///
+/// The Σ's base is `T`, the NP's own type — read off the CATEGORY, which is the half of this that
+/// is not available to an ESL entry (`cat_forall`/`DepApply` consumes `cat_n` only; see
+/// `dispatch_tests::a_dependent_entry_cannot_bind_the_class_off_a_determined_np`). It states that
+/// `x` is a trap, NOT that `x ∈ g` — only a `member_of` relation could say that, and adding one
+/// would make the group transparent here while it stays opaque everywhere else. Dropping the
+/// conjunct UNDER-claims; quantifying over `T` instead of `g` would OVER-claim, reading the sentence
+/// as maximal among traps in general and discarding the restriction the text states.
+///
+/// Number is `sg`: the fused head is singular ("the most dangerous ONE of the traps") whatever the
+/// group's number.
+///
+/// **It does NOT inherit slice 1's `NotSuperlativeRefined` refusal, and that is deliberate.**
+/// [`is_superlative_refined`] matches `∀(y : C). ge(…)` and so does not see this restrictor, which
+/// means `pp_mod` will attach a following PP to the fused head. For the ATTRIBUTIVE superlative that
+/// bracketing is spurious — the class is the head noun, so a PP belonging to the class has to sit
+/// INSIDE it ("[most useful] [piece of evidence]"). The partitive's class is already closed off by
+/// the `of`-phrase: "the most dangerous of the traps in the lab" has the PP inside the group NP
+/// (built before `of` ever applies) OR on the fused head, and those are two real English readings of
+/// two different claims. Refusing the second would lose one of them.
+fn refine_sup_partitive(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let decl = match right.cat() {
+        Exp::InductiveCtor(iri, _, _) => iri.clone(),
+        _ => unreachable!("the sup_partitive trigger matched a non-inductive NP category"),
+    };
+    let t = binds
+        .get("T")
+        .expect("sup_partitive trigger binds T")
+        .clone();
+    let group = right.sem().clone();
+    let mu = left.sem().clone();
+    let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+    // `sg` on the GROUP's own feature declaration. A category ctor can be built on `list_decl`
+    // (`match_cat` compares the ctor NAME), but a FEATURE goes through `feat_meets`, which is
+    // structural equality on the whole `InductiveCtor` — IRI included. A hand-built `sg` on the
+    // wrong decl meets nothing, and the determiner silently refuses the noun.
+    let sg = match binds.get("num").expect("sup_partitive trigger binds num") {
+        Exp::InductiveCtor(iri, _, _) => Exp::InductiveCtor(iri.clone(), "sg".into(), Vec::new()),
+        other => other.clone(),
+    };
+    refine_conjoin(&decl, &t, &sg, layer, |x| {
+        let ge = Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::EigonAxiom(
+                    crate::ontology::iri::Iri::parse("urn:eigenius:measurements:ge")
+                        .expect("static ge IRI"),
+                )),
+                Box::new(scale(Exp::Var(x.into()))),
+            )),
+            Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+        );
+        let every = Exp::Lam(Patt::Var(SUPERLATIVE_Y.into()), Box::new(ge));
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(
+                        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:has_proportion")
+                            .expect("static has_proportion IRI"),
+                    )),
+                    Box::new(group.clone()),
+                )),
+                Box::new(every),
+            )),
+            Box::new(whole_proportion()),
+        )
+    })
+}
+
+/// The proportion `1` at the dimensionless unit — `(units:mk_quantity(1, 0) : units:Quantity(u"1"))`,
+/// the same term `all of` and `each of` carry in `closed-class.esl`. Annotated because the unit is
+/// the type's parameter and the constructor's arguments do not carry it.
+fn whole_proportion() -> Exp {
+    let quantity = crate::ontology::well_known::iri(crate::units::convert::QUANTITY);
+    Exp::Ann(
+        Box::new(Exp::InductiveCtor(
+            quantity.clone(),
+            "mk_quantity".into(),
+            vec![
+                Exp::LitRat(
+                    crate::numeric::Rational::new(1.into(), 1.into()).expect("1/1 is rational"),
+                ),
+                Exp::LitInt(0),
+            ],
+        )),
+        Box::new(Exp::const_applied(
+            quantity,
+            Vec::new(),
+            vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
+        )),
+    )
 }
 
 /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
@@ -3727,6 +3915,170 @@ mod dispatch_tests {
         let l = mk_item(cat_sup_mod_cat(), mu);
         let r = mk_item(np(head.clone()), head);
         assert!(apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none());
+    }
+
+    #[test]
+    fn partitive_superlative_maximizes_over_the_group_not_over_the_type() {
+        // `most dangerous of` + `the traps` -> the fused-head noun
+        // `Σx:Trap. has_proportion(the(Trap), λy. ge(μ(x), μ(y)), 1)`.
+        let mu = ax("urn:eigenius:lexicon:deg_dangerous");
+        let trap = cls("urn:eigenius:lexicon:Trap");
+        let group = Exp::App(
+            Box::new(ax("urn:eigenius:ontology:the")),
+            Box::new(trap.clone()),
+        );
+        let l = mk_item(cat_sup_part_cat(), mu.clone());
+        let r = mk_item(ct("cat_np", vec![trap.clone(), plural()]), group.clone());
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_sup_part + cat_np -> the fused-head noun");
+
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let ge = Exp::App(
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:measurements:ge")),
+                Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+            )),
+            Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+        );
+        let expected = Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            // The Σ's base is the NP's TYPE: the encoding still says `x` is a trap.
+            Box::new(trap.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(ax("urn:eigenius:ontology:has_proportion")),
+                        // The maximality is over the GROUP ENTITY, not over the type — this is the
+                        // whole point: quantifying over `Trap` would read the sentence as maximal
+                        // among traps in general and discard "of the traps".
+                        Box::new(group),
+                    )),
+                    Box::new(Exp::Lam(Patt::Var(SUPERLATIVE_Y.into()), Box::new(ge))),
+                )),
+                // Proportion 1 — `all of`'s own encoding, hence no new axiom.
+                Box::new(whole_proportion()),
+            )),
+        );
+        assert_eq!(got.sem(), &expected);
+        // The result is a NOUN awaiting its determiner ("THE most dangerous of the traps"), and
+        // singular whatever the group's number.
+        assert_eq!(got.cat(), &ct("cat_n", vec![expected, ct("sg", vec![])]));
+    }
+
+    /// The partitive rule must not fire on a bare noun, and the ATTRIBUTIVE one must not fire on the
+    /// group NP — the two superlative categories consume disjoint things, which is why they are two
+    /// categories and not one with a guard.
+    #[test]
+    fn the_two_superlative_categories_do_not_cross() {
+        let mu = ax("urn:eigenius:lexicon:deg_dangerous");
+        let trap = cls("urn:eigenius:lexicon:Trap");
+        let ctx = crate::dcg::rules::RightContext::Other;
+        let noun = mk_item(ct("cat_n", vec![trap.clone(), plural()]), trap.clone());
+        let np_item = mk_item(ct("cat_np", vec![trap.clone(), plural()]), trap);
+
+        assert!(
+            apply(
+                &mk_item(cat_sup_part_cat(), mu.clone()),
+                &noun,
+                &layer(),
+                ctx
+            )
+            .is_none(),
+            "`most dangerous of` must not take a bare head noun"
+        );
+        assert!(
+            apply(&mk_item(cat_sup_mod_cat(), mu), &np_item, &layer(), ctx).is_none(),
+            "`most dangerous` must not take a determined NP"
+        );
+    }
+
+    /// **The partitive superlative's open question (D63 §7b): does ONE node carry both the class
+    /// TYPE and the group ENTITY?** `the genes` is `the_plain_np_pl`
+    /// (`cat_forall(pl, λT. cat_np(T, pl))`, `closed-class.esl`) dep-applied to its head noun. This
+    /// pins the two halves a partitive superlative needs: the noun's type survives into the NP's
+    /// CATEGORY, and the group entity is its SEM. A rule matching `cat_np(T, num)` therefore has
+    /// both in hand, so `Σx:T. has_proportion(g, λy. ge(μ(x), μ(y)), 1)` is buildable.
+    #[test]
+    fn a_definite_plural_np_carries_its_class_type_and_its_group_entity_at_one_node() {
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        let the = mk_item(the_plain_np_pl_cat(), the_sem());
+        let noun = mk_item(ct("cat_n", vec![gene.clone(), plural()]), gene.clone());
+        let np = apply(
+            &the,
+            &noun,
+            &layer(),
+            crate::dcg::rules::RightContext::Other,
+        )
+        .expect("the + plural noun -> a plain NP");
+
+        // (a) the CLASS: the noun's type is the NP category's first index, not erased to `Entity`.
+        assert_eq!(np.cat(), &ct("cat_np", vec![gene.clone(), plural()]));
+        // (b) the GROUP: the sem is `the` applied to that SAME type — un-reduced `App`, β-reducing
+        // to `the(Gene)`. Class and group are therefore not two independently-sourced things: the
+        // group entity is built FROM the category's type index, at this one node.
+        assert_eq!(
+            np.sem(),
+            &Exp::App(Box::new(the_sem()), Box::new(gene.clone())),
+            "the NP's sem must be `the` over the category's own type index"
+        );
+        // (c) a rule pattern reads the class off the category — what `name` already does with
+        // `Var(\"namety\")`, so this needs no new matching machinery.
+        let mut binds = crate::dcg::category::CatSubst::new();
+        assert!(crate::dcg::category::match_cat(
+            &CatPat::Ctor("cat_np", vec![CatPat::Var("T"), CatPat::Var("num")]),
+            np.cat(),
+            &mut binds
+        ));
+        assert_eq!(binds.get("T"), Some(&gene));
+    }
+
+    /// The same question's NEGATIVE half: `cat_forall` + `DepApply` consumes `cat_n` ONLY, so an
+    /// ESL entry cannot bind the class off a determined NP. The partitive superlative is therefore
+    /// kernel work (a `CatRule`), not three resources — unlike the free relative.
+    #[test]
+    fn a_dependent_entry_cannot_bind_the_class_off_a_determined_np() {
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        let dependent = mk_item(the_plain_np_pl_cat(), the_sem());
+        let ctx = crate::dcg::rules::RightContext::Other;
+
+        // CONTROL: the identical left operand DOES fire on the bare noun, so a `None` below is
+        // the right operand's category and nothing else about this fixture.
+        let bare = mk_item(ct("cat_n", vec![gene.clone(), plural()]), gene.clone());
+        assert!(apply(&dependent, &bare, &layer(), ctx).is_some());
+
+        let determined = mk_item(ct("cat_np", vec![gene.clone(), plural()]), gene);
+        assert!(
+            apply(&dependent, &determined, &layer(), ctx).is_none(),
+            "DepApply must not fire on a cat_np right operand"
+        );
+    }
+
+    /// `the_plain_np_pl`'s category, as `ontologies/lexicon/closed-class.esl` declares it:
+    /// `cat_forall(pl, λT. cat_np(T, pl))`.
+    fn the_plain_np_pl_cat() -> Exp {
+        ct(
+            "cat_forall",
+            vec![
+                plural(),
+                Exp::Lam(
+                    Patt::Var("T".into()),
+                    Box::new(ct("cat_np", vec![Exp::Var("T".into()), plural()])),
+                ),
+            ],
+        )
+    }
+    /// `the_plain_sem`: `fun (A : Set) => ontology:the(A)`.
+    fn the_sem() -> Exp {
+        Exp::Lam(
+            Patt::Var("A".into()),
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:ontology:the")),
+                Box::new(Exp::Var("A".into())),
+            )),
+        )
+    }
+    fn plural() -> Exp {
+        ct("pl", vec![])
     }
 
     #[test]
