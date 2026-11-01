@@ -11,11 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! **Free relatives** — `what` as a headless relative NP. Snapshot-free: the entries under
-//! measurement come from `experiments/lexicon/free-relative.esl` (the very file layered onto a
-//! snapshot for the DB measurement), and this fixture adds only the content words — two transitive
-//! verbs and two NPs. The committed closed-class layer supplies the INTERROGATIVE `what`
-//! (`what_subj` / `what_obj`), which is what makes the last test here meaningful.
+//! **Free relatives** — `what` as a headless relative NP. Snapshot-free: the entries under test are
+//! the PROMOTED ones in `ontologies/lexicon/closed-class.esl`, reached through
+//! `testing::bootstrap_context`, and this fixture adds only the content words — two transitive verbs
+//! and two NPs. Reading them from the bootstrap rather than from a probe layer is the point: a copy
+//! of the entries would keep these tests green even if the promotion were wrong. The same
+//! closed-class layer supplies the INTERROGATIVE `what` (`what_subj` / `what_obj`), which is what
+//! makes the last test here meaningful.
 //!
 //! The point the tests pin is that a free relative is a DEFINITE DESCRIPTION, not a question and
 //! not an existential: `what affects cells` must come out `the(Σx:Entity. affects(cells, x)).1` —
@@ -28,11 +30,6 @@ use std::sync::Arc;
 use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-
-/// The entries under measurement, compiled from the SAME file `add-layer-to-snapshot.sh` layers
-/// onto a snapshot — one source of truth, so this test cannot pass against a version of the
-/// entries that the measured layer does not contain.
-const LAYER: &str = include_str!("../../experiments/lexicon/free-relative.esl");
 
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
@@ -75,10 +72,8 @@ resource lexicon:fr_reported : lexicon:LexicalEntry {
 fn parser() -> Parser {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let mut b = LayerBuilder::new("free-rel", Some(Arc::clone(ctx.head())));
-    for src in [LAYER, FIXTURE] {
-        for r in esl::compile(src, ctx.head()).expect("source compiles") {
-            b.add_resource(r).expect("add resource");
-        }
+    for r in esl::compile(FIXTURE, ctx.head()).expect("fixture compiles") {
+        b.add_resource(r).expect("add resource");
     }
     let layer: Arc<Layer> = Arc::new(b.build(LayerStorage::in_memory()));
     Parser::build(layer)

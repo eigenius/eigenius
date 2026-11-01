@@ -17,11 +17,23 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-28-advfold`** (reseeded `2026-10-28` at `a23e4e12`
-> via the now-tracked `scripts/reseed-chain.sh`, which GATES on the three provenance counts rather
-> than printing them — 38,391 / 20,533 / 864, all reproduced). Batch: the six folded entries
-> (short passive ×2, `neither` ×2, `when` ×2) plus the fronted-adverb lift. Battery **80 of 89**,
-> page grammar-gap **460**, encoded 18, ambiguous 431, open 147, claim units **64**.
+> **Store: `wordnet-umls-hpo-aligned-2026-10-31-freerel-who`** (reseeded `2026-10-31` via
+> `scripts/reseed-chain.sh`, which GATES on the three provenance counts rather than printing them —
+> 38,391 / 20,533 / 864, all reproduced). Batch: the free relative (`what`, 3 entries) plus the
+> `who` relativizer (`rc_who`, 1 resource). Battery **83 of 89**, page grammar-gap **456**,
+> encoded 18, ambiguous 432, open 150, claim units **67**, one-away 85.
+>
+> Both were measured as LAYERS first and the promoted store is unit-for-unit IDENTICAL to the
+> layered arm — an empty per-unit disposition diff — so layering predicted promotion exactly here.
+> The kernel at this store also carries the superlative work (partitive, post-nominal relational,
+> `most` as a leaf functor; `7b3978b2`), which accounts for grammar-gap 460 → 459 and claim units
+> 64 on the PREVIOUS store before either promotion.
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-10-28-advfold` (reseeded `2026-10-28` at `a23e4e12`; the
+> six folded entries — short passive ×2, `neither` ×2, `when` ×2 — plus the fronted-adverb lift).
+> Battery 80 of 89, grammar-gap 460, claim units 64. Retained on disk; the demo picks the NEWEST
+> aligned snapshot by mtime (`demo/prose-to-formulas-v2/run.sh::newest_snapshot`), so nothing pins
+> a path that needed re-pointing.
 >
 > The fronted adverb is a KERNEL LIFT, not an entry, and needs no event variable: `S/S` is
 > unavailable event-free (`⟦S⟧ = Prop`, while `ADV` needs the predicate and its subject separately),

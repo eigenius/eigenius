@@ -211,6 +211,53 @@ resource lexicon:which_obj : lexicon:LexicalEntry {
     lexicon:sense    = "which";
 }
 
+// ── Free relatives: `what` as a headless relative NP (2026-10-28) ──────
+// «The study reported what affects cells.» / «what the check returned» — a clause missing one NP,
+// used as an ARGUMENT. `what` is "the thing(s) which": one token supplying the silent head, the
+// relativization, and the definiteness.
+//
+// It is the DECLARATIVE TWIN of the two interrogative entries above, and deliberately shaped to
+// say so: the same body in each gap position, differing only in the result and the sem.
+// `what_subj` yields `cat_q(Entity)` over the answer-property `λV.λx. V(x)`; this yields
+// `cat_np(Entity, sg)` over the maximal satisfier. The object-gap body is `S[dcl]/NP` rather than
+// `what_obj`'s `S[q]/NP` — a free relative embeds a declarative, and `S[dcl]/NP` is already built,
+// since it is what `relativize` takes for an object relative.
+//
+// This needs NO rule, which is why it is here and not in `constructions.rs`. `relativize` must be
+// a rule because a HEADED relative's result TYPE is built from the body's sem
+// (`cat_n(Σx:C. body(x), num)`) and a lexical category is static. A free relative has no head to
+// refine, so its category is the fixed `cat_np(Entity, sg)`; only the SEM depends on the body, and
+// a sem is a λ-term. `⟦S\NP⟧ = ⟦S/NP⟧ = Entity → Prop`, so ONE term serves both gaps.
+//
+// DEFINITE, not existential: a free relative is maximal — "what affects cells" is everything that
+// does — so it takes the ι operator over the Σ and projects. `the(Σ).1` is the same shape
+// `the_plain_np` builds over a refined noun, with the Σ built here instead of by the relativizer.
+resource lexicon:free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) =>
+            eigentt:fst(ontology:the(exists x : lexicon:Entity => V(x)))
+          : (lexicon:Entity -> Prop) -> lexicon:Entity )
+    );
+}
+// what — free relative over a SUBJECT gap. `cat_np(Entity,sg)/(S[dcl]\NP_Entity)`.
+resource lexicon:what_free_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative pronoun, subject gap ('what affects cells').";
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "what_free_rel";
+}
+// what — free relative over an OBJECT gap. `cat_np(Entity,sg)/(S[dcl]/NP_Entity)`.
+resource lexicon:what_free_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative pronoun, object gap ('what the check returned').";
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "what_free_rel";
+}
+
 // ── Auxiliary `do`-support (D63 §8.5, Slice 5a — polar questions) ─────
 // `does`/`do`/`did` invert to form a yes/no question: `aux + subject + base-VP`.
 // Category `(S[q,fin] / (S[dcl,bse]\NP)) / NP` — takes the subject, then the BASE
@@ -3809,6 +3856,16 @@ resource lexicon:rc_that : lexicon:ReservedConstruct {
 resource lexicon:rc_which : lexicon:ReservedConstruct {
     lexicon:construct_form = "which";
     lexicon:construct_kind = lexicon:rk_wh_relativizer;
+}
+// `who` — the PERSONAL relativizer, `rk_relativizer` and NOT `rk_wh_relativizer` (2026-10-31).
+// The two kinds differ in exactly one respect: the wh- kind ALSO keys pied-piping (`prep which`,
+// `dcg/parse/unpacked.rs`). `who` does not pied-pipe — *«the reviewer of who» — it is `whom` that
+// does, and `whom` is a separate form. Declaring `who` as the wh- kind would license a
+// construction English does not have at this form. Measured as a layer before promotion: claim
+// units 66 → 67, grammar-gap 457 → 456, one unit converted, battery unchanged at 83 of 89.
+resource lexicon:rc_who : lexicon:ReservedConstruct {
+    lexicon:construct_form = "who";
+    lexicon:construct_kind = lexicon:rk_relativizer;
 }
 resource lexicon:rc_but : lexicon:ReservedConstruct {
     lexicon:construct_form = "but";
