@@ -24,8 +24,6 @@ use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 
-const LAYER: &str = include_str!("../../experiments/lexicon/possessive-s.esl");
-
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
 namespace core    = "urn:eigenius:core";
@@ -85,10 +83,8 @@ resource fixture:affects_v : lexicon:LexicalEntry {
 fn parser() -> Parser {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let mut b = LayerBuilder::new("possessive-s", Some(Arc::clone(ctx.head())));
-    for src in [LAYER, FIXTURE] {
-        for r in esl::compile(src, ctx.head()).expect("source compiles") {
-            b.add_resource(r).expect("add resource");
-        }
+    for r in esl::compile(FIXTURE, ctx.head()).expect("source compiles") {
+        b.add_resource(r).expect("add resource");
     }
     let layer: Arc<Layer> = Arc::new(b.build(LayerStorage::in_memory()));
     Parser::build(layer)

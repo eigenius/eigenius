@@ -258,6 +258,40 @@ resource lexicon:what_free_rel_obj : lexicon:LexicalEntry {
     lexicon:sense    = "what_free_rel";
 }
 
+// ── Determiner free relatives / embedded `which`-clauses (2026-11-05) ──
+// Declarative NP twins of `lexicon:which_subj` and `lexicon:which_obj`, mirroring how
+// `lexicon:what_free_rel_subj` and `lexicon:what_free_rel_obj` pair with `what_subj` /
+// `what_obj` above. Consumes the restrictor noun `T : Set` via `cat_forall`, then the
+// gapped declarative body (`S[dcl]\NP_T` for a subject gap, `S[dcl]/NP_T` for an object
+// gap, filled by contravariant functor subsumption from an `Entity`-typed verb), and
+// yields a singular definite NP `cat_np(T, sg)` denoting the maximal satisfier
+// `the(Σx:T. V(x)).1 : T`. Returning at `T` (rather than `Entity`) lets coercive
+// subtyping (`T ≤ Entity`) fire at the governing verb or preposition's argument slot
+// once `T` is instantiated to a concrete class.
+resource lexicon:which_free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) =>
+            eigentt:fst(ontology:the(exists x : A => V(x)))
+          : forall (A : Set) => (A -> Prop) -> A )
+    );
+}
+resource lexicon:which_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, subject gap ('turns on which cutoff is used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "which";
+}
+resource lexicon:which_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, object gap ('reported which cutoff the study used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "which";
+}
+
 // ── Auxiliary `do`-support (D63 §8.5, Slice 5a — polar questions) ─────
 // `does`/`do`/`did` invert to form a yes/no question: `aux + subject + base-VP`.
 // Category `(S[q,fin] / (S[dcl,bse]\NP)) / NP` — takes the subject, then the BASE
@@ -599,6 +633,26 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:scope_bearing = true;
+}
+// very — degree modifier over an adjectival predicate ("is very essential", "a very weak signal").
+// Positive-degree counterpart of `not_adj` (`(S[dcl,adj]\NP)/(S[dcl,adj]\NP)`). One entry covers
+// both predicative (consumed by `is_adj`) and attributive (lifted to `cat_mod` via `UnaryKind::ModLift`
+// after forward application) positions without licensing verbal modification (*«very affects»).
+axiom lexicon:very_deg : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+resource lexicon:very_deg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), lexicon:very_deg(V, s))
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:very_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: degree modifier over an adjectival predicate ('is very essential', 'a very weak signal').";
+    lexicon:form     = "very";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:very_deg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "very";
 }
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`. Sense
 // `do`, shared with the question entries (see `lexicon:does_aux`).
@@ -1932,6 +1986,57 @@ resource lexicon:their_obj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "their";
 }
+// ── Possessive clitic `'s` (OpenCCG `core-en` `det.xsl` `PossS`) ────────────
+// Clitic counterpart of `PossPro` (`its`/`my`/`your`/`their`): where `PossPro` fixes the
+// possessor to `lexicon:anaphor`, `'s` takes the preceding noun phrase `cat_np(Entity, num_any)`
+// as a backward argument `p` and yields a `cat_forall` possessive determiner over
+// `lexicon:poss_of(A, x, p)`.
+resource lexicon:poss_s_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : lexicon:Entity) => fun (A : Set) => fun (V : A -> Prop) =>
+            forall (C : Prop) => (forall (x : A) => (lexicon:poss_of(A, x, p) -> V(x) -> C)) -> C
+          : lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) )
+    );
+}
+resource lexicon:poss_s_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : lexicon:Entity) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : T) => (lexicon:poss_of(T, x, p) -> TV(x, subj) -> C)) -> C
+          : lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) )
+    );
+}
+resource lexicon:poss_s_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in subject position, singular head ('the study's gene').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_s_subj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in object position, singular head ('affects the study's gene').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:poss_s_obj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in subject position, plural head ('the study's genes').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_s_subj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in object position, plural head ('affects the study's genes').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:poss_s_obj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) );
+    lexicon:sense    = "'s";
+}
 
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
 // "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE adverbial
@@ -2537,8 +2642,6 @@ resource lexicon:to_nmod : lexicon:LexicalEntry {
 // seeded at the tight cap and need not be widened in — where the correct senses rank #0/#1 — instead
 // of losing to a widen-admitted noun pile. The WordNet PREDICATIVE adjective `alone` ("the child is
 // alone") stays a separate open-class entry; this adds only the post-nominal focus reading.
-// NB: pre-nominal `only`/`just` ("only this event") are the same `sole` operator but attach OUTSIDE
-// the determiner (NP-level focus), a distinct rule from this N-level refine — deferred.
 resource lexicon:sole_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => ontology:sole(x)
@@ -2552,6 +2655,44 @@ resource lexicon:alone_focus : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:sole_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "alone";
+}
+// ── Pre-nominal NP focus `only` (D61 faithfulness follow-up, 2026-11-05) ─────
+// Pre-nominal counterpart of post-nominal `alone` (`lexicon:alone_focus`), reusing
+// `ontology:sole : lexicon:Entity -> Prop`. Where `alone` refines a bare `cat_n` inside
+// the determiner ("each event alone"), `only` attaches OUTSIDE the determiner to the
+// generalized quantifier (`[only [an assay]]`, `[only [one pattern]]`, `[only [four residues]]`,
+// `[only [the count]]`), restricting its witness by `ontology:sole`.
+resource lexicon:only_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => logic:And(ontology:sole(x), V(x)))
+          : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:only_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+          fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) =>
+          fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => logic:And(ontology:sole(x), TV(x, s)))
+          : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:only_s : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-nominal exclusive focus particle on a subject or PP-object NP ('only an assay', 'only one pattern').";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:only_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "only";
+}
+resource lexicon:only_o : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-nominal exclusive focus particle on an object NP ('involve only four residues').";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:only_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "only";
 }
 
 // ── Comparative `than` marker (D63 §8.12 Slice 6-cmp) ─────────────────

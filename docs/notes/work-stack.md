@@ -17,7 +17,18 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-31-freerel-who`** (reseeded `2026-10-31` via
+> **Store: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh`** (reseeded `2026-11-05` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Batch: adjectival degree `very` (`very_deg`, `very_deg_sem`, `very_adj`), possessive clitic
+> `'s` (`poss_s_subj_sem`, `poss_s_obj_sem`, `poss_s_{subj,obj}_{sg,pl}` + preprocessor clitic split),
+> pre-nominal NP focus `only` (`only_subj_sem`, `only_obj_sem`, `only_s`, `only_o` + `adv_initial_lifts`
+> gate), and determiner free relatives (`which_free_rel_sem`, `which_fr_s`, `which_fr_o`). Battery
+> **85 of 89** (`missing-lexeme surfaces: 0`), page grammar-gap **452**, encoded 18, ambiguous 435,
+> open 151, claim units **69**, one-away 84, readings 41,431, skeletons 5,387. The promoted store is
+> unit-for-unit IDENTICAL to the layered probe arm (0 per-unit disposition diffs on both the battery
+> and the page).
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-10-31-freerel-who` (reseeded `2026-10-31` via
 > `scripts/reseed-chain.sh`, which GATES on the three provenance counts rather than printing them —
 > 38,391 / 20,533 / 864, all reproduced). Batch: the free relative (`what`, 3 entries) plus the
 > `who` relativizer (`rc_who`, 1 resource). Battery **83 of 89**, page grammar-gap **456**,

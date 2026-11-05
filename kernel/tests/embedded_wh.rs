@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! **Determiner free relatives / embedded `which`-clauses** (`experiments/lexicon/embedded-wh.esl`)
+//! **Determiner free relatives / embedded `which`-clauses** (`ontologies/lexicon/closed-class.esl`)
 //! — snapshot-free integration test.
 //!
 //! Pins:
@@ -28,8 +28,6 @@ use std::sync::Arc;
 use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
-
-const LAYER: &str = include_str!("../../experiments/lexicon/embedded-wh.esl");
 
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
@@ -97,18 +95,11 @@ resource fixture:reported_v : lexicon:LexicalEntry {
 
 fn parser() -> Parser {
     let ctx = eigenius_kernel::testing::bootstrap_context();
-    let mut head = Arc::clone(ctx.head());
-    for (name, src) in [
-        ("embedded-wh-layer", LAYER),
-        ("embedded-wh-fixture", FIXTURE),
-    ] {
-        let mut b = LayerBuilder::new(name, Some(Arc::clone(&head)));
-        for r in esl::compile(src, &head).expect("source compiles") {
-            b.add_resource(r).expect("add resource");
-        }
-        head = Arc::new(b.build(LayerStorage::in_memory()));
+    let mut b = LayerBuilder::new("embedded-wh-fixture", Some(Arc::clone(ctx.head())));
+    for r in esl::compile(FIXTURE, ctx.head()).expect("source compiles") {
+        b.add_resource(r).expect("add resource");
     }
-    Parser::build(head)
+    Parser::build(Arc::new(b.build(LayerStorage::in_memory())))
 }
 
 fn sems(sentence: &str) -> Vec<String> {

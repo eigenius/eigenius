@@ -11,10 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! **Degree `very` over adjectival predicates** (`experiments/lexicon/very-degree.esl`).
+//! **Degree `very` over adjectival predicates** (`ontologies/lexicon/closed-class.esl`).
 //!
-//! Snapshot-free: compiles the probe layer on top of `testing::bootstrap_context` + a minimal
-//! content-word fixture so the test fails if the measured layer drifts.
+//! Snapshot-free: reads the promoted entries in `closed-class.esl` through
+//! `testing::bootstrap_context` + a minimal content-word fixture.
 //!
 //! Pins four properties:
 //! 1. **Predicative position** («the gene is very essential») closes through the copula (`is_adj`)
@@ -35,8 +35,6 @@ use std::sync::Arc;
 use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-
-const LAYER: &str = include_str!("../../experiments/lexicon/very-degree.esl");
 
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
@@ -107,10 +105,8 @@ resource fixture:affect_bse : lexicon:LexicalEntry {
 fn parser() -> Parser {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let mut b = LayerBuilder::new("very-degree", Some(Arc::clone(ctx.head())));
-    for src in [LAYER, FIXTURE] {
-        for r in esl::compile(src, ctx.head()).expect("source compiles") {
-            b.add_resource(r).expect("add resource");
-        }
+    for r in esl::compile(FIXTURE, ctx.head()).expect("source compiles") {
+        b.add_resource(r).expect("add resource");
     }
     let layer: Arc<Layer> = Arc::new(b.build(LayerStorage::in_memory()));
     Parser::build(layer)

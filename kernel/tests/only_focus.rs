@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! **Pre-nominal NP focus `only`** (`experiments/lexicon/only-focus.esl`) — snapshot-free integration test.
+//! **Pre-nominal NP focus `only`** (`ontologies/lexicon/closed-class.esl`) — snapshot-free integration test.
 //!
 //! Pins:
 //! 1. **Subject indefinite / cardinal / definite NP focus** («only an assay resolves it»,
@@ -21,7 +21,7 @@
 //! 2. **Object NP focus** («the study involves only four genes») closes in object position
 //!    with `ontology:sole`.
 //! 3. **Gate on `adv_initial_lifts`**: when `only` carries an open-class manner-adverb sense
-//!    alongside `only_focus_subj`, sentence-initial `only` does NOT double-seed the manner-adverb
+//!    alongside `only_s`, sentence-initial `only` does NOT double-seed the manner-adverb
 //!    reading via `adv_initial_lifts`.
 
 use std::sync::Arc;
@@ -29,8 +29,6 @@ use std::sync::Arc;
 use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-
-const LAYER: &str = include_str!("../../experiments/lexicon/only-focus.esl");
 
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
@@ -126,10 +124,8 @@ resource fixture:involves_v : lexicon:LexicalEntry {
 fn parser() -> Parser {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let mut b = LayerBuilder::new("only-focus", Some(Arc::clone(ctx.head())));
-    for src in [LAYER, FIXTURE] {
-        for r in esl::compile(src, ctx.head()).expect("source compiles") {
-            b.add_resource(r).expect("add resource");
-        }
+    for r in esl::compile(FIXTURE, ctx.head()).expect("source compiles") {
+        b.add_resource(r).expect("add resource");
     }
     let layer: Arc<Layer> = Arc::new(b.build(LayerStorage::in_memory()));
     Parser::build(layer)
