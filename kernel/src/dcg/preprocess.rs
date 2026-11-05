@@ -159,7 +159,7 @@ impl Token {
 pub fn join_surfaces(tokens: &[Token]) -> String {
     let mut out = String::new();
     for (i, t) in tokens.iter().enumerate() {
-        if i > 0 {
+        if i > 0 && t.surface != "'s" {
             out.push(' ');
         }
         out.push_str(&t.surface);
@@ -737,6 +737,11 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
     let span = run[start].span.start..run[last].span.end;
     if let Some(parts) = split_solid_negation(&surface, &span) {
         tokens.extend(parts);
+    } else if let Some(parts) = (kind == TokenKind::Word)
+        .then(|| split_possessive_clitic(&surface, &span))
+        .flatten()
+    {
+        tokens.extend(parts);
     } else {
         tokens.push(Token {
             span,
@@ -778,6 +783,46 @@ fn split_solid_negation(surface: &str, span: &std::ops::Range<usize>) -> Option<
         Token {
             span: span.start + 3..span.end,
             surface: not.to_string(),
+            kind: TokenKind::Word,
+        },
+    ])
+}
+
+/// `<stem>'s` / `<stem>’s` → `<stem>` + `'s`, the English possessive clitic (`det.xsl` `PossS`).
+///
+/// The clitic attaches to the full preceding noun phrase (`[The study]'s gene`, `[WRN]'s domain`)
+/// rather than the last word alone, so it must be its own token in the chart. Straight and curly
+/// apostrophes both normalize to the surface `"'s"`, while each half keeps its exact byte sub-span
+/// in the source text. Pronoun/adverb/verb contractions with `'s` (`it's`, `that's`, `what's`,
+/// `there's`, `let's`, etc.) are not possessives and are left unsplit.
+fn split_possessive_clitic(surface: &str, span: &std::ops::Range<usize>) -> Option<Vec<Token>> {
+    let suffix_len = ["'s", "'S", "\u{2019}s", "\u{2019}S"]
+        .into_iter()
+        .find(|s| surface.ends_with(s))?
+        .len();
+    if span.len() <= suffix_len {
+        return None;
+    }
+    let stem = &surface[..surface.len() - suffix_len];
+    if !stem.chars().any(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    if matches!(
+        stem.to_ascii_lowercase().as_str(),
+        "it" | "that" | "what" | "there" | "here" | "where" | "who" | "he" | "she" | "let"
+    ) {
+        return None;
+    }
+    let split_at = span.end - suffix_len;
+    Some(vec![
+        Token {
+            span: span.start..split_at,
+            surface: stem.to_string(),
+            kind: TokenKind::Word,
+        },
+        Token {
+            span: split_at..span.end,
+            surface: "'s".to_string(),
             kind: TokenKind::Word,
         },
     ])
@@ -955,7 +1000,23 @@ mod tests {
     #[test]
     fn keeps_internal_alphanumerics() {
         assert_eq!(surfaces("p53, (BRCA1)"), ["p53"]);
-        assert_eq!(surfaces("0.56-fold WRN's"), ["0.56-fold", "WRN's"]);
+        assert_eq!(surfaces("0.56-fold WRN's"), ["0.56-fold", "WRN", "'s"]);
+    }
+
+    #[test]
+    fn splits_possessive_clitic_and_rejoins_multiwords() {
+        let toks = tokenize("The study\u{2019}s gene");
+        assert_eq!(
+            toks.iter().map(Token::surface).collect::<Vec<_>>(),
+            ["The", "study", "'s", "gene"]
+        );
+        assert_eq!(toks[1].span(), 4..9);
+        assert_eq!(toks[2].span(), 9..13);
+        assert_eq!(
+            join_surfaces(&tokenize("Alzheimer's disease")),
+            "Alzheimer's disease"
+        );
+        assert_eq!(surfaces("it's that's"), ["it's", "that's"]);
     }
 
     #[test]

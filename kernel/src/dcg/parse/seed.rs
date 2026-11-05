@@ -845,6 +845,9 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
+                if j > i && tokens[j].surface() == "'s" {
+                    continue;
+                }
                 let surface = join_surfaces(&tokens[i..=j]);
                 for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
                     // A BARE pronoun is tagged here, before freshening — afterwards the placeholder
@@ -1072,12 +1075,22 @@ impl Parser {
             // the TYPE-RAISED SUBJECT, so «Slowly the gene affects cells.» can attach the adverb
             // left of the subject. Leaf-time for the same reason as the participial lifts above:
             // the shift table only runs over spans of length >= 2, and an adverb is one token.
-            if let Some(asem) = adv_initial_sem.as_ref() {
-                let lifted: Vec<Item> = row[i]
-                    .iter()
-                    .flat_map(|it| super::super::rules::combinators::adv_initial_lifts(it, asem))
-                    .collect();
-                mods.extend(lifted);
+            // Gated when the surface already owns a lexical subject-GQ modifier (`only_focus_subj`),
+            // mirroring the `participial_lifts` gate above so focus particles do not double-seed
+            // an intersective manner-adverb reading alongside `ontology:sole`.
+            if !row[i]
+                .iter()
+                .any(|it| super::super::rules::combinators::is_subj_gq_modifier(it.cat()))
+            {
+                if let Some(asem) = adv_initial_sem.as_ref() {
+                    let lifted: Vec<Item> = row[i]
+                        .iter()
+                        .flat_map(|it| {
+                            super::super::rules::combinators::adv_initial_lifts(it, asem)
+                        })
+                        .collect();
+                    mods.extend(lifted);
+                }
             }
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all

@@ -1,0 +1,51 @@
+namespace lexicon = "urn:eigenius:lexicon";
+namespace logic   = "urn:eigenius:logic";
+namespace core    = "urn:eigenius:core";
+
+// Predicative and attributive degree `very` (`core-en` `Adverb`/Degree, `convert.rs` `DEGREE_SURFACES`).
+//
+// MEASURED AS A LAYER, not yet promoted. Its permanent home is `ontologies/ontology/ontology.esl`
+// (`very_deg`) + `ontologies/lexicon/closed-class.esl` (`very_deg_sem`, `very_adj`), beside `not_adj`,
+// but a bootstrap edit trips `bootstrap_manifest_is_pinned` and makes persisted stores unresumable.
+//
+// WHY `very` WAS MISSING PREDICATIVELY. `convert.rs` withholds `DEGREE_SURFACES` from `adv_cats()`
+// because the manner-adverb categories `(S[dcl,f]\NP)/(S[dcl,f]\NP)` bind `f : Fin` across all
+// finiteness values and would modify finite and base verbs (*«The gene very affects cells.»,
+// *«The gene may very affect cells.»). `very` is an adjectival degree modifier: its category is
+// `(S[dcl,adj]\NP)/(S[dcl,adj]\NP)`, the positive-degree counterpart of `not_adj`.
+//
+// ONE ENTRY COVERS BOTH POSITIONS. Composing `[very] [essential]` by forward application yields a
+// two-token `S[dcl,adj]\NP` with `Combinator::App` provenance:
+//   - predicatively, the copula (`is_adj`) consumes that `S[dcl,adj]\NP` directly («The gene is very
+//     essential.»);
+//   - attributively, `UnaryKind::ModLift` lifts the composed `S[dcl,adj]\NP` cell to `cat_mod`
+//     («A very essential gene affects cells.»), so no separate `cat_mod/cat_mod` entry is needed and
+//     attributive derivations are not duplicated.
+// Meanwhile, `very`'s open-class emphatic adjective senses in WordNet (`a01839317` / `a02068946`,
+// «at this very residue») keep their `S[dcl,adj]\NP` → `cat_mod` path over nouns untouched, because
+// `(S[dcl,adj]\NP)/(S[dcl,adj]\NP)` does not combine with `cat_n`.
+//
+// DENOTATION. Luo & Shi's `ADV = (Entity -> Prop) -> (Entity -> Prop)` in conjoining form
+// `λV. λs. And(V(s), very_deg(V, s))`, matching the imported adverb family (`convert.rs::push_adv`):
+// «The gene is very essential» entails «The gene is essential» (modifier drop holds by `And`
+// elimination) without collapsing `very essential` to the unmodified `essential`.
+
+axiom lexicon:very_deg : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+
+resource lexicon:very_deg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), lexicon:very_deg(V, s))
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
+resource lexicon:very_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: degree modifier over an adjectival predicate ('is very essential', 'a very weak signal').";
+    lexicon:form     = "very";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:very_deg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "very";
+}
+

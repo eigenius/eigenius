@@ -1,0 +1,45 @@
+namespace core     = "urn:eigenius:core";
+namespace eigentt  = "urn:eigenius:eigentt";
+namespace lexicon  = "urn:eigenius:lexicon";
+namespace ontology = "urn:eigenius:ontology";
+
+// ── Determiner free relatives / embedded `which`-clauses ──────────────────────
+//
+// Declarative NP twins of `lexicon:which_subj` and `lexicon:which_obj`, mirroring how
+// `lexicon:what_free_rel_subj` and `lexicon:what_free_rel_obj` pair with `what_subj` /
+// `what_obj` (`ontologies/lexicon/closed-class.esl:214-259`).
+//
+// Consumes the restrictor noun `T : Set` via `cat_forall`, then the gapped declarative
+// body (`S[dcl]\NP_T` for a subject gap, `S[dcl]/NP_T` for an object gap, filled by
+// contravariant functor subsumption from an `Entity`-typed verb), and yields a singular
+// definite NP `cat_np(T, sg)` denoting the maximal satisfier `the(Σx:T. V(x)).1 : T`.
+// Returning at `T` (rather than `Entity`) lets coercive subtyping (`T ≤ Entity`) fire at
+// the governing verb or preposition's argument slot once `T` is instantiated to a
+// concrete class.
+
+resource lexicon:which_free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) =>
+            eigentt:fst(ontology:the(exists x : A => V(x)))
+          : forall (A : Set) => (A -> Prop) -> A )
+    );
+}
+
+resource lexicon:which_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, subject gap ('turns on which cutoff is used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "which";
+}
+
+resource lexicon:which_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, object gap ('reported which cutoff the study used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "which";
+}
+

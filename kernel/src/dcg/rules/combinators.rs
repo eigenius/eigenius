@@ -1849,6 +1849,28 @@ pub(crate) fn adv_initial_lifts(it: &Item, adv_initial_sem: &Exp) -> Vec<Item> {
     )]
 }
 
+/// Whether `cat` is already a lexical subject-GQ modifier `(S/(S\NP))/(S/(S\NP))` (such as
+/// `only_focus_subj`), so seeding does not also lift an open-class manner-adverb entry on the same
+/// surface into a competing `AdvInitial` reading.
+pub(crate) fn is_subj_gq_modifier(cat: &Exp) -> bool {
+    use super::super::category::{is_ctor, slash_parts};
+    let Some((_m, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    if res != arg {
+        return false;
+    }
+    let Some((_gm, s1, vp)) = slash_parts(arg, "fwd") else {
+        return false;
+    };
+    let Some((_vm, s2, np)) = slash_parts(vp, "bwd") else {
+        return false;
+    };
+    is_ctor(s1, "cat_s").is_some()
+        && is_ctor(s2, "cat_s").is_some()
+        && is_ctor(np, "cat_np").is_some()
+}
+
 /// `VP/VP` → `(S/(S\NP))/(S/(S\NP))`, or `None` for any other category.
 ///
 /// Only the FORWARD pre-modifier lifts. The backward VP modifier already attaches after the verb,
