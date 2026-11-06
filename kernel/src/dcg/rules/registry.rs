@@ -573,7 +573,7 @@ impl Grammar {
     /// `kind_of(Σx:C. R)`, keeping the compound's content. Type-raising (vs a plain `cat_np`) keeps it
     /// **argument-only**, so it cannot feed the named-entity compound rule — a noun's prenominal reading
     /// stays the `compound_kind` classifier, no spurious `compound(x, kind_of(C))` duplicate (§7.5).
-    fn kind_raised_nps(&self, noun: &Item, det_cats: &[Exp], want_num: &str) -> Vec<Item> {
+    pub(crate) fn kind_raised_nps(&self, noun: &Item, det_cats: &[Exp], want_num: &str) -> Vec<Item> {
         let Some([t, num]) = is_ctor(noun.cat(), "cat_n") else {
             return Vec::new();
         };
@@ -1207,7 +1207,7 @@ fn apply_reduced_relative(
     _rctx: super::RightContext,
 ) -> Vec<Item> {
     reduced_relative(it.cat(), &g.layer)
-        .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))
+        .map(|cat| Item::from_parts(cat, it.sem().clone(), Combinator::GerParticipial, it.cost()))
         .into_iter()
         .collect()
 }

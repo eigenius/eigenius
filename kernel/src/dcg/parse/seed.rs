@@ -141,7 +141,8 @@ impl Parser {
         // collisions DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and
         // its `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase
         // prose is not.
-        let surface_all_caps = super::all_caps_symbol(surface.trim());
+        let surface_all_caps = super::all_caps_symbol(surface.trim())
+            || surface.trim().chars().any(|c| c.is_ascii_digit());
         let surface_has_wn_verb = self
             .lex
             .entries_for(&s_lc)
@@ -367,6 +368,7 @@ impl Parser {
                 }
             }));
         }
+        self.closed_class_supplements(surface, &s_lc, scope, &mut out);
         // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
         // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
         // ("Genes are cell lines" → subclass_of) and its raised bare-argument NPs (`kind_of(t)`, §7.4).
@@ -377,6 +379,17 @@ impl Parser {
             .flat_map(|it| self.grammar.bare_nominal_shifts(it))
             .collect();
         out.extend(shifts);
+        let trimmed = surface.trim();
+        let is_identifier_or_proper_token = !trimmed.contains(' ')
+            && (trimmed.chars().skip(1).any(|c| c.is_uppercase())
+                || trimmed.chars().any(|c| c.is_ascii_digit()));
+        if is_identifier_or_proper_token {
+            let sg_shifts: Vec<Item> = out
+                .iter()
+                .flat_map(|it| self.grammar.kind_raised_nps(it, &self.grammar.dets.a, "sg"))
+                .collect();
+            out.extend(sg_shifts);
+        }
         // Non-finite backward VP adverb expansion: imported `data.adv` entries carry only the finite
         // backward category `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)`. Emit the four non-finite verbal
         // siblings (`pass`, `ger`, `bse`, `inf`) so post-verbal adverbs also attach to passive,
@@ -391,6 +404,351 @@ impl Parser {
             .collect();
         out.extend(nonfinite_advs);
         out
+    }
+
+    /// Closed-class paradigm completions at seed time (Batch 3):
+    /// - `"both of"`: partitive quantifier reusing `"all of"`;
+    /// - `"I"` (exact uppercase): 1st-person singular pronoun reusing `"we"` (`lexicon:speaker`) with `num_any`;
+    /// - `"that"`: standalone demonstrative pronoun reusing `"this"` (`lexicon:anaphor`, `Combinator::Pronoun`);
+    /// - `"not"`: non-finite verbal negation siblings (`pss`, `pass`, `ger`) cloned from `not_vp` (`bse`);
+    /// - `"all"`: determiner-before-numeral (`the_count_subj`, `the_count_obj`) + fused-head `<det> <num>`
+    ///   for `"all"`, `"the"`, `"these"`, `"those"`;
+    /// - `"of"`: bare-numeral partitive siblings (`cat_num` alongside `cat_mp(u"1", value)`);
+    /// - `"yours"`, `"mine"`, `"ours"`, `"theirs"`: predicative possessive `S[dcl,pred]\NP`;
+    /// - `"worth"`: predicative adjective taking a saturated (`S[dcl,ger]\NP`) or patient-gapped
+    ///   (`(S[dcl,ger]\NP)/NP`) gerund VP.
+    fn closed_class_supplements(
+        &self,
+        surface: &str,
+        s_lc: &str,
+        scope: Option<&[Iri]>,
+        out: &mut Vec<Item>,
+    ) {
+        use super::super::category::{subst_cat, CatSubst};
+        use super::super::item::{Combinator, Cost};
+
+        if s_lc == "both of" {
+            out.extend(
+                self.scoped(self.lex.entries_for("all of"), scope)
+                    .into_iter()
+                    .map(|e| e.item),
+            );
+        }
+        if surface.trim() == "I" {
+            for e in self.lex.entries_for("we") {
+                if let Exp::InductiveCtor(decl, name, args) = e.item.cat() {
+                    if name == "cat_np" && args.len() == 2 {
+                        if let Exp::InductiveCtor(num_decl, _, _) = &args[1] {
+                            let num_any = Exp::InductiveCtor(
+                                num_decl.clone(),
+                                "num_any".into(),
+                                Vec::new(),
+                            );
+                            let cat = Exp::InductiveCtor(
+                                decl.clone(),
+                                "cat_np".into(),
+                                vec![args[0].clone(), num_any],
+                            );
+                            out.push(Item::from_parts(
+                                cat,
+                                e.item.sem().clone(),
+                                Combinator::Pronoun,
+                                Cost::ZERO,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if s_lc == "that" {
+            for e in self.lex.entries_for("this") {
+                if is_ctor(e.item.cat(), "cat_np").is_some() {
+                    out.push(Item::from_parts(
+                        e.item.cat().clone(),
+                        e.item.sem().clone(),
+                        Combinator::Pronoun,
+                        Cost::from_sense_rank(4),
+                    ));
+                }
+            }
+        }
+        if s_lc == "not" {
+            let mut neg_nonfinite = Vec::new();
+            for it in out.iter() {
+                if let Some((m_outer, res_vp, arg_vp)) = slash_parts(it.cat(), "fwd") {
+                    if res_vp == arg_vp {
+                        if let Some((m_vp, s_cat, np_cat)) = slash_parts(res_vp, "bwd") {
+                            if let Some([mood, Exp::InductiveCtor(fin_decl, fin_name, _)]) =
+                                is_ctor(s_cat, "cat_s")
+                            {
+                                if fin_name == "bse" {
+                                    if let Exp::InductiveCtor(cat_decl, _, _) = it.cat() {
+                                        for target_fin in ["pss", "pass", "ger"] {
+                                            let f = Exp::InductiveCtor(
+                                                fin_decl.clone(),
+                                                target_fin.into(),
+                                                Vec::new(),
+                                            );
+                                            let s_new = Exp::InductiveCtor(
+                                                cat_decl.clone(),
+                                                "cat_s".into(),
+                                                vec![mood.clone(), f],
+                                            );
+                                            let vp_new = Exp::InductiveCtor(
+                                                cat_decl.clone(),
+                                                "bwd".into(),
+                                                vec![m_vp.clone(), s_new, np_cat.clone()],
+                                            );
+                                            let cat_new = Exp::InductiveCtor(
+                                                cat_decl.clone(),
+                                                "fwd".into(),
+                                                vec![m_outer.clone(), vp_new.clone(), vp_new],
+                                            );
+                                            neg_nonfinite.push(Item::from_parts(
+                                                cat_new,
+                                                it.sem().clone(),
+                                                it.prov(),
+                                                it.cost(),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            out.extend(neg_nonfinite);
+        }
+        if s_lc == "all" {
+            for e in self.lex.entries_for("the") {
+                if let Some((_m, _res, arg)) = slash_parts(e.item.cat(), "fwd") {
+                    if is_ctor(arg, "cat_num").is_some() {
+                        out.push(e.item);
+                    }
+                }
+            }
+        }
+        if matches!(s_lc, "all" | "the" | "these" | "those") {
+            if let Ok(ent_iri) = Iri::parse("urn:eigenius:lexicon:Entity") {
+                let entity_cls = Exp::EigonClass(ent_iri);
+                let mut fused = Vec::new();
+                for it in out.iter() {
+                    if let Some((m, res, arg)) = slash_parts(it.cat(), "fwd") {
+                        if is_ctor(arg, "cat_num").is_some() {
+                            if let Some([_num, Exp::Lam(Patt::Var(tvar), body)]) =
+                                is_ctor(res, "cat_forall")
+                            {
+                                if let Exp::InductiveCtor(cat_decl, _, _) = it.cat() {
+                                    let mut subst = CatSubst::new();
+                                    subst.insert(tvar.clone(), entity_cls.clone());
+                                    let fused_res = subst_cat(body, &subst);
+                                    let fused_cat = Exp::InductiveCtor(
+                                        cat_decl.clone(),
+                                        "fwd".into(),
+                                        vec![m.clone(), fused_res, arg.clone()],
+                                    );
+                                    let q_var = "__fh_q";
+                                    let fused_sem = Exp::Lam(
+                                        Patt::Var(q_var.into()),
+                                        Box::new(Exp::App(
+                                            Box::new(Exp::App(
+                                                Box::new(it.sem().clone()),
+                                                Box::new(Exp::Var(q_var.into())),
+                                            )),
+                                            Box::new(entity_cls.clone()),
+                                        )),
+                                    );
+                                    fused.push(Item::from_parts(
+                                        fused_cat,
+                                        fused_sem,
+                                        Combinator::Other,
+                                        it.cost(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                out.extend(fused);
+            }
+        }
+        if s_lc == "of" {
+            let mut num_partitives = Vec::new();
+            for it in out.iter() {
+                if let Some((m, res, arg)) = slash_parts(it.cat(), "bwd") {
+                    if is_ctor(arg, "cat_mp").is_some() && is_ctor(res, "fwd").is_some() {
+                        if let Exp::InductiveCtor(cat_decl, _, _) = it.cat() {
+                            let num_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "cat_num".into(),
+                                Vec::new(),
+                            );
+                            let new_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "bwd".into(),
+                                vec![m.clone(), res.clone(), num_cat],
+                            );
+                            num_partitives.push(Item::from_parts(
+                                new_cat,
+                                it.sem().clone(),
+                                it.prov(),
+                                it.cost(),
+                            ));
+                        }
+                    }
+                }
+            }
+            out.extend(num_partitives);
+        }
+        if matches!(s_lc, "yours" | "mine" | "ours" | "theirs") {
+            if let Some(adj_cat) = predicative_adjective_cat(&self.grammar.layer) {
+                let pred_cat = if let Some((m, s_cat, np_cat)) = slash_parts(&adj_cat, "bwd") {
+                    if let (
+                        Exp::InductiveCtor(cat_decl, _, _),
+                        Some([mood, Exp::InductiveCtor(fin_decl, _, _)]),
+                    ) = (&adj_cat, is_ctor(s_cat, "cat_s"))
+                    {
+                        let pred = Exp::InductiveCtor(fin_decl.clone(), "pred".into(), Vec::new());
+                        let s_pred = Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "cat_s".into(),
+                            vec![mood.clone(), pred],
+                        );
+                        Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "bwd".into(),
+                            vec![m.clone(), s_pred, np_cat.clone()],
+                        )
+                    } else {
+                        adj_cat
+                    }
+                } else {
+                    adj_cat
+                };
+                let owner_iri = if matches!(s_lc, "mine" | "ours") {
+                    "urn:eigenius:lexicon:speaker"
+                } else {
+                    "urn:eigenius:lexicon:anaphor"
+                };
+                if let (Ok(poss_iri), Ok(ent_iri), Ok(own_iri)) = (
+                    Iri::parse("urn:eigenius:lexicon:poss_of"),
+                    Iri::parse("urn:eigenius:lexicon:Entity"),
+                    Iri::parse(owner_iri),
+                ) {
+                    let x = "__poss_pred_x";
+                    let body = Exp::App(
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(Exp::EigonAxiom(poss_iri)),
+                                Box::new(Exp::EigonClass(ent_iri)),
+                            )),
+                            Box::new(Exp::Var(x.into())),
+                        )),
+                        Box::new(Exp::EigonAxiom(own_iri)),
+                    );
+                    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+                    out.push(Item::new(pred_cat, sem));
+                }
+            }
+        }
+        if s_lc == "worth" {
+            if let (Some(adj_vp), Some(m_all)) = (
+                predicative_adjective_cat(&self.grammar.layer),
+                super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
+            ) {
+                if let Some((m_vp, s_cat, np_cat)) = slash_parts(&adj_vp, "bwd") {
+                    if let (
+                        Exp::InductiveCtor(cat_decl, _, _),
+                        Some([mood, Exp::InductiveCtor(fin_decl, _, _)]),
+                    ) = (&adj_vp, is_ctor(s_cat, "cat_s"))
+                    {
+                        let ger = Exp::InductiveCtor(fin_decl.clone(), "ger".into(), Vec::new());
+                        let s_ger = Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "cat_s".into(),
+                            vec![mood.clone(), ger],
+                        );
+                        let ger_vp = Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "bwd".into(),
+                            vec![m_vp.clone(), s_ger, np_cat.clone()],
+                        );
+                        let ger_tv = Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "fwd".into(),
+                            vec![m_all.clone(), ger_vp.clone(), np_cat.clone()],
+                        );
+                        let worth_vp_cat = Exp::InductiveCtor(
+                            cat_decl.clone(),
+                            "fwd".into(),
+                            vec![m_all.clone(), adj_vp.clone(), ger_vp],
+                        );
+                        let ident = Exp::Lam(
+                            Patt::Var("__worth_V".into()),
+                            Box::new(Exp::Var("__worth_V".into())),
+                        );
+                        out.push(Item::new(worth_vp_cat, ident));
+                        let passive_sem: Option<Exp> =
+                            Iri::parse("urn:eigenius:lexicon:passive_sem")
+                                .ok()
+                                .and_then(|i| {
+                                    super::super::lexicon::resolve_sem_value(
+                                        &self.grammar.layer,
+                                        &crate::ontology::resource::Value::String(
+                                            i.as_str().to_string(),
+                                        ),
+                                    )
+                                    .ok()
+                                });
+                        if let Some(passive_sem) = passive_sem {
+                            let worth_tv_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "fwd".into(),
+                                vec![m_all, adj_vp, ger_tv],
+                            );
+                            out.push(Item::new(worth_tv_cat, passive_sem));
+                        }
+                    }
+                }
+            }
+        }
+        if s_lc == "as" {
+            for e in self.lex.entries_for("with") {
+                if is_vp_adjunct_prep(e.item.cat()) {
+                    out.push(e.item);
+                }
+            }
+        }
+        if let Some(stem) = s_lc.strip_prefix("mis-") {
+            for e in self.scoped(self.lex.entries_for(stem), scope) {
+                if is_ctor(e.item.cat(), "cat_n").is_none()
+                    && is_ctor(e.item.cat(), "cat_np").is_none()
+                    && !is_adjective_cat(e.item.cat())
+                {
+                    out.push(e.item);
+                }
+            }
+        }
+        if super::all_caps_symbol(surface.trim())
+            && surface.trim().len() >= 2
+            && !out.is_empty()
+            && !out.iter().any(|it| {
+                is_ctor(it.cat(), "cat_n").is_some() || is_ctor(it.cat(), "cat_np").is_some()
+            })
+        {
+            if let (Some(cat_decl), Some(num_decl), Ok(ent_iri)) = (
+                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
+                Iri::parse("urn:eigenius:lexicon:Entity"),
+            ) {
+                let ent_cls = Exp::EigonClass(ent_iri);
+                let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
+                let np_cat =
+                    Exp::InductiveCtor(cat_decl, "cat_np".into(), vec![ent_cls.clone(), sg]);
+                out.push(Item::new(np_cat, kind_of(ent_cls)));
+            }
+        }
     }
 
     /// Transparent `-ly` **adverb** items (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
@@ -549,20 +907,32 @@ impl Parser {
             return Vec::new();
         };
         let head_entries = self.lex.entries_for(head);
-        let head_adjectives = || {
-            head_entries
-                .iter()
-                .filter(|e| is_adjective_cat(e.item.cat()))
-        };
+        let mut head_adjs: Vec<Item> = head_entries
+            .iter()
+            .filter(|e| is_adjective_cat(e.item.cat()))
+            .map(|e| e.item.clone())
+            .collect();
+        if head_adjs.is_empty() {
+            if let Some(adj_cat) = predicative_adjective_cat(&self.grammar.layer) {
+                for e in &head_entries {
+                    if let Some(restr) = super::super::rules::combinators::participial_restrictor(
+                        e.item.cat(),
+                        e.item.sem(),
+                    ) {
+                        head_adjs.push(Item::with_cost(adj_cat.clone(), restr, e.item.cost()));
+                    }
+                }
+            }
+        }
         if is_transparent_hyphen_prefix(left) {
-            return head_adjectives().map(|e| e.item.clone()).collect();
+            return head_adjs;
         }
         if OPAQUE_HYPHEN_PREFIXES.contains(&left) {
             return Vec::new();
         }
         let left_entries = self.lex.entries_for(left);
         if left_entries.iter().any(|e| is_adjective_cat(e.item.cat())) {
-            return head_adjectives().map(|e| e.item.clone()).collect();
+            return head_adjs;
         }
         let mut out = Vec::new();
         let and = inductive_iri(&self.grammar.layer, "urn:eigenius:logic:And");
@@ -577,7 +947,7 @@ impl Parser {
             };
             // The vague reading: `λx. H(x) ∧ relation(x, L)`.
             if let Some(and) = &and {
-                for h in head_adjectives() {
+                for h in &head_adjs {
                     let x = "__hyc_theta";
                     let sem = Exp::Lam(
                         Patt::Var(x.to_string()),
@@ -586,7 +956,7 @@ impl Parser {
                             Vec::new(),
                             vec![
                                 Exp::App(
-                                    Box::new(h.item.sem().clone()),
+                                    Box::new(h.sem().clone()),
                                     Box::new(Exp::Var(x.to_string())),
                                 ),
                                 Exp::App(
@@ -601,7 +971,7 @@ impl Parser {
                             ],
                         )),
                     );
-                    out.push(Item::with_cost(h.item.cat().clone(), sem, h.item.cost()));
+                    out.push(Item::with_cost(h.cat().clone(), sem, h.cost()));
                 }
             }
             // The phrase the compound may abbreviate: `H P L`.

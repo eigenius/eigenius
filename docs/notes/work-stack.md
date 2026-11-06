@@ -31,11 +31,22 @@ any detour.
 > gerund VP rules (`ger_prep_ppmod`, `ger_prep_by_vpadjunct`, `ger_prep_argmarker`, `ger_prep_vpadjunct`),
 > fronted PP with quantified/demonstrative object (`gq_prep_vpadjunct` `ForwardApp` provenance +
 > `front_adjunct_lifts` finiteness variable), and predicative adjective / passive participle +
-> `to`-infinitive complements (`pred_infinitive`). **Battery 89 of 89 (`grammar-gap 0`,
-> `missing-lexeme 0` — full coverage across all 54 core-en families!)**, page grammar-gap **436**
-> (−16 vs `452` before Batch 1, −9 vs `445` after Batch 1), encoded 18, ambiguous 447 (+12), open
-> 155 (+4), claim units **72** (+3), one-away **86**, readings 41,897, skeletons 5,739 (18 strictly
-> forward unit transitions across Batches 1–2 on the page, 0 regressions).
+> `to`-infinitive complements (`pred_infinitive`). Batch 3 (kernel-only on the same store):
+> standalone demonstrative pronoun `that` + 1st-person singular pronoun `I` (`seed.rs`), spelled
+> cardinal numerals `eleven`–`twenty` (`preprocess.rs`), `both of` partitive + `all <num>` determiner +
+> fused-head `<det> <num>` (`all`/`the`/`these`/`those`) + bare-numeral `of` partitive + predicative
+> possessives (`yours`/`mine`/`ours`/`theirs`), `worth` + gerund VP (`seed.rs` + `ger_tv_adj` +
+> `ger_tv_vpadjunct`), non-finite verbal `not` (`pss`/`pass`/`ger`), `vp_functor_bwd_adv` (adverb on
+> unsaturated copular/verbal functors), `copula_pp`, `adj_pp_mod`, `adj_pass_mod`, `noun_adj_pred`,
+> `as_adj_arg` + `as` VP-adjunct categories, `name_numeral` classifier + numeral designator, singular
+> `kind_raised_nps` for capitalized/alphanumeric identifier tokens, all-caps verb-homograph acronym NP
+> fallback, `mis-` verbal stem lookup, and participial head fallback in `hyphen_compound_items`.
+> **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
+> families!)**, page grammar-gap **286** (−166 vs `452` before Batch 1, −150 vs `436` after Batch 2;
+> 770 / 1,056 units parsed = 72.9%), encoded **19** (+1), ambiguous **547** (+100), open **204** (+49),
+> claim units **111 / 274** (+39 vs Batch 2, +42 vs before Batch 1), one-away **95 / 274** (+9),
+> readings 51,587, skeletons 8,417 (150 strictly forward `GRAMMAR-GAP` → parsed transitions in Batch 3,
+> 0 regressions).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

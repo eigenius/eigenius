@@ -830,8 +830,27 @@ fn split_possessive_clitic(surface: &str, span: &std::ops::Range<usize>) -> Opti
 
 /// The number words (decision 6): the closed class's cardinals before D95 slice 7d, whose entries
 /// they replace. Larger numbers are written in digits.
-const NUMBER_WORDS: [&str; 10] = [
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+const NUMBER_WORDS: [&str; 20] = [
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
 ];
 
 /// The value of a number word, in any case: `Nine` is 9.

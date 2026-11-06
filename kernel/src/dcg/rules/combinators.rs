@@ -1150,6 +1150,16 @@ enum Guard {
     /// able to…`) and passive participles (`is expected to…`, `is allowed to…`) taking a `to`-infinitive
     /// complement.
     FinIsAdjOrPass(&'static str),
+    /// The bound `Fin` metavar must be `fin` or `bse` (copular `is`/`are`/`was`/`were`/`be`).
+    FinIsFinOrBse(&'static str),
+    /// The `cat_pp` operand is a prepositional phrase, not a participial reduced relative.
+    NotParticipialPp(Operand),
+    /// The bound argument metavar of a VP-returning functor is not itself a VP `S\NP`.
+    NotVpArg(&'static str),
+    /// The operand is a lexical/derived adverb, not a PP/measure adjunct built by application.
+    IsAdverb(Operand),
+    /// The operand is not a composition output (`LeftNotComposed`).
+    NotComposed(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -1192,6 +1202,11 @@ impl Guard {
             Guard::NotSuperlativeRefined(_) => "NotSuperlativeRefined",
             Guard::NotPpRefined(_) => "NotPpRefined",
             Guard::FinIsAdjOrPass(_) => "FinIsAdjOrPass",
+            Guard::FinIsFinOrBse(_) => "FinIsFinOrBse",
+            Guard::NotParticipialPp(_) => "NotParticipialPp",
+            Guard::NotVpArg(_) => "NotVpArg",
+            Guard::IsAdverb(_) => "IsAdverb",
+            Guard::NotComposed(_) => "NotComposed",
         }
     }
 
@@ -1204,11 +1219,18 @@ impl Guard {
             | Guard::NotKindRaised(o)
             | Guard::NotPronoun(o)
             | Guard::NotDerivedIndividual(o)
-            | Guard::NotPpRefined(o) => match o {
+            | Guard::NotPpRefined(o)
+            | Guard::NotParticipialPp(o)
+            | Guard::IsAdverb(o)
+            | Guard::NotComposed(o) => match o {
                 Operand::Left => "L",
                 Operand::Right => "R",
             },
-            Guard::ProperName(_) | Guard::NotPlural(_) | Guard::FinIsAdjOrPass(_) => "-",
+            Guard::ProperName(_)
+            | Guard::NotPlural(_)
+            | Guard::FinIsAdjOrPass(_)
+            | Guard::FinIsFinOrBse(_)
+            | Guard::NotVpArg(_) => "-",
         }
     }
 }
@@ -1235,6 +1257,33 @@ impl Guard {
             Guard::FinIsAdjOrPass(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::InductiveCtor(_, n, _)) if n == "adj" || n == "pass"
+            ),
+            Guard::FinIsFinOrBse(meta) => matches!(
+                binds.get(*meta),
+                Some(Exp::InductiveCtor(_, n, _)) if n == "fin" || n == "bse"
+            ),
+            Guard::NotParticipialPp(op) => !matches!(
+                op.pick(left, right).prov,
+                Combinator::ShortPassiveParticipial | Combinator::GerParticipial
+            ),
+            Guard::NotVpArg(meta) => {
+                let Some(arg) = binds.get(*meta) else {
+                    return false;
+                };
+                if let Some((_m, res, slot)) = slash_parts(arg, "bwd") {
+                    if is_ctor(res, "cat_s").is_some() && is_ctor(slot, "cat_np").is_some() {
+                        return false;
+                    }
+                }
+                true
+            }
+            Guard::IsAdverb(op) => matches!(
+                op.pick(left, right).prov,
+                Combinator::Other | Combinator::ScopeOperator
+            ),
+            Guard::NotComposed(op) => !matches!(
+                op.pick(left, right).prov,
+                Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
             ),
             // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
             // postmodifier cannot sit between a modifier and its head), so it does not care whether the
@@ -1486,7 +1535,9 @@ pub(crate) fn cat_sup_mod_post_cat() -> Exp {
 /// [`is_adjective_cat`] simply does not match it. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
 /// shift), mirroring `bare_nominal_shifts`.
 pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
-    if super::super::category::is_adjective_cat(it.cat()) && it.prov() != Combinator::KindRaised {
+    if super::super::category::is_adjective_cat(it.cat())
+        && !matches!(it.prov(), Combinator::KindRaised)
+    {
         return vec![Item::from_parts(
             cat_mod_cat(),
             it.sem().clone(),
@@ -1989,7 +2040,7 @@ const PARTICIPIAL_MOD_PENALTY: u32 = 12;
 /// `(S[dcl,pss]\NP)/NP` (sem `TV`), or `None` for any other category. The `∃` is the impredicative
 /// encoding used by `closed-class.esl`'s `passive_sem` (`∀C:Prop. (∀a. TV(x,a) → C) → C`), so the
 /// modifier reading and the finite short passive denote identically.
-fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
+pub(crate) fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
     use super::super::category::{is_ctor, slash_parts};
     let (_m, vp, obj) = slash_parts(cat, "fwd")?;
     is_ctor(obj, "cat_np")?;
@@ -2464,6 +2515,168 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 guards: &[Guard::FinIsAdjOrPass("pred_fin")],
                 build: build_pred_infinitive,
             },
+            // Classifier + cardinal numeral designator (`Codon 380`, `chromosome X position 123,900,532`,
+            // `table 1`): `[cat_n(sortal, sortalnum)] [cat_num]` → `cat_np(base_class(sortal), sg)`
+            // denoting `the_count(sortal, q)`.
+            CatRule {
+                name: "name_numeral",
+                left_pat: Ctor("cat_n", vec![Var("sortal"), Var("sortalnum")]),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[
+                    Guard::NotPlural("sortalnum"),
+                    Guard::NotPpRefined(Operand::Left),
+                ],
+                build: build_name_numeral,
+            },
+            // Essive `as` + predicative adjective (`classifies X as Benign`, `treats X as pathogenic`):
+            // `[cat_pp_arg(prep_as)/NP] [S[dcl,adj]\NP]` → `cat_pp_arg(prep_as)`.
+            CatRule {
+                name: "as_adj_arg",
+                left_pat: fwd_pat(
+                    Ctor("cat_pp_arg", vec![Ctor("prep_as", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    Ctor("cat_np", vec![Var("adj_subj_ty"), wild()]),
+                ),
+                guards: &[],
+                build: as_adj_apply,
+            },
+            // Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + prepositional phrase `cat_pp`
+            // (`That is for the canonical transcript.`, `is in a male`, `was in the middle of X`).
+            CatRule {
+                name: "copula_pp",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("cop_fin")]),
+                        Ctor("cat_np", vec![Var("cop_ty"), Var("cop_num")]),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                right_pat: Ctor("cat_pp", vec![]),
+                guards: &[
+                    Guard::FinIsFinOrBse("cop_fin"),
+                    Guard::NotParticipialPp(Operand::Right),
+                ],
+                build: build_copula_pp,
+            },
+            // Predicative adjective + prepositional phrase (`reachable by a single nucleotide`,
+            // `absent in X`): `[S[dcl,adj]\NP] [cat_pp]` → `S[dcl,adj]\NP`.
+            CatRule {
+                name: "adj_pp_mod",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_pp", vec![]),
+                guards: &[Guard::NotParticipialPp(Operand::Right)],
+                build: build_pred_infinitive,
+            },
+            // Epistemic predicative adjective + passive participle (`is very likely tolerated`):
+            // `[S[dcl,adj]\NP] [S[dcl,pass]\NP]` → `S[dcl,adj]\NP`.
+            CatRule {
+                name: "adj_pass_mod",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("pass", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[],
+                build: build_pred_infinitive,
+            },
+            // Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
+            // `[cat_n(sortal, n_num)] [S[dcl,adj]\NP]` → `S[dcl,pred]\NP`.
+            CatRule {
+                name: "noun_adj_pred",
+                left_pat: Ctor("cat_n", vec![Var("sortal"), Var("n_num")]),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotPlural("n_num"),
+                    Guard::NotPpRefined(Operand::Left),
+                ],
+                build: build_noun_adj_pred,
+            },
+            // VP-adjunct PP on an unsaturated transitive gerund (`leaving as a vague worry`):
+            // `[(S[dcl,ger]\NP)/NP] [(S[dcl,ger]\NP)\(S[dcl,ger]\NP)]` → `(S[dcl,ger]\NP)/NP`.
+            CatRule {
+                name: "ger_tv_vpadjunct",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                guards: &[],
+                build: build_vp_functor_bwd_adv,
+            },
+            // Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
+            // `[(S[dcl,ger]\NP)/NP] [S[dcl,adj]\NP]` → `(S[dcl,ger]\NP)/NP`.
+            CatRule {
+                name: "ger_tv_adj",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[],
+                build: build_ger_tv_adj,
+            },
+            // Post-verbal / post-copular adverb on an unsaturated VP-returning functor
+            // (`is therefore 0`, `is therefore a statement…`, `points directly at X`, `stating precisely`):
+            // `[(S[dcl,f]\NP)/Z] [(S[dcl,f]\NP)\(S[dcl,f]\NP)]` → `(S[dcl,f]\NP)/Z`.
+            CatRule {
+                name: "vp_functor_bwd_adv",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_ty"), Var("vf_num")]),
+                    ),
+                    Var("vf_arg"),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_adv_ty"), Var("vf_adv_num")]),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_adv_ty"), Var("vf_adv_num")]),
+                    ),
+                ),
+                guards: &[
+                    Guard::NotVpArg("vf_arg"),
+                    Guard::IsAdverb(Operand::Right),
+                    Guard::NotComposed(Operand::Left),
+                ],
+                build: build_vp_functor_bwd_adv,
+            },
         ]
     });
     &RULES
@@ -2723,8 +2936,40 @@ fn ger_prep_by_vpadjunct(
     Item::from_parts(vpadj_cat, sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
+/// If `cat` is a predicative adjective VP `bwd(m, cat_s(mood, adj), np)`, rewrite its finiteness
+/// feature from `adj` to `pred` so post-modified predicative adjectives (`likely to V`, `reachable
+/// by X`, `likely tolerated`) remain selectable by the copula, negation, and forward adverbs
+/// (`pred ⊑ adj`) without lifting to pre-nominal `cat_mod` (`is_adjective_cat` requires `adj`).
+fn as_pred_vp_cat(cat: &Exp) -> Exp {
+    if let Exp::InductiveCtor(c_decl, bwd_name, bwd_args) = cat {
+        if bwd_name == "bwd" && bwd_args.len() == 3 {
+            if let Exp::InductiveCtor(s_decl, s_name, s_args) = &bwd_args[1] {
+                if s_name == "cat_s" && s_args.len() == 2 {
+                    if let Exp::InductiveCtor(f_decl, f_name, _) = &s_args[1] {
+                        if f_name == "adj" {
+                            let pred =
+                                Exp::InductiveCtor(f_decl.clone(), "pred".into(), Vec::new());
+                            let s_pred = Exp::InductiveCtor(
+                                s_decl.clone(),
+                                "cat_s".into(),
+                                vec![s_args[0].clone(), pred],
+                            );
+                            return Exp::InductiveCtor(
+                                c_decl.clone(),
+                                "bwd".into(),
+                                vec![bwd_args[0].clone(), s_pred, bwd_args[2].clone()],
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cat.clone()
+}
+
 /// Predicative adjective / passive participle + `to`-infinitive complement
-/// (`[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,adj|pass]\NP`, e.g. `likely to V`, `able to V`,
+/// (`[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,pred|pass]\NP`, e.g. `likely to V`, `able to V`,
 /// `expected to V`, `allowed to V`): conjoin the two predicates over the shared subject
 /// `λx. logic:And(left(x), right(x))`. Tagged [`Combinator::BackwardApp`] so a passive participle
 /// modified by a `to`-infinitive is no longer blocked by
@@ -2750,6 +2995,155 @@ fn build_pred_infinitive(
     );
     let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
     let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(left.cat()),
+        sem,
+        Combinator::BackwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Classifier + cardinal numeral designator (`Codon 380`, `chromosome X position 123,900,532`,
+/// `table 1`): `cat_np(base_class(sortal), sg)` with `ontology:the_count(sortal, q)`.
+fn build_name_numeral(
+    binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let sortal = binds
+        .get("sortal")
+        .expect("name_numeral trigger binds sortal")
+        .clone();
+    let base = super::super::category::base_class(&sortal);
+    let the_count = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the_count")
+            .expect("valid the_count iri"),
+    );
+    let raw_sem = Exp::App(
+        Box::new(Exp::App(Box::new(the_count), Box::new(sortal.clone()))),
+        Box::new(right.sem().clone()),
+    );
+    let sem = if matches!(sortal, Exp::Sig(..)) {
+        Exp::Fst(Box::new(raw_sem))
+    } else {
+        raw_sem
+    };
+    let (decl, num_decl) = match left.cat() {
+        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => match &largs[1] {
+            Exp::InductiveCtor(nd, _, _) => (d.clone(), nd.clone()),
+            _ => unreachable!("cat_n second arg is Num ctor"),
+        },
+        _ => unreachable!("name_numeral requires cat_n left"),
+    };
+    let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
+    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![base, sg]);
+    Item::from_parts(cat, sem, Combinator::DerivedIndividual, Cost::ZERO)
+}
+
+/// Essive `as` + predicative adjective (`as Benign`, `as pathogenic`): nominalize the adjective
+/// predicate `right : Entity -> Prop` as `kind_of(Σs:adj_subj_ty. right(s)) : Entity` and apply
+/// `left.sem()`.
+fn as_adj_apply(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let subj_ty = binds
+        .get("adj_subj_ty")
+        .expect("as_adj_arg binds adj_subj_ty")
+        .clone();
+    let s_var = "__as_adj_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let adj_entity = super::super::category::kind_of(sig);
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(adj_entity));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + prepositional phrase `cat_pp`
+/// (`That is for the canonical transcript.`, `is in a male`): apply the copula functor directly to
+/// the `cat_pp` predicate (`Entity -> Prop`).
+fn build_copula_pp(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(right.sem().clone()));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
+/// `λx. And(right(x), compound_kind(x, left))` with output category `S[dcl,pred]\NP`.
+fn build_noun_adj_pred(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__n_adj_x";
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let l_app = app2("urn:eigenius:ontology:compound_kind", x, left.sem().clone());
+    let body = Exp::const_applied(and, Vec::new(), vec![r_app, l_app]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(right.cat()),
+        sem,
+        Combinator::BackwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
+/// `λobj. λsubj. And(left(obj, subj), right(obj))`.
+fn build_ger_tv_adj(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let (obj, subj) = ("__tv_adj_o", "__tv_adj_s");
+    let l_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(left.sem().clone()),
+            Box::new(Exp::Var(obj.into())),
+        )),
+        Box::new(Exp::Var(subj.into())),
+    );
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(obj.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
+    let sem = Exp::Lam(
+        Patt::Var(obj.into()),
+        Box::new(Exp::Lam(Patt::Var(subj.into()), Box::new(body))),
+    );
+    Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
+}
+
+/// Post-verbal / post-copular backward adverb on an unsaturated VP-returning functor
+/// (`[(S[dcl,f]\NP)/Z] [(S[dcl,f]\NP)\(S[dcl,f]\NP)]` → `(S[dcl,f]\NP)/Z`):
+/// `λz. right(left(z))`.
+fn build_vp_functor_bwd_adv(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let z = "__vf_adv_z";
+    let l_z = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(z.into())),
+    );
+    let body = Exp::App(Box::new(right.sem().clone()), Box::new(l_z));
+    let sem = Exp::Lam(Patt::Var(z.into()), Box::new(body));
     Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
 }
 

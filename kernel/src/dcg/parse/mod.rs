@@ -464,6 +464,14 @@ impl Parser {
         if self.grammar.reserved.coord_connective(&s_lc).is_some() {
             return true;
         }
+        if surface.trim() == "I"
+            || matches!(
+                s_lc.as_str(),
+                "yours" | "mine" | "ours" | "theirs" | "worth"
+            )
+        {
+            return true;
+        }
         // Exactly the lemmas the SEEDER will try ([`super::seed`] opens with the same call), so a
         // token this reports missing is a token the parser could not have seeded. The list used to
         // be re-derived here — raw surface, Morphy lemmas, the hyphen rule — and had drifted: it
