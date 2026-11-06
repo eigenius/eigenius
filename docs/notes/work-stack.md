@@ -19,16 +19,23 @@ any detour.
 >
 > **Store: `wordnet-umls-hpo-aligned-2026-11-05-core-en-89`** (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
-> 864). Batch closing the final 4 `core-en-families.txt` grammar-gaps: gerund VP subjects
-> (`gerund_subject` unary shift in `constructions.rs` + `UNARY_SHIFTS`), `there`-existentials
-> (`there_sem`, `there_expl`), `to`-infinitive subject control (`to_inf` + WordNet frame 28
-> `FrameKind::SubjectControl`), ECM `to`-infinitives (`be_copula`, `to_ecm`), and simple-past verb
-> lemmatizer number relaxation (`with_past_verb_num` in `seed.rs` for verbs whose simple past
-> differs from their participle, e.g. `showed`/`shown`, `began`/`begun`). **Battery 89 of 89
-> (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en families!)**, page
-> grammar-gap **445** (−7), encoded 18, ambiguous 439 (+4), open 154 (+3), claim units **69**,
-> one-away **87** (+3), readings 41,774, skeletons 5,527 (8 strictly forward unit transitions on the
-> page, 0 regressions).
+> 864). Batch 1 (reseeded): gerund VP subjects (`gerund_subject` unary shift in `constructions.rs` +
+> `UNARY_SHIFTS`), `there`-existentials (`there_sem`, `there_expl`), `to`-infinitive subject control
+> (`to_inf` + WordNet frame 28 `FrameKind::SubjectControl`), ECM `to`-infinitives (`be_copula`,
+> `to_ecm`), and simple-past verb lemmatizer number relaxation (`with_past_verb_num` in `seed.rs` for
+> verbs whose simple past differs from their participle, e.g. `showed`/`shown`, `began`/`begun`).
+> Batch 2 (kernel-only on the same store): fixed `short_passive_participial_cat` `Fin` declaration
+> IRI bug (`combinators.rs` + `ProvGuard::RightNotShortPassiveParticipial`), non-finite backward VP
+> adverb modification (`pass`, `ger`, `bse`, `inf` in `category.rs` and `seed.rs`), `coordinate_but_not_prop`
+> object-GQ raising and `common_cat` generalization (`constructions.rs` / `registry.rs`), preposition +
+> gerund VP rules (`ger_prep_ppmod`, `ger_prep_by_vpadjunct`, `ger_prep_argmarker`, `ger_prep_vpadjunct`),
+> fronted PP with quantified/demonstrative object (`gq_prep_vpadjunct` `ForwardApp` provenance +
+> `front_adjunct_lifts` finiteness variable), and predicative adjective / passive participle +
+> `to`-infinitive complements (`pred_infinitive`). **Battery 89 of 89 (`grammar-gap 0`,
+> `missing-lexeme 0` — full coverage across all 54 core-en families!)**, page grammar-gap **436**
+> (−16 vs `452` before Batch 1, −9 vs `445` after Batch 1), encoded 18, ambiguous 447 (+12), open
+> 155 (+4), claim units **72** (+3), one-away **86**, readings 41,897, skeletons 5,739 (18 strictly
+> forward unit transitions across Batches 1–2 on the page, 0 regressions).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

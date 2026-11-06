@@ -254,6 +254,14 @@ enum ProvGuard {
     /// composition output ([`Combinator::DetComposed`]) but a coordination of them (D95 slice 7d):
     /// applied alone it re-derives the determiner over the refined noun.
     LeftNotDetComposed,
+    /// The right operand — the forward-application ARGUMENT — is not an unmodified seed-time short-
+    /// passive participial lift ([`Combinator::ShortPassiveParticipial`]). For an unmodified leaf
+    /// participle (`was queried`), `was_passive` (`(S\NP)/((S[pss]\NP)/NP)`) already derives the short
+    /// passive; blocking `was_passive_by` (`(S\NP)/(S[pass]\NP)`) from forward-applying to the bare
+    /// `ShortPassiveParticipial` leaf prevents a duplicate derivation while allowing `was_passive_by`
+    /// once the `pass` VP has been modified or coordinated (`was [queried directly rather than
+    /// assumed]`).
+    RightNotShortPassiveParticipial,
 }
 
 impl ProvGuard {
@@ -270,6 +278,9 @@ impl ProvGuard {
             ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
             ProvGuard::LeftNotObliqueParticipial => left_prov != Combinator::ObliqueParticipial,
             ProvGuard::LeftNotDetComposed => left_prov != Combinator::DetComposed,
+            ProvGuard::RightNotShortPassiveParticipial => {
+                right_prov != Combinator::ShortPassiveParticipial
+            }
         }
     }
 }
@@ -693,7 +704,11 @@ fn comb_rules() -> &'static [CombRule] {
                     functor: Operand::Left,
                     slash: "fwd",
                 },
-                prov_guards: &[ProvGuard::LeftNotComposed, ProvGuard::LeftNotRaised],
+                prov_guards: &[
+                    ProvGuard::LeftNotComposed,
+                    ProvGuard::LeftNotRaised,
+                    ProvGuard::RightNotShortPassiveParticipial,
+                ],
             },
             CombRule {
                 name: "backward_app",
@@ -1131,6 +1146,10 @@ enum Guard {
     /// sentence's.
     NotSuperlativeRefined(Operand),
     NotPpRefined(Operand),
+    /// The bound `Fin` metavar must be `adj` or `pass` — predicative adjectives (`is likely to…`, `is
+    /// able to…`) and passive participles (`is expected to…`, `is allowed to…`) taking a `to`-infinitive
+    /// complement.
+    FinIsAdjOrPass(&'static str),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -1172,6 +1191,7 @@ impl Guard {
             Guard::NotPlural(_) => "NotPlural",
             Guard::NotSuperlativeRefined(_) => "NotSuperlativeRefined",
             Guard::NotPpRefined(_) => "NotPpRefined",
+            Guard::FinIsAdjOrPass(_) => "FinIsAdjOrPass",
         }
     }
 
@@ -1188,7 +1208,7 @@ impl Guard {
                 Operand::Left => "L",
                 Operand::Right => "R",
             },
-            Guard::ProperName(_) | Guard::NotPlural(_) => "-",
+            Guard::ProperName(_) | Guard::NotPlural(_) | Guard::FinIsAdjOrPass(_) => "-",
         }
     }
 }
@@ -1211,6 +1231,10 @@ impl Guard {
             Guard::NotPlural(meta) => !matches!(
                 binds.get(*meta),
                 Some(Exp::InductiveCtor(_, n, _)) if n == "pl"
+            ),
+            Guard::FinIsAdjOrPass(meta) => matches!(
+                binds.get(*meta),
+                Some(Exp::InductiveCtor(_, n, _)) if n == "adj" || n == "pass"
             ),
             // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
             // postmodifier cannot sit between a modifier and its head), so it does not care whether the
@@ -1574,7 +1598,7 @@ pub(crate) fn front_adjunct_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
             "bwd",
             vec![
                 m_all.clone(),
-                s.clone(),
+                ctor("cat_s", vec![mood.clone(), var("__fr_F2")]),
                 ctor("cat_np", vec![var(FRONT_T), var(FRONT_N)]),
             ],
         );
@@ -1743,7 +1767,10 @@ fn short_passive_participial_cat(cat: &Exp) -> Option<Exp> {
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(voice, Exp::InductiveCtor(_, n, _) if n == "pss") {
+    let Exp::InductiveCtor(fin_decl, voice_name, _) = voice else {
+        return None;
+    };
+    if voice_name != "pss" {
         return None;
     }
     let Exp::InductiveCtor(decl, _, _) = cat else {
@@ -1761,7 +1788,7 @@ fn short_passive_participial_cat(cat: &Exp) -> Option<Exp> {
                 "cat_s".into(),
                 vec![
                     mood.clone(),
-                    Exp::InductiveCtor(decl.clone(), "pass".into(), Vec::new()),
+                    Exp::InductiveCtor(fin_decl.clone(), "pass".into(), Vec::new()),
                 ],
             ),
             obj.clone(),
@@ -2299,6 +2326,23 @@ fn passive_agent_res_pat() -> CatPat {
     bwd_pat(vp_pat(), fwd_pat(vp_pat(), any_np_pat()))
 }
 
+/// A saturated gerund VP `S[dcl,ger]\NP` as the object of a preposition (`without finding X`, `by
+/// querying Y`, `before tallying`). Binds the subject slot's type index `ger_subj_ty` so
+/// [`ger_prep_apply`] can nominalize the gerund VP as `kind_of(Σs:ger_subj_ty. V(s)) : Entity`,
+/// matching [`super::constructions::gerund_subject`].
+fn ger_vp_pat() -> CatPat {
+    bwd_pat(
+        CatPat::Ctor(
+            "cat_s",
+            vec![
+                CatPat::Ctor("dcl", vec![]),
+                CatPat::Ctor("ger", vec![]),
+            ],
+        ),
+        CatPat::Ctor("cat_np", vec![CatPat::Var("ger_subj_ty"), wild()]),
+    )
+}
+
 /// The "other grammar" rule table (built once). Priority = order: close-naming apposition first, then
 /// the three GQ-as-prep-object kinds (distinguished by the preposition functor's result `pp_res`:
 /// `cat_pp` / `cat_pp_arg` / `(S\NP)\(S\NP)` — disjoint ctors). Tried after the nominal-modification
@@ -2361,6 +2405,64 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_passive_agent,
+            },
+            // Gerund-VP-as-prep-object, PpMod: `[cat_pp/NP] [S[dcl,ger]\NP]` → `cat_pp` ("method for
+            // querying the database").
+            CatRule {
+                name: "ger_prep_ppmod",
+                left_pat: fwd_pat(Ctor("cat_pp", vec![]), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Means/manner `by` + gerund VP (`by querying X`, `by tallying Y`): `by` has no general
+            // `by_prep` VP-adjunct entry in `closed-class.esl` (to avoid competing with `by_agent` on
+            // passive NPs), but `by` + a saturated gerund VP is unambiguously a VP adjunct. Keyed on
+            // `by_arg`'s `cat_pp_arg(prep_by)/NP` before the generic `ger_prep_argmarker`.
+            CatRule {
+                name: "ger_prep_by_vpadjunct",
+                left_pat: fwd_pat(
+                    Ctor("cat_pp_arg", vec![Ctor("prep_by", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_by_vpadjunct,
+            },
+            // Gerund-VP-as-prep-object, ArgMarker: `[cat_pp_arg/NP] [S[dcl,ger]\NP]` → `cat_pp_arg`
+            // ("compatible with reaching adulthood").
+            CatRule {
+                name: "ger_prep_argmarker",
+                left_pat: fwd_pat(Ctor("cat_pp_arg", vec![wild()]), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Gerund-VP-as-prep-object, VpAdjunct: `[(S\NP)\(S\NP)/NP] [S[dcl,ger]\NP]` → VP modifier
+            // ("without finding X", "by querying Y", "before tallying").
+            CatRule {
+                name: "ger_prep_vpadjunct",
+                left_pat: fwd_pat(bwd_pat(vp_pat(), vp_pat()), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Predicative adjective / passive participle + `to`-infinitive complement:
+            // `[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,adj|pass]\NP` ("likely to V", "able to V",
+            // "expected to V", "allowed to V"). Conjoins the predicate with the infinitive VP over the
+            // shared subject (`λx. And(left(x), right(x))`).
+            CatRule {
+                name: "pred_infinitive",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("pred_fin")]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[Guard::FinIsAdjOrPass("pred_fin")],
+                build: build_pred_infinitive,
             },
         ]
     });
@@ -2507,6 +2609,9 @@ fn gq_prep_passive_agent(
 }
 
 /// GQ-as-prep-object, VP-adjunct: `λV.λs. Q(λx. prep_sem(x)(V)(s))` — result `(S\NP)\(S\NP)`.
+/// Tagged [`Combinator::ForwardApp`] (like plain-NP preposition application) so a sentence-initial
+/// PP with a quantified object (`In a study, …`, `In every cell, …`) is lifted by
+/// [`front_adjunct_lifts`].
 fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let (x, v, s) = ("__pobj_x", "__pobj_V", "__pobj_s");
     let applied = Exp::App(
@@ -2527,7 +2632,7 @@ fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<
         Patt::Var(v.into()),
         Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(scoped))),
     );
-    Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
 /// GQ-as-prep-object, argument marker: `Q(prep_sem)` — the raised GQ applied to the transparent
@@ -2535,6 +2640,117 @@ fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<
 fn gq_prep_argmarker(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sem = Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone()));
     Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
+}
+
+/// Gerund-VP-as-prep-object (`without finding X`, `before tallying`, `compatible with reaching
+/// adulthood`): nominalize the saturated gerund VP `right : Entity → Prop` as the reified kind
+/// entity `kind_of(Σs:ger_subj_ty. right(s)) : Entity` (matching
+/// [`super::constructions::gerund_subject`]) and apply the preposition functor `left` directly to it.
+fn ger_prep_apply(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let subj_ty = binds
+        .get("ger_subj_ty")
+        .expect("ger_vp_pat binds ger_subj_ty")
+        .clone();
+    let s_var = "__ger_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let ger_entity = super::super::category::kind_of(sig);
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(ger_entity));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Means/manner `by` + gerund VP (`by querying X`, `by tallying Y`) → finite VP adjunct
+/// `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)` with sem `λV. λs. And(V(s), prep_by(s, kind_of(Σx. right(x))))`.
+fn ger_prep_by_vpadjunct(
+    binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let subj_ty = binds
+        .get("ger_subj_ty")
+        .expect("ger_vp_pat binds ger_subj_ty")
+        .clone();
+    let s_var = "__ger_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let ger_entity = super::super::category::kind_of(sig);
+
+    let (m_all, _res, np_any) =
+        slash_parts(left.cat(), "fwd").expect("ger_prep_by_vpadjunct matched fwd left");
+    let (_m_r, s_ger, _np_r) =
+        slash_parts(right.cat(), "bwd").expect("ger_prep_by_vpadjunct matched bwd right");
+    let Some([dcl, ger]) = is_ctor(s_ger, "cat_s") else {
+        unreachable!("ger_vp_pat matched cat_s");
+    };
+    let Exp::InductiveCtor(cat_decl, _, _) = left.cat() else {
+        unreachable!("left cat is an InductiveCtor");
+    };
+    let Exp::InductiveCtor(fin_decl, _, _) = ger else {
+        unreachable!("ger is an InductiveCtor");
+    };
+    let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl.clone(), fin]);
+    let vp_fin = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all.clone(), s_fin, np_any.clone()],
+    );
+    let vpadj_cat = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all.clone(), vp_fin.clone(), vp_fin],
+    );
+
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let (v, s) = ("__by_ger_V", "__by_ger_s");
+    let v_s = Exp::App(Box::new(Exp::Var(v.into())), Box::new(Exp::Var(s.into())));
+    let prep_by_s = app2("urn:eigenius:ontology:prep_by", s, ger_entity);
+    let conj = Exp::const_applied(and, Vec::new(), vec![v_s, prep_by_s]);
+    let sem = Exp::Lam(
+        Patt::Var(v.into()),
+        Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(conj))),
+    );
+    Item::from_parts(vpadj_cat, sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Predicative adjective / passive participle + `to`-infinitive complement
+/// (`[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,adj|pass]\NP`, e.g. `likely to V`, `able to V`,
+/// `expected to V`, `allowed to V`): conjoin the two predicates over the shared subject
+/// `λx. logic:And(left(x), right(x))`. Tagged [`Combinator::BackwardApp`] so a passive participle
+/// modified by a `to`-infinitive is no longer blocked by
+/// [`ProvGuard::RightNotShortPassiveParticipial`] when `is_passive_by`/`was_passive_by` applies.
+fn build_pred_infinitive(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__pred_inf_x";
+    let l_app = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
 }
 
 /// Coordination/distributive rules — the packed-forest **carve-out** (Harper 1994 pitfall): these
@@ -4424,7 +4640,7 @@ mod dispatch_tests {
             "result is the VP-adjunct (S\\NP)\\(S\\NP)"
         );
         assert_eq!(got.sem(), &expected_sem);
-        assert_eq!(got.prov(), Combinator::Other);
+        assert_eq!(got.prov(), Combinator::ForwardApp);
     }
 
     // ── universal combinators (Phase 2b): application, composition, dependent determiner ──

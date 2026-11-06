@@ -860,11 +860,70 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     let bound = clause(Exp::Var("ADV#fin".to_string()));
     let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
 
-    // 2. Backward VP modifier — verbal only; returns the `fin` it accepts, so nothing to bind.
-    let vp = clause(Exp::InductiveCtor(fin, "fin".to_string(), vec![]));
-    let vp_mod_bwd = ctor("bwd", vec![m_all, vp.clone(), vp]);
+    // 2. Backward VP modifier — verbal only (`fin`, `pass`, `ger`, `bse`, `inf`; excludes `adj` and
+    //    `pred`); returns the finiteness feature it accepts.
+    let mut out = vec![fwd_mod];
+    for f_name in ["fin", "pass", "ger", "bse", "inf"] {
+        let vp = clause(Exp::InductiveCtor(fin.clone(), f_name.to_string(), vec![]));
+        out.push(ctor("bwd", vec![m_all.clone(), vp.clone(), vp]));
+    }
 
-    Some(vec![fwd_mod, vp_mod_bwd])
+    Some(out)
+}
+
+/// If `cat` is a finite backward VP-modifier category `bwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
+/// (the shape imported WordNet adverbs carry in `data.adv`), return its four non-finite verbal
+/// siblings (`pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so post-verbal adverbs also
+/// attach to passive, gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly", "stating
+/// precisely", "can affect cells directly", "to report directly"). Excludes `adj` and `pred`.
+pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
+    let Some((m_outer, res_vp, arg_vp)) = slash_parts(cat, "bwd") else {
+        return Vec::new();
+    };
+    if res_vp != arg_vp {
+        return Vec::new();
+    }
+    let Some((m_vp, s, np)) = slash_parts(res_vp, "bwd") else {
+        return Vec::new();
+    };
+    let Some([mood, fin]) = is_ctor(s, "cat_s") else {
+        return Vec::new();
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return Vec::new();
+    }
+    let Exp::InductiveCtor(fin_decl, fin_name, _) = fin else {
+        return Vec::new();
+    };
+    if fin_name != "fin" {
+        return Vec::new();
+    }
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return Vec::new();
+    };
+    ["pass", "ger", "bse", "inf"]
+        .into_iter()
+        .map(|f_name| {
+            let s_f = Exp::InductiveCtor(
+                cat_decl.clone(),
+                "cat_s".into(),
+                vec![
+                    mood.clone(),
+                    Exp::InductiveCtor(fin_decl.clone(), f_name.into(), Vec::new()),
+                ],
+            );
+            let vp_f = Exp::InductiveCtor(
+                cat_decl.clone(),
+                "bwd".into(),
+                vec![m_vp.clone(), s_f, np.clone()],
+            );
+            Exp::InductiveCtor(
+                cat_decl.clone(),
+                "bwd".into(),
+                vec![m_outer.clone(), vp_f.clone(), vp_f],
+            )
+        })
+        .collect()
 }
 
 /// The transparent **sentence modifier** categories `S/S` and `S\S` (D62 Phase 3) — for

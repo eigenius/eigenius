@@ -377,6 +377,19 @@ impl Parser {
             .flat_map(|it| self.grammar.bare_nominal_shifts(it))
             .collect();
         out.extend(shifts);
+        // Non-finite backward VP adverb expansion: imported `data.adv` entries carry only the finite
+        // backward category `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)`. Emit the four non-finite verbal
+        // siblings (`pass`, `ger`, `bse`, `inf`) so post-verbal adverbs also attach to passive,
+        // gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly", "stating precisely").
+        let nonfinite_advs: Vec<Item> = out
+            .iter()
+            .flat_map(|it| {
+                super::super::category::nonfinite_bwd_adverb_cats(it.cat())
+                    .into_iter()
+                    .map(|cat| Item::from_parts(cat, it.sem().clone(), it.prov(), it.cost()))
+            })
+            .collect();
+        out.extend(nonfinite_advs);
         out
     }
 

@@ -495,6 +495,8 @@ mod tests {
             "urn:eigenius:units:lt",
             "urn:eigenius:units:le",
             "urn:eigenius:units:approx",
+            // Degree intensifier operator (`very`, `closed-class.esl`).
+            "urn:eigenius:lexicon:very_deg",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()

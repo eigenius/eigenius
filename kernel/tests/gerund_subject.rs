@@ -140,3 +140,46 @@ fn gerund_subject_refuses_plural_verb_agreement() {
     );
 }
 
+#[test]
+fn preposition_with_gerund_vp_and_fronted_pp_parse() {
+    let p = parser();
+    let (closed, open) = p.parse_open("Without reporting genes, the cell is essential.", &Identity);
+    let closed: Vec<String> = closed.iter().map(|i| pretty_term(i.sem())).collect();
+    assert!(
+        !closed.is_empty(),
+        "expected a closed parse for 'Without reporting genes, the cell is essential.'; open={:?}",
+        open.iter().map(|o| pretty_term(o.item.sem())).collect::<Vec<_>>()
+    );
+    assert!(
+        closed.iter().any(|s| {
+            s.contains("adv_without")
+                && s.contains("kind_of")
+                && s.contains("report")
+                && s.contains("essential")
+        }),
+        "expected fronted 'Without reporting genes,' to attach to the matrix clause; got: {closed:#?}"
+    );
+
+    let (closed_by, _open_by) = p.parse_open("By reporting genes, the cell is essential.", &Identity);
+    let closed_by: Vec<String> = closed_by.iter().map(|i| pretty_term(i.sem())).collect();
+    assert!(
+        closed_by.iter().any(|s| {
+            s.contains("prep_by")
+                && s.contains("kind_of")
+                && s.contains("report")
+                && s.contains("essential")
+        }),
+        "expected fronted 'By reporting genes,' to attach to the matrix clause; got: {closed_by:#?}"
+    );
+
+    let (closed_det, _open_det) = p.parse_open("In a cell, the gene is essential.", &Identity);
+    let closed_det: Vec<String> = closed_det.iter().map(|i| pretty_term(i.sem())).collect();
+    assert!(
+        closed_det
+            .iter()
+            .any(|s| s.contains("adv_in") && s.contains("essential(the(Gene))")),
+        "expected fronted PP with quantified object 'In a cell,' to parse; got: {closed_det:#?}"
+    );
+}
+
+

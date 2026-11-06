@@ -483,18 +483,11 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
 
 fn build_coord_excluding(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
     let cost = l.cost().saturating_add(r.cost());
-    if cats_coordinate(l.cat(), r.cat(), &g.layer) {
-        // Escape hatch: the DECISION reads the sem (a completed coordination cannot be a `but not`
-        // right operand) — this is why `ButNot` declares `reads_sem` and `Sig` carries the bit.
-        if sem_is_coordination(r.sem()) {
-            return None;
-        }
-        coordinate_but_not_sem(l.cat(), l.sem(), r.sem(), &g.layer)
-            .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
-    } else {
-        coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
-            .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
-    }
+    // Escape hatch: the DECISION reads the sem (a completed coordination cannot be a `but not`
+    // right operand) — this is why `ButNot` declares `reads_sem` and `Sig` carries the bit.
+    super::constructions::coordinate_but_not_prop(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
+        .or_else(|| coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
+        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
 }
 
 fn build_reciprocal(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {

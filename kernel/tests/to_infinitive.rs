@@ -55,6 +55,11 @@ axiom fixture:wants     : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 axiom fixture:report    : lexicon:Entity -> lexicon:Entity -> Prop
 axiom fixture:showed    : Prop -> lexicon:Entity -> Prop
 axiom fixture:essential : lexicon:Entity -> Prop
+axiom fixture:likely    : lexicon:Entity -> Prop
+axiom fixture:expected  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom fixture:queried   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom fixture:assumed   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom fixture:directly  : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)
 
 resource fixture:study_sg : lexicon:LexicalEntry {
     lexicon:form     = "study";
@@ -104,6 +109,41 @@ resource fixture:essential_adj : lexicon:LexicalEntry {
     lexicon:sem      = fixture:essential;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "fixture_essential";
+}
+resource fixture:likely_adj : lexicon:LexicalEntry {
+    lexicon:form     = "likely";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = fixture:likely;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "fixture_likely";
+}
+resource fixture:expected_pss : lexicon:LexicalEntry {
+    lexicon:form     = "expected";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = fixture:expected;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "fixture_expected";
+}
+resource fixture:queried_pss : lexicon:LexicalEntry {
+    lexicon:form     = "queried";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = fixture:queried;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "fixture_queried";
+}
+resource fixture:assumed_pss : lexicon:LexicalEntry {
+    lexicon:form     = "assumed";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = fixture:assumed;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "fixture_assumed";
+}
+resource fixture:directly_adv : lexicon:LexicalEntry {
+    lexicon:form     = "directly";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = fixture:directly;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "fixture_directly";
 }
 "#;
 
@@ -168,4 +208,36 @@ fn base_show_rejects_singular_subject_while_showed_accepts_it() {
         "base finite 'show' carries a plural subject slot and must reject singular 'The study'"
     );
 }
+
+#[test]
+fn predicative_adjective_and_passive_participle_take_to_infinitive_complements() {
+    let adj = sems("The study is likely to report genes.");
+    assert!(
+        adj.iter()
+            .any(|s| s.contains("likely(the(Study))") && s.contains("report(kind_of(Gene), the(Study))")),
+        "expected 'is likely to report genes' to conjoin likely and report over the subject; got: {adj:#?}"
+    );
+
+    let pass = sems("The study is expected to report genes.");
+    assert!(
+        pass.iter()
+            .any(|s| s.contains("expected(the(Study)") && s.contains("report(kind_of(Gene), the(Study))")),
+        "expected 'is expected to report genes' to conjoin passive expected and report over the subject; got: {pass:#?}"
+    );
+}
+
+#[test]
+fn short_passive_modified_by_adverb_and_rather_than_parses() {
+    let got = sems("The gene was queried directly rather than assumed.");
+    assert!(
+        got.iter().any(|s| {
+            s.contains("directly(")
+                && s.contains("queried(")
+                && s.contains("assumed(")
+                && s.contains("False")
+        }),
+        "expected 'was queried directly rather than assumed' to parse as contrastive passive VP coordination; got: {got:#?}"
+    );
+}
+
 

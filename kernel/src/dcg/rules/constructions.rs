@@ -84,6 +84,60 @@ pub fn coordinate_but_not_sem(cat: &Exp, a: &Exp, b: &Exp, layer: &Arc<Layer>) -
     but_not_coord(&and, &denote, a, b, 0, layer)
 }
 
+/// Contrastive prop-ending coordination (`a but not b`, `a rather than b`) with the same bare-kind
+/// object-GQ raising ([`raise_kind_to_object_gq`]) and object-GQ type-generalization ([`common_cat`])
+/// that [`coordinate_prop`] provides for `and`/`or`.
+///
+/// Without this, `coordinate_but_not_sem` required exact bidirectional unification
+/// ([`cats_coordinate`]), so two determined object GQs of distinct noun classes (`the complete set
+/// rather than a selection`) or a bare kind paired with a determined object GQ failed to coordinate.
+pub fn coordinate_but_not_prop(
+    l_cat: &Exp,
+    l_sem: &Exp,
+    r_cat: &Exp,
+    r_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    if is_ctor(r_cat, "cat_coord").is_some() || sem_is_coordination(r_sem) {
+        return None;
+    }
+    let (l_raised, r_raised);
+    let (l_cat, l_sem, r_cat, r_sem) = if is_ctor(l_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(l_cat, l_sem, r_cat) {
+            Some((c, m)) => {
+                l_raised = (c, m);
+                (&l_raised.0, &l_raised.1, r_cat, r_sem)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else if is_ctor(r_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(r_cat, r_sem, l_cat) {
+            Some((c, m)) => {
+                r_raised = (c, m);
+                (l_cat, l_sem, &r_raised.0, &r_raised.1)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else {
+        (l_cat, l_sem, r_cat, r_sem)
+    };
+    let base_cat = if cats_coordinate(l_cat, r_cat, layer) {
+        l_cat.clone()
+    } else {
+        match common_cat(l_cat, r_cat, layer) {
+            Some(gen)
+                if is_ctor(&gen, "bwd").is_some()
+                    && denote_cat(&gen).map(|d| prop_ending(&d)).unwrap_or(false) =>
+            {
+                gen
+            }
+            _ => return None,
+        }
+    };
+    let sem = coordinate_but_not_sem(&base_cat, l_sem, r_sem, layer)?;
+    Some((base_cat, sem))
+}
+
 fn but_not_coord(
     and: &Iri,
     denote: &Exp,
