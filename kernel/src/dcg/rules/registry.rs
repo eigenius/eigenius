@@ -931,6 +931,8 @@ pub(crate) enum UnaryKind {
     DefiniteDesignation,
     /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
     FrontParticipial,
+    /// Gerund VP subject: a subject-gapped `ger` VP → a singular finite-clause subject `S /⋆ (S\NP_sg)`.
+    GerundSubject,
     /// Reduced relative (core-en `rrel`): a subject-gapped `pss` VP → a noun post-modifier `cat_pp`,
     /// so `pp_mod` attaches it. The post-nominal counterpart of `FrontParticipial`.
     ReducedRelative,
@@ -1000,7 +1002,7 @@ impl UnaryShift {
 /// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
 /// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
 /// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
-static UNARY_SHIFTS: [UnaryShift; 10] = [
+static UNARY_SHIFTS: [UnaryShift; 11] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -1051,6 +1053,11 @@ static UNARY_SHIFTS: [UnaryShift; 10] = [
         kind: UnaryKind::FrontParticipial,
         name: "front_participial",
         apply: apply_front_participial,
+    },
+    UnaryShift {
+        kind: UnaryKind::GerundSubject,
+        name: "gerund_subject",
+        apply: apply_gerund_subject,
     },
     UnaryShift {
         kind: UnaryKind::ReducedRelative,
@@ -1161,6 +1168,25 @@ fn apply_front_participial(
     let (i, j) = span;
     front_participial(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
+        .into_iter()
+        .collect()
+}
+
+/// Gerund VP subject: a subject-gapped `ger` VP → `S[dcl,fin] /⋆ (S[dcl,fin]\NP_sg)` over
+/// `kind_of(Σs:T. body(s))`. Refused when the cell is followed by a comma (where the participial is
+/// a fronted adjunct, not a clausal subject) or a coordinator (coordination completes on `ger` VPs
+/// before this shift runs).
+fn apply_gerund_subject(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    rctx: super::RightContext,
+) -> Vec<Item> {
+    if !matches!(rctx, super::RightContext::Other) {
+        return Vec::new();
+    }
+    gerund_subject(it.cat(), it.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
         .into_iter()
         .collect()
 }

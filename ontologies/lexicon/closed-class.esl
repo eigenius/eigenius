@@ -402,6 +402,15 @@ resource lexicon:were_copula : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
 }
+// be — base-form copula over predicative adjective / nominal (`to be essential`, `may be a target`).
+resource lexicon:be_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: base/infinitive form of BE — copula over a predicative adjective or nominal.";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
 
 // ── IDENTITY COPULA (D99 §10's identity form; D63 §8.5's membership `a` is its counterpart) ──
 // "The NOD2-to-NF-kB axis is the inflammatory-bowel-disease arm." Both sides are REFERRING
@@ -6478,4 +6487,76 @@ resource lexicon:some_of_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:some_of_obj_sem;
     lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "some of";
+}
+
+// ── Existential `there` (`There is a gene.`, `There are genes.`, `There is no gene.`) ──────────
+// Consumes the finite copula's `cat_numpred` entry (`is`/`are`/`was`/`were`, binding its agreement
+// number `n = sg | pl`) and yields an application-only functor `S[dcl,fin] /⋆ (S[dcl,fin_any] /
+// (S[dcl,fin]\NP_n))` that scopes the post-verbal generalized quantifier over the trivial existence
+// predicate `λx:Entity. Eq(Entity, x, x)`.
+//
+// Keying the copula argument to `cat_numpred` restricts expletive `there` to `is`/`are`/`was`/`were`
+// (no content verb has `cat_numpred`), while threading `n` into the GQ's VP slot enforces number
+// agreement between the copula and the post-verbal NP (`There is a gene` and `There are genes` parse;
+// `*There is genes`, `*There are a gene`, and `*There affects a gene` are refused).
+//
+// `lexicon:sense` is intentionally omitted: `apply_sense_cap` keeps sense-less grammatical entries
+// unconditionally without consuming a sense-cap slot, so WordNet's locative adverb `there.r.00109151`
+// and noun `there.n.08489627` both survive at `SENSE_CAP = 2`.
+resource lexicon:there_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (cop : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) =>
+          fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+            Q(cop(fun (x : lexicon:Entity) => eigentt:Eq(lexicon:Entity, x, x)))
+          : ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) -> ((lexicon:Entity -> Prop) -> Prop) -> Prop )
+    );
+}
+resource lexicon:there_expl : lexicon:LexicalEntry {
+    core:description = "grammatical: existential expletive THERE ('There is a gene', 'There are two genes').";
+    lexicon:form     = "there";
+    lexicon:cat      = type_expr(
+        lexicon:cat_num_forall(fun (n : lexicon:Num) =>
+            lexicon:fwd(lexicon:m_app,
+                lexicon:fwd(lexicon:m_app,
+                    lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                    lexicon:fwd(lexicon:m_all,
+                        lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+                        lexicon:bwd(lexicon:m_all,
+                            lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                            lexicon:cat_np(lexicon:Entity, n)))),
+                lexicon:fwd(lexicon:m_all,
+                    lexicon:bwd(lexicon:m_all,
+                        lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                        lexicon:cat_np(lexicon:Entity, n)),
+                    lexicon:cat_numpred)))
+    );
+    lexicon:sem      = lexicon:there_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) -> ((lexicon:Entity -> Prop) -> Prop) -> Prop );
+}
+
+// ── Infinitival `to` (`wants to report genes`, `showed the gene to be essential`) ───────────────
+// `to_inf` lifts a base-form VP `S[dcl,bse]\NP` to an infinitival VP `S[dcl,inf]\NP` with identity
+// semantics (`copula_sem`), consumed by subject-control verbs (`FrameKind::SubjectControl`, WordNet
+// frame 28: `(S\NP)/(S[dcl,inf]\NP)`).
+//
+// `to_ecm` lifts a base-form VP `S[dcl,bse]\NP` to `(cat_cp \⋆ NP)` with identity semantics, so an
+// ECM subject NP on its left (`[the gene] [to be essential]`) backward-applies to form a propositional
+// complement `cat_cp` (`essential(the(Gene))`) consumed by clause-taking verbs (`show`, `prove`,
+// `demonstrate`, `expect`, `find`). The `m_app` backward slash prevents composition, and `cat_cp` is
+// non-root so an unembedded `[NP to VP]` cannot stand as a matrix clause.
+resource lexicon:to_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: infinitival marker TO ('wants to report genes').";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_ecm : lexicon:LexicalEntry {
+    core:description = "grammatical: ECM infinitival marker TO ('showed the gene to be essential').";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_app, lexicon:cat_cp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
 }

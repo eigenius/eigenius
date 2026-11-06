@@ -2282,9 +2282,14 @@ fn bwd_pat(res: CatPat, arg: CatPat) -> CatPat {
 fn vp_pat() -> CatPat {
     bwd_pat(any_s_pat(), any_np_pat())
 }
-/// A type-raised subject GQ `S/(S\NP)` — the right operand every GQ-prep rule consumes.
+/// A type-raised subject GQ `S/(S\NP)` (`m_all` outer slash) — the right operand every GQ-prep rule
+/// consumes. Keyed to `m_all` so application-only subject functors (`gerund_subject`'s `S /⋆ (S\NP_sg)`)
+/// apply only to finite VPs and do not enter preposition-object raising.
 fn raised_gq_pat() -> CatPat {
-    fwd_pat(any_s_pat(), vp_pat())
+    CatPat::Ctor(
+        "fwd",
+        vec![CatPat::Ctor("m_all", vec![]), any_s_pat(), vp_pat()],
+    )
 }
 
 /// The agentive-passive `by`'s functor RESULT — `(S[pass]\NP) \ ((S[pss]\NP)/NP)`: a passive patient-VP

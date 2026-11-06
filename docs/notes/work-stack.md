@@ -17,7 +17,20 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh`** (reseeded `2026-11-05` via
+> **Store: `wordnet-umls-hpo-aligned-2026-11-05-core-en-89`** (reseeded `2026-11-05` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Batch closing the final 4 `core-en-families.txt` grammar-gaps: gerund VP subjects
+> (`gerund_subject` unary shift in `constructions.rs` + `UNARY_SHIFTS`), `there`-existentials
+> (`there_sem`, `there_expl`), `to`-infinitive subject control (`to_inf` + WordNet frame 28
+> `FrameKind::SubjectControl`), ECM `to`-infinitives (`be_copula`, `to_ecm`), and simple-past verb
+> lemmatizer number relaxation (`with_past_verb_num` in `seed.rs` for verbs whose simple past
+> differs from their participle, e.g. `showed`/`shown`, `began`/`begun`). **Battery 89 of 89
+> (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en families!)**, page
+> grammar-gap **445** (−7), encoded 18, ambiguous 439 (+4), open 154 (+3), claim units **69**,
+> one-away **87** (+3), readings 41,774, skeletons 5,527 (8 strictly forward unit transitions on the
+> page, 0 regressions).
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
 > 864). Batch: adjectival degree `very` (`very_deg`, `very_deg_sem`, `very_adj`), possessive clitic
 > `'s` (`poss_s_subj_sem`, `poss_s_obj_sem`, `poss_s_{subj,obj}_{sg,pl}` + preprocessor clitic split),

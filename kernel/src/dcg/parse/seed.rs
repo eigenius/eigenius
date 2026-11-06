@@ -142,6 +142,11 @@ impl Parser {
         // its `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase
         // prose is not.
         let surface_all_caps = super::all_caps_symbol(surface.trim());
+        let surface_has_wn_verb = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "v"));
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.lex.entries_for(c), scope);
@@ -342,7 +347,25 @@ impl Parser {
             // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
             // bites at composition.
             let num = if *c == s_lc { "sg" } else { "pl" };
-            out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
+            // Simple-past verb forms whose surface differs from the past participle (`showed` vs
+            // `shown`, `began` vs `begun`, `ran` vs `run`, `went` vs `gone`) are not emitted as
+            // separate `fpast` entries by the WordNet importer (`head_pps` carries only the
+            // participle). They reach their verb entries only by lemmatizer reduction to the base
+            // lemma `c`, whose finite entry (`_fp`) carries a `pl` subject slot (`6-agr`). Relax
+            // that finite subject slot to `num_any` (= `cat_fin_past`) so singular subjects
+            // ("The study showed…", "The study began…") compose with simple-past verbs.
+            let is_past_reduction = *c != s_lc
+                && !s_lc.ends_with("ing")
+                && crate::dcg::regular_plural_stem(&s_lc).as_deref() != Some(c.as_str())
+                && !surface_has_wn_verb;
+            out.extend(entries.iter().map(|e| {
+                let it = with_noun_num(&e.item, num);
+                if is_past_reduction {
+                    with_past_verb_num(&it)
+                } else {
+                    it
+                }
+            }));
         }
         // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
         // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
@@ -2045,6 +2068,61 @@ pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
         }
     }
     it.clone()
+}
+
+/// Relax a plural finite subject slot `bwd(m, cat_s(_, fin), cat_np(T, pl))` at any functor depth
+/// to `bwd(m, cat_s(_, fin), cat_np(T, num_any))` when seeding a simple-past verb surface via
+/// lemmatizer reduction to its base lemma.
+fn relax_finite_subj_to_num_any(cat: &Exp) -> Exp {
+    if let Exp::InductiveCtor(decl, name, args) = cat {
+        if name == "bwd" && args.len() == 3 {
+            let finite = matches!(is_ctor(&args[1], "cat_s"),
+                Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
+            if finite {
+                if let Exp::InductiveCtor(np_decl, np_name, np_args) = &args[2] {
+                    if np_name == "cat_np" && np_args.len() == 2 {
+                        if let Exp::InductiveCtor(num_decl, n, _) = &np_args[1] {
+                            if n == "pl" {
+                                let num_any = Exp::InductiveCtor(
+                                    num_decl.clone(),
+                                    "num_any".to_string(),
+                                    Vec::new(),
+                                );
+                                let new_np = Exp::InductiveCtor(
+                                    np_decl.clone(),
+                                    np_name.clone(),
+                                    vec![np_args[0].clone(), num_any],
+                                );
+                                return Exp::InductiveCtor(
+                                    decl.clone(),
+                                    name.clone(),
+                                    vec![args[0].clone(), args[1].clone(), new_np],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Exp::InductiveCtor(
+            decl.clone(),
+            name.clone(),
+            args.iter().map(relax_finite_subj_to_num_any).collect(),
+        );
+    }
+    cat.clone()
+}
+
+fn with_past_verb_num(it: &Item) -> Item {
+    if !has_plural_finite_subject(it.cat()) {
+        return it.clone();
+    }
+    Item::from_parts(
+        relax_finite_subj_to_num_any(it.cat()),
+        it.sem().clone(),
+        it.prov(),
+        it.cost(),
+    )
 }
 
 /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate

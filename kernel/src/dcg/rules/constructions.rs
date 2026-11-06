@@ -1521,6 +1521,64 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     Some((ss, new_sem))
 }
 
+/// **Gerund VP subject** (core-en `unary-rules.xsl`, nominalized-VP subject shift): a saturated
+/// subject-gapped present-participle VP `cat_s(dcl, ger)\NP_T` ("Reporting genes", "Reverting the
+/// stop") becomes a singular finite-clause subject functor `S[dcl,fin] /⋆ (S[dcl,fin]\NP_sg)` over
+/// the nominalized kind `ontology:kind_of(Σs:T. body(s)) : Entity` (`λV. V(kind_of(Σs:T. body(s)))`).
+///
+/// The outer slash carries `m_app` (`⋆`, application-only) so the shifted subject can only
+/// forward-apply to a complete finite VP (`is essential`, `should restore …`), never forward-compose
+/// or enter the `gq_prep_*` rules, and the inner subject slot is fixed at `sg` so singular agreement
+/// holds (`Reporting genes is essential` parses; `*Reporting genes are essential` is refused).
+pub fn gerund_subject(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return None;
+    };
+    let (_m, s, np) = slash_parts(cat, "bwd")?;
+    let [mood, fin] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
+        return None;
+    }
+    let [subj_ty, _] = is_ctor(np, "cat_np")? else {
+        return None;
+    };
+    let mood_d = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin_d = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
+    let num_d = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
+    let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
+    let fin_c = Exp::InductiveCtor(fin_d, "fin".into(), vec![]);
+    let sg = Exp::InductiveCtor(num_d, "sg".into(), vec![]);
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, fin_c]);
+    let np_sg = Exp::InductiveCtor(cat_decl.clone(), "cat_np".into(), vec![entity, sg]);
+    let m_all = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_ALL)?;
+    let m_app = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_APP)?;
+    let vp_fin = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all, s_fin.clone(), np_sg],
+    );
+    let subj_cat = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![m_app, s_fin, vp_fin]);
+    let (s_var, v_var) = ("__ger_s", "__ger_V");
+    let body = Exp::App(Box::new(sem.clone()), Box::new(Exp::Var(s_var.into())));
+    let sigma = Exp::Sig(
+        Patt::Var(s_var.into()),
+        Box::new(subj_ty.clone()),
+        Box::new(body),
+    );
+    let nom = crate::dcg::category::kind_of(sigma);
+    let new_sem = Exp::Lam(
+        Patt::Var(v_var.into()),
+        Box::new(Exp::App(Box::new(Exp::Var(v_var.into())), Box::new(nom))),
+    );
+    Some((subj_cat, new_sem))
+}
+
 /// **Reduced relative** (core-en `unary-rules.xsl`, the `rrel` type-changing rule): a subject-gapped
 /// PASSIVE VP becomes a NOUN POST-MODIFIER — "the dependency [compared to MSS cells]", "the deficiency
 /// [predicted by the model]".
