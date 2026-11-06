@@ -54,13 +54,30 @@ any detour.
 > (`re-`, `under-`, `over-`, `self-`, `co-`, `out-`, `cross-`, `pre-`, `de-`), fronted passive
 > participials in `front_participial`, `pss` backward adverb modifiers, discourse adverbs (`instead`,
 > `otherwise`, `then`, `still`, `already`), and sentence-initial negative imperatives (`Do not …`).
+> Batch 5 (kernel-only on the same store): identifier/notation/OOV-name `cat_n(Entity, sg)` +
+> `cat_np(ProperName, sg)` siblings for close-naming apposition (`name`) and determined/classifier
+> positions, `group_compound` (`[cat_group] [cat_n]` coordinated nominal pre-modifiers), preposition
+> paradigm completions (`through`, `across`, `against`, `inside`, `outside`, `onto`, `behind`, `along`,
+> `alongside`, `besides`, `among`, `around`, `past`, `out of`, `ahead of`, `apart from`, `away from`,
+> `plus`, `upstream of`, `downstream of`), generic non-finite VP-adjunct completion (`bse`, `inf`,
+> `ger`, `pss`, `pass`) for finite VP-adjunct prepositions, preposition stranding (`to act against`,
+> `to fall back on`, `is used for`), bare singular abstract/technical nominal complements of
+> prepositions, object-predicative verb frames (`call`, `make`, `rate`, `rank`, `leave`, `keep`, `get`,
+> `consider`, `deem`, `render`), inchoative/linking copulas (`become`, `stay`, `remain`),
+> intransitive/unaccusative alternations (`express`, `resolve`, `match`, `compensate`, `cancel`,
+> `cluster`, `tally`), propositional copular complements (`is [not] that S`), `adj_cp_comp` and
+> `tv_cp_comp`, floating `each`, bare-numeral verb objects (`tv_num_obj`, `dtv_num_obj`) and
+> bare-numeral prepositions/bounds, non-integer decimal count determiners, `expected`/`observed` plural
+> nominals, `nucleotides`/`stars`/`orders` bare-numeral measure/NP post-heads, `long` predicative
+> measure adjective, `inf_rel_vp`/`inf_rel_tv` post-nominal `to`-infinitive relatives + `for NP to VP`
+> PPs, sentence-initial affirmative imperatives, and `least`/`worse`/`better`/`one`/`such`/`as was`.
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **224** (−228 vs `452` before Batch 1, −62 vs `286` after Batch 3;
-> 832 / 1,056 units parsed = 78.8%), encoded **19**, ambiguous **582** (+35), open **231** (+27),
-> claim units **145 / 274** (+34 vs Batch 3, +76 vs before Batch 1; **52.9%** of non-PROV claim units
-> fully parsed), one-away **74 / 274** (−21 as one-away claims graduated to fully parsed; **219 / 274 =
-> 79.9%** of claim units now either fully parsed or 1 sentence away), readings 58,657, skeletons 9,270
-> (62 strictly forward `GRAMMAR-GAP` → parsed transitions in Batch 4, 0 regressions).
+> families!)**, page grammar-gap **139** (−313 vs `452` before Batch 1, −85 vs `224` after Batch 4;
+> 917 / 1,056 units parsed = **86.8%**), encoded **11**, ambiguous **683** (+101), open **223**,
+> claim units **186 / 274** (+41 vs Batch 4, +117 vs before Batch 1; **67.9%** of non-PROV claim units
+> fully parsed), one-away **58 / 274** (**244 / 274 = 89.1%** of claim units now either fully parsed or
+> 1 sentence away), readings 74,295, skeletons 16,630 (85 strictly forward `GRAMMAR-GAP` → parsed
+> transitions in Batch 5, 0 regressions).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

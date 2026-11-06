@@ -505,7 +505,7 @@ fn list_term(members: &[Exp]) -> Exp {
 
 /// The members of a group sem (a `List` cons-chain), in order. `None` if the sem
 /// is not a well-formed `cons`/`nil` chain.
-fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
+pub(crate) fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
     let mut out = Vec::new();
     let mut cur = sem;
     loop {
@@ -771,6 +771,9 @@ fn np_conjunct(
         return None;
     };
     let ty = args.first()?.clone();
+    if matches!(&ty, Exp::EigonClass(iri) if iri.as_str() == "urn:eigenius:lexicon:ProperName") {
+        return None;
+    }
     let Exp::InductiveCtor(num_decl, _, _) = args.get(1)? else {
         return None;
     };
@@ -1364,6 +1367,10 @@ pub fn type_raise(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)
         return None;
     };
     if name != "cat_np" || args.len() != 2 {
+        return None;
+    }
+    if matches!(&args[0], Exp::EigonClass(iri) if iri.as_str() == "urn:eigenius:lexicon:ProperName")
+    {
         return None;
     }
     // The fixed target `S = cat_s(dcl, fin)` — a finite declarative clause (the body

@@ -1242,7 +1242,15 @@ impl Guard {
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
             Guard::NotSuperlativeRefined(op) => !is_superlative_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
-            Guard::NotPronoun(op) => op.pick(left, right).prov != Combinator::Pronoun,
+            Guard::NotPronoun(op) => {
+                let p = op.pick(left, right);
+                p.prov != Combinator::Pronoun
+                    && !matches!(
+                        is_ctor(&p.cat, "cat_np"),
+                        Some([Exp::EigonClass(iri), _])
+                            if iri.as_str() == "urn:eigenius:lexicon:ProperName"
+                    )
+            }
             Guard::NotDerivedIndividual(op) => {
                 op.pick(left, right).prov != Combinator::DerivedIndividual
             }
@@ -1364,6 +1372,21 @@ fn refine_rules() -> &'static [CatRule] {
                 guards: &[],
                 build: refine_sup_partitive,
             },
+            // Coordinated nominal modifier before a head noun (`the cIAP2 and MALT1 fusion`):
+            // `[cat_group(_, conn_and, _)] [cat_n(C, num)]` → `cat_n(Σx:C. ∧_m compound(x, m), num)`.
+            CatRule {
+                name: "group_compound",
+                left_pat: Ctor(
+                    "cat_group",
+                    vec![Var("_"), Ctor("conn_and", vec![]), Var("_")],
+                ),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Right),
+                    Guard::NotAdjectiveRefined(Operand::Right),
+                ],
+                build: refine_group_compound,
+            },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
             // not itself be a compound result. Adjective-outside NF (§3.3): nor an adjective-refined
             // one — an adjective on the head attaches OUTSIDE the compound, not before it.
@@ -1429,6 +1452,39 @@ fn refine_rules() -> &'static [CatRule] {
                     Guard::NotSuperlativeRefined(Operand::Left),
                 ],
                 build: refine_pp_mod,
+            },
+            // Post-nominal `to`-infinitive relative modifier (`no case reports to anchor on`,
+            // `a way to do X`): `[cat_n(C, num)] [S[dcl,inf]\NP]` → `cat_n(Σx:C. right(x), num)`.
+            CatRule {
+                name: "inf_rel_vp",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_pp_mod,
+            },
+            // Post-nominal object-gapped `to`-infinitive relative modifier (`another family to check`,
+            // `nothing to fall back on`): `[cat_n(C, num)] [(S[dcl,inf]\NP)/NP]`.
+            CatRule {
+                name: "inf_rel_tv",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_inf_rel_tv,
             },
         ]
     });
@@ -2260,6 +2316,46 @@ fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Ar
     })
 }
 
+/// Coordinated nominal modifier `[cat_group] [cat_n]` → `Σx:C. ∧_m compound(x, m)`.
+fn refine_group_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let members = super::constructions::group_members(left.sem())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| vec![left.sem().clone()]);
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        let mut it = members
+            .iter()
+            .map(|m| app2("urn:eigenius:ontology:compound", x, m.clone()));
+        let first = it.next().expect("non-empty members");
+        it.fold(first, |acc, next| {
+            Exp::const_applied(and.clone(), Vec::new(), vec![acc, next])
+        })
+    })
+}
+
+/// Post-nominal object-gapped `to`-infinitive modifier (`[cat_n(C, num)] [(S[dcl,inf]\NP)/NP]`):
+/// `Σx:C. right(x, speaker)`.
+fn refine_inf_rel_tv(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(left, binds);
+    let spk = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:speaker")
+            .expect("static speaker IRI"),
+    );
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(right.sem().clone()),
+                Box::new(Exp::Var(x.into())),
+            )),
+            Box::new(spk.clone()),
+        )
+    })
+}
+
 /// N-N kind compound `[cat_n] [cat_n]` → `Σx:C. compound_kind(x, ⟦left⟧)`. Head noun is the right.
 fn refine_kind_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
@@ -2673,6 +2769,67 @@ fn other_grammar_rules() -> &'static [CatRule] {
                     Guard::NotComposed(Operand::Left),
                 ],
                 build: build_vp_functor_bwd_adv,
+            },
+            // Transitive verb + bare numeral object (`scores 0.72`, `exceeds 0.7`, `equals 1`):
+            // `[(S[dcl,tv_fin]\NP)/NP] [cat_num]` → `S[dcl,tv_fin]\NP`.
+            CatRule {
+                name: "tv_num_obj",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                        Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                    ),
+                    Ctor("cat_np", vec![Var("tv_obj_ty"), Var("tv_obj_num")]),
+                ),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_num_obj,
+            },
+            // Oblique-complement transitive verb + bare numeral object (`scores 0.72 on X`):
+            // `[((S[dcl,tv_fin]\NP)/cat_pp_arg(Prep))/NP] [cat_num]` → `(S[dcl,tv_fin]\NP)/cat_pp_arg(Prep)`.
+            CatRule {
+                name: "dtv_num_obj",
+                left_pat: fwd_pat(
+                    fwd_pat(
+                        bwd_pat(
+                            Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                            Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                        ),
+                        Ctor("cat_pp_arg", vec![Var("tv_prep")]),
+                    ),
+                    Ctor("cat_np", vec![Var("tv_obj_ty"), Var("tv_obj_num")]),
+                ),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_num_obj,
+            },
+            // Predicative adjective + `that`/`whether` complement clause (`is explicit that S`):
+            // `[S[dcl,adj]\NP] [cat_cp]` → `S[dcl,pred]\NP`.
+            CatRule {
+                name: "adj_cp_comp",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_cp", vec![]),
+                guards: &[],
+                build: build_adj_cp_comp,
+            },
+            // Transitive verb + `that`/`whether` complement clause when the verb's clausal frame
+            // is absent from WordNet (`caution that S`, `warn that S`):
+            // `[(S[dcl,tv_fin]\NP)/NP] [cat_cp]` → `S[dcl,tv_fin]\NP`.
+            CatRule {
+                name: "tv_cp_comp",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                        Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_cp", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_cp_comp,
             },
         ]
     });
@@ -3142,6 +3299,79 @@ fn build_vp_functor_bwd_adv(
     let body = Exp::App(Box::new(right.sem().clone()), Box::new(l_z));
     let sem = Exp::Lam(Patt::Var(z.into()), Box::new(body));
     Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
+}
+
+/// Transitive / ditransitive verb + bare numeral object (`scores 0.72`, `exceeds 0.7`):
+/// nominalizes the bare numeral as `ontology:the_count(tv_obj_ty, right)` and applies `left`.
+fn build_tv_num_obj(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let obj_ty = binds.get("tv_obj_ty").cloned().unwrap_or_else(|| {
+        Exp::EigonClass(
+            crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity")
+                .expect("valid Entity iri"),
+        )
+    });
+    let the_count = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the_count")
+            .expect("valid the_count iri"),
+    );
+    let num_ent = Exp::App(
+        Box::new(Exp::App(Box::new(the_count), Box::new(obj_ty))),
+        Box::new(right.sem().clone()),
+    );
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(num_ent));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Predicative adjective + complement clause `cat_cp` (`is explicit that S`):
+/// `λx. And(left(x), right)` with output category `S[dcl,pred]\NP`.
+fn build_adj_cp_comp(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__adj_cp_x";
+    let l_app = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, right.sem().clone()]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(left.cat()),
+        sem,
+        Combinator::ForwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Transitive verb + complement clause `cat_cp` (`caution that S`, `warn that S`):
+/// `λs. And(left(s, s), right)`.
+fn build_tv_cp_comp(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let s = "__tv_cp_s";
+    let l_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(left.sem().clone()),
+            Box::new(Exp::Var(s.into())),
+        )),
+        Box::new(Exp::Var(s.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, right.sem().clone()]);
+    let sem = Exp::Lam(Patt::Var(s.into()), Box::new(body));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
 /// Coordination/distributive rules — the packed-forest **carve-out** (Harper 1994 pitfall): these
