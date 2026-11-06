@@ -860,10 +860,10 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     let bound = clause(Exp::Var("ADV#fin".to_string()));
     let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
 
-    // 2. Backward VP modifier — verbal only (`fin`, `pass`, `ger`, `bse`, `inf`; excludes `adj` and
-    //    `pred`); returns the finiteness feature it accepts.
+    // 2. Backward VP modifier — verbal only (`fin`, `pss`, `pass`, `ger`, `bse`, `inf`; excludes
+    //    `adj` and `pred`); returns the finiteness feature it accepts.
     let mut out = vec![fwd_mod];
-    for f_name in ["fin", "pass", "ger", "bse", "inf"] {
+    for f_name in ["fin", "pss", "pass", "ger", "bse", "inf"] {
         let vp = clause(Exp::InductiveCtor(fin.clone(), f_name.to_string(), vec![]));
         out.push(ctor("bwd", vec![m_all.clone(), vp.clone(), vp]));
     }
@@ -872,8 +872,8 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
 }
 
 /// If `cat` is a finite backward VP-modifier category `bwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
-/// (the shape imported WordNet adverbs carry in `data.adv`), return its four non-finite verbal
-/// siblings (`pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so post-verbal adverbs also
+/// (the shape imported WordNet adverbs carry in `data.adv`), return its five non-finite verbal
+/// siblings (`pss`, `pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so post-verbal adverbs also
 /// attach to passive, gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly", "stating
 /// precisely", "can affect cells directly", "to report directly"). Excludes `adj` and `pred`.
 pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
@@ -901,7 +901,7 @@ pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
     let Exp::InductiveCtor(cat_decl, _, _) = cat else {
         return Vec::new();
     };
-    ["pass", "ger", "bse", "inf"]
+    ["pss", "pass", "ger", "bse", "inf"]
         .into_iter()
         .map(|f_name| {
             let s_f = Exp::InductiveCtor(

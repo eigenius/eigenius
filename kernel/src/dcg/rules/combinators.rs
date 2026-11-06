@@ -2522,10 +2522,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 name: "name_numeral",
                 left_pat: Ctor("cat_n", vec![Var("sortal"), Var("sortalnum")]),
                 right_pat: Ctor("cat_num", vec![]),
-                guards: &[
-                    Guard::NotPlural("sortalnum"),
-                    Guard::NotPpRefined(Operand::Left),
-                ],
+                guards: &[Guard::NotPpRefined(Operand::Left)],
                 build: build_name_numeral,
             },
             // Essive `as` + predicative adjective (`classifies X as Benign`, `treats X as pathogenic`):

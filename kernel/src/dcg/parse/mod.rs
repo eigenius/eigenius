@@ -467,10 +467,39 @@ impl Parser {
         if surface.trim() == "I"
             || matches!(
                 s_lc.as_str(),
-                "yours" | "mine" | "ours" | "theirs" | "worth"
+                "yours"
+                    | "mine"
+                    | "ours"
+                    | "theirs"
+                    | "worth"
+                    | "you"
+                    | "them"
+                    | "me"
+                    | "us"
+                    | "itself"
+                    | "themselves"
+                    | "any"
+                    | "any of"
+                    | "where"
+                    | "so that"
+                    | "whether"
+                    | "why"
+                    | "how"
+                    | "how much"
+                    | "how many"
+                    | "whatever"
             )
         {
             return true;
+        }
+        for prefix in [
+            "mis-", "re-", "under-", "over-", "self-", "co-", "out-", "cross-", "pre-", "de-",
+        ] {
+            if let Some(stem) = s_lc.strip_prefix(prefix) {
+                if stem.len() >= 3 && self.has_token(stem, lemmatizer) {
+                    return true;
+                }
+            }
         }
         // Exactly the lemmas the SEEDER will try ([`super::seed`] opens with the same call), so a
         // token this reports missing is a token the parser could not have seeded. The list used to

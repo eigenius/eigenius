@@ -1544,7 +1544,7 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger" || n == "pass") {
         return None;
     }
     let and = inductive_iri(layer, "urn:eigenius:logic:And")?;

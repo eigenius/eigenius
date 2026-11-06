@@ -40,13 +40,27 @@ any detour.
 > unsaturated copular/verbal functors), `copula_pp`, `adj_pp_mod`, `adj_pass_mod`, `noun_adj_pred`,
 > `as_adj_arg` + `as` VP-adjunct categories, `name_numeral` classifier + numeral designator, singular
 > `kind_raised_nps` for capitalized/alphanumeric identifier tokens, all-caps verb-homograph acronym NP
-> fallback, `mis-` verbal stem lookup, and participial head fallback in `hyphen_compound_items`.
+> fallback, `mis-` verbal stem lookup, and participial head fallback in `hyphen_compound_items`. Batch 4
+> (kernel-only on the same store): closed-class pronoun/determiner completions (`you`, `them`, `me`,
+> `us`, `itself`, `themselves` including post-nominal/post-NP emphatic reflexives, `any`, `any of`,
+> correlative pre-GQ/pre-NP `both`), post-modified indefinite pronouns (`nothing`/`something`/`anything`/
+> `everything`/`someone`/`anyone`/etc. taking post-nominal `cat_pp`, predicative adjective, passive
+> participial, or gerund participial modifiers), subordinating conjunctions (`where`, `so that`,
+> `before`, `after`, `once`, `since`, `until`) plus post-nominal relative `where`, embedded
+> clausal/free-relative complementizers (`why`, `how`, `whether`, `whatever`, `how much`, `how many`),
+> non-integer/negative numeral dimensionless `cat_mp` seeding + measure-value prepositions (`to`,
+> `from`, `above`, `below`, `under`, `over`) + bare-numeral range `to` + plural `name_numeral`
+> classifiers + bounded `cat_factor` (`by` + bound modifiers), productive hyphen-prefix stem lookup
+> (`re-`, `under-`, `over-`, `self-`, `co-`, `out-`, `cross-`, `pre-`, `de-`), fronted passive
+> participials in `front_participial`, `pss` backward adverb modifiers, discourse adverbs (`instead`,
+> `otherwise`, `then`, `still`, `already`), and sentence-initial negative imperatives (`Do not …`).
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **286** (−166 vs `452` before Batch 1, −150 vs `436` after Batch 2;
-> 770 / 1,056 units parsed = 72.9%), encoded **19** (+1), ambiguous **547** (+100), open **204** (+49),
-> claim units **111 / 274** (+39 vs Batch 2, +42 vs before Batch 1), one-away **95 / 274** (+9),
-> readings 51,587, skeletons 8,417 (150 strictly forward `GRAMMAR-GAP` → parsed transitions in Batch 3,
-> 0 regressions).
+> families!)**, page grammar-gap **224** (−228 vs `452` before Batch 1, −62 vs `286` after Batch 3;
+> 832 / 1,056 units parsed = 78.8%), encoded **19**, ambiguous **582** (+35), open **231** (+27),
+> claim units **145 / 274** (+34 vs Batch 3, +76 vs before Batch 1; **52.9%** of non-PROV claim units
+> fully parsed), one-away **74 / 274** (−21 as one-away claims graduated to fully parsed; **219 / 274 =
+> 79.9%** of claim units now either fully parsed or 1 sentence away), readings 58,657, skeletons 9,270
+> (62 strictly forward `GRAMMAR-GAP` → parsed transitions in Batch 4, 0 regressions).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
