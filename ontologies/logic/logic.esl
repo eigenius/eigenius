@@ -88,6 +88,29 @@ axiom logic:Will : Prop -> Prop
 axiom logic:Would : Prop -> Prop
 axiom logic:Should : Prop -> Prop
 
+// ── FACTIVE subordinators (D62 2d, Fork A — `d62-subordinator-design-findings.md`) ──
+// `because` / `although` / `while` are FACTIVE: each presupposes both clauses, and the decided
+// treatment is a dependent signature that takes PROOFS of them —
+// `Because : Π(p q:Prop) → p → q → Prop` — so presupposition becomes a type-checking requirement
+// rather than a side channel. The parser never PROVES a clause (felicity ≠ truth); the proof
+// arguments are hypothetical, introduced as fresh variables and exported as proof obligations for
+// the justification-logic layer to discharge or fail closed on.
+//
+// Each is its OWN opaque primitive, for the reason the modals above are: collapsing `because` onto
+// `And` would drop the causal claim from the typed content, and there is no causal or temporal
+// relation here to reduce it to. The kernel asserts no laws about them; their meaning is supplied
+// on the reasoning side.
+//
+// Projection falls out of ordinary variable scoping (§5): a hypothesis still free in Γ is a
+// PROJECTED presupposition, one discharged within a sub-derivation is FILTERED. Negation
+// (`¬X := X → False`) and the modals above are formed within Γ and do not discharge, so the
+// obligations project through them — "it wasn't because he was angry" still presupposes he was
+// angry. Round 3 confirmed that account except for PLUGS (attitude verbs), which must bind their
+// complement's obligations and do not yet.
+axiom logic:Because : forall (p : Prop) => forall (q : Prop) => p -> q -> Prop
+axiom logic:Although : forall (p : Prop) => forall (q : Prop) => p -> q -> Prop
+axiom logic:While : forall (p : Prop) => forall (q : Prop) => p -> q -> Prop
+
 // NOTE: contrastive `but` (D62 §2d) maps to `logic:And` — verified adequate against every
 // `but` in the WRN source (all are "X but (not) Y", truth-conditionally plain conjunction;
 // the contrast is rhetorical, carried by explicit negation, and not part of the typed claim).

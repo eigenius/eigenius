@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! HGVS change notation. Lived in `crates/eigenius-pmi-registry/src/hgvs.rs` until `2026-10-11`,
+//! moved into this leaf crate so the kernel's document glossary can read the same parser.
+//!
+//! **The contract below is unchanged by the move.** In particular `p.L44P` is still REFUSED — the
+//! registry's rows use three-letter residues and a one-letter read of an allele would be a
+//! different allele. One-letter recognition for the glossary is a SEPARATE entry point
+//! ([`crate::recognize`]), never a loosening of these.
+//!
 //! The HGVS forms a registry row writes, read into an allele's identity fields (D99 §4): an interval
 //! (1-based, inclusive, as HGVS counts), the reference state where the notation states it, and the
 //! alternate state.
@@ -40,6 +48,13 @@ fn position(s: &str) -> Result<u32, String> {
 /// A coding change, with or without its `c.` prefix.
 pub fn parse_c(notation: &str) -> Result<Change, String> {
     let s = notation.trim();
+    // HGVS is ASCII by specification. The guard is not pedantry: these functions slice by
+    // BYTE, so a multi-byte char in the first three bytes panicked rather than refused —
+    // `3₁₀` (a 3-10 helix) did exactly that the first time this ran over document prose
+    // instead of curated registry rows.
+    if !s.is_ascii() {
+        return Err(format!("`{s}` is not ASCII, so it is not coding notation"));
+    }
     let body = s
         .strip_prefix("c.")
         .ok_or_else(|| format!("`{s}` is not a coding (c.) change"))?;
@@ -81,6 +96,13 @@ pub fn parse_c(notation: &str) -> Result<Change, String> {
 /// A protein change, with or without its `p.` prefix, parenthesised or not.
 pub fn parse_p(notation: &str) -> Result<Change, String> {
     let s = notation.trim();
+    // HGVS is ASCII by specification. The guard is not pedantry: these functions slice by
+    // BYTE, so a multi-byte char in the first three bytes panicked rather than refused —
+    // `3₁₀` (a 3-10 helix) did exactly that the first time this ran over document prose
+    // instead of curated registry rows.
+    if !s.is_ascii() {
+        return Err(format!("`{s}` is not ASCII, so it is not protein notation"));
+    }
     let body = s
         .strip_prefix("p.")
         .ok_or_else(|| format!("`{s}` is not a protein (p.) change"))?;
@@ -157,6 +179,18 @@ mod tests {
             (369, Some("Ser"), "Leufs*12")
         );
         assert_eq!(parse_p("p.(Leu44Pro)").unwrap(), m);
+    }
+
+    /// Refusing is right; panicking is not. Byte-slicing `&body[..3]` crashed on a token whose
+    /// first characters are multi-byte, which only surfaced when the parser met document prose.
+    #[test]
+    fn non_ascii_is_refused_rather_than_panicking() {
+        for bad in ["3₁₀", "p.Ilé380Thr", "Met375–Arg381", "α1"] {
+            assert!(
+                parse_p(bad).is_err() && parse_c(bad).is_err(),
+                "{bad} must be refused"
+            );
+        }
     }
 
     #[test]

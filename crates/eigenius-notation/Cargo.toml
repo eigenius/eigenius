@@ -1,0 +1,14 @@
+[package]
+name = "eigenius-notation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Published biomedical notations — HGVS changes, accessions, coordinates — parsed from their specified grammars rather than recognised by orthography."
+
+# NO DEPENDENCIES, deliberately. Two consumers that must not depend on each other: the kernel's
+# document glossary (eigenius-kernel) and the PMI registry converter, whose lib is kernel-free by
+# design (serde + clap only, with the kernel a dev-dependency for one DB-backed test). A leaf crate
+# is what lets both read one parser; putting it in either would have forced a dependency the other
+# was built to avoid.
+[dependencies]

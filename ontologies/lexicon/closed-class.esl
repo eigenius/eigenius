@@ -16,6 +16,7 @@ namespace logic     = "urn:eigenius:logic";
 namespace ontology  = "urn:eigenius:ontology";
 namespace measurements = "urn:eigenius:measurements";
 namespace core         = "urn:eigenius:core";
+namespace eigentt      = "urn:eigenius:eigentt";   // D99 §10 identity forms (the identity copula)
 namespace units        = "urn:eigenius:units";
 
 // ── Quantifier cores (factored; D63 §8.3 Phase 1) ─────────────────────
@@ -90,6 +91,14 @@ resource lexicon:the_ref_obj_sem : lexicon:SemTerm {
         ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
             TV(ontology:the(T), subj)
           : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// Plain definite NP: λA. the(A) — the same ι term standing ALONE, at the noun's own type. The two
+// sems above wrap `ontology:the` in a predicate slot and so yield TYPE-RAISED categories; this one
+// yields a plain `cat_np` argument (`the_plain_np` below).
+resource lexicon:the_plain_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => ontology:the(A) : forall (A : Set) => A )
     );
 }
 
@@ -199,6 +208,87 @@ resource lexicon:which_obj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_q(T), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))) );
     lexicon:sem      = lexicon:wh_which_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> (A -> Prop) );
+    lexicon:sense    = "which";
+}
+
+// ── Free relatives: `what` as a headless relative NP (2026-10-28) ──────
+// «The study reported what affects cells.» / «what the check returned» — a clause missing one NP,
+// used as an ARGUMENT. `what` is "the thing(s) which": one token supplying the silent head, the
+// relativization, and the definiteness.
+//
+// It is the DECLARATIVE TWIN of the two interrogative entries above, and deliberately shaped to
+// say so: the same body in each gap position, differing only in the result and the sem.
+// `what_subj` yields `cat_q(Entity)` over the answer-property `λV.λx. V(x)`; this yields
+// `cat_np(Entity, sg)` over the maximal satisfier. The object-gap body is `S[dcl]/NP` rather than
+// `what_obj`'s `S[q]/NP` — a free relative embeds a declarative, and `S[dcl]/NP` is already built,
+// since it is what `relativize` takes for an object relative.
+//
+// This needs NO rule, which is why it is here and not in `constructions.rs`. `relativize` must be
+// a rule because a HEADED relative's result TYPE is built from the body's sem
+// (`cat_n(Σx:C. body(x), num)`) and a lexical category is static. A free relative has no head to
+// refine, so its category is the fixed `cat_np(Entity, sg)`; only the SEM depends on the body, and
+// a sem is a λ-term. `⟦S\NP⟧ = ⟦S/NP⟧ = Entity → Prop`, so ONE term serves both gaps.
+//
+// DEFINITE, not existential: a free relative is maximal — "what affects cells" is everything that
+// does — so it takes the ι operator over the Σ and projects. `the(Σ).1` is the same shape
+// `the_plain_np` builds over a refined noun, with the Σ built here instead of by the relativizer.
+resource lexicon:free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) =>
+            eigentt:fst(ontology:the(exists x : lexicon:Entity => V(x)))
+          : (lexicon:Entity -> Prop) -> lexicon:Entity )
+    );
+}
+// what — free relative over a SUBJECT gap. `cat_np(Entity,sg)/(S[dcl]\NP_Entity)`.
+resource lexicon:what_free_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative pronoun, subject gap ('what affects cells').";
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "what_free_rel";
+}
+// what — free relative over an OBJECT gap. `cat_np(Entity,sg)/(S[dcl]/NP_Entity)`.
+resource lexicon:what_free_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative pronoun, object gap ('what the check returned').";
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "what_free_rel";
+}
+
+// ── Determiner free relatives / embedded `which`-clauses (2026-11-05) ──
+// Declarative NP twins of `lexicon:which_subj` and `lexicon:which_obj`, mirroring how
+// `lexicon:what_free_rel_subj` and `lexicon:what_free_rel_obj` pair with `what_subj` /
+// `what_obj` above. Consumes the restrictor noun `T : Set` via `cat_forall`, then the
+// gapped declarative body (`S[dcl]\NP_T` for a subject gap, `S[dcl]/NP_T` for an object
+// gap, filled by contravariant functor subsumption from an `Entity`-typed verb), and
+// yields a singular definite NP `cat_np(T, sg)` denoting the maximal satisfier
+// `the(Σx:T. V(x)).1 : T`. Returning at `T` (rather than `Entity`) lets coercive
+// subtyping (`T ≤ Entity`) fire at the governing verb or preposition's argument slot
+// once `T` is instantiated to a concrete class.
+resource lexicon:which_free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) =>
+            eigentt:fst(ontology:the(exists x : A => V(x)))
+          : forall (A : Set) => (A -> Prop) -> A )
+    );
+}
+resource lexicon:which_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, subject gap ('turns on which cutoff is used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "which";
+}
+resource lexicon:which_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative / embedded interrogative, object gap ('reported which cutoff the study used').";
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
     lexicon:sense    = "which";
 }
 
@@ -312,6 +402,141 @@ resource lexicon:were_copula : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
 }
+// be — base-form copula over predicative adjective / nominal (`to be essential`, `may be a target`).
+resource lexicon:be_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: base/infinitive form of BE — copula over a predicative adjective or nominal.";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+
+// ── IDENTITY COPULA (D99 §10's identity form; D63 §8.5's membership `a` is its counterpart) ──
+// "The NOD2-to-NF-kB axis is the inflammatory-bowel-disease arm." Both sides are REFERRING
+// expressions and the claim is that they denote the same entity. `is a Y` gives
+// `ontology:is_a(s, T)` — MEMBERSHIP, which cannot express this: `is the lever` is not `is a lever`,
+// and encoding the definite as the indefinite drops the uniqueness the claim asserts (R2).
+//
+// **Takes the complement as an ordinary NP rather than binding the noun's Set.** The natural shape,
+// a predicative `the` at `fun (T : Set) => ... eigentt:Eq(Entity, s, ontology:the(T))`, does NOT
+// type-check: `ontology:the : forall (A : Set) => A` gives `the(T) : T`, and coercive subtyping
+// (Luo 2012) reaches `Entity` from a CONCRETE class the chain knows is a subclass — never from a
+// bound variable, for which nothing says `T ≤ Entity`. Ascription does not help and ESL has no
+// bounded quantification. Of the 147 entries here that bind `T`, every one uses it as a Set
+// ARGUMENT or returns at `T`; none takes `the(T)` as an Entity-typed term. Letting the definite NP
+// form normally and putting the identity on the COPULA sidesteps it: both sides arrive at their own
+// concrete classes and coerce at the argument slots.
+//
+// Written with `eigentt:Eq`, the ESL surface spelling of the kernel's `Id` (D99 §10), so the
+// proposition COMPUTES — `refl` inhabits it, `J` eliminates it, `apart` refutes it. An opaque
+// 2-place axiom would parse the same sentences and prove nothing with them, the defect the WordNet
+// importer records for opaque `be`.
+//
+// Measured over the 1,056-sentence CNL corpus on `wordnet-umls-hpo-aligned-2026-10-24-identity`
+// (provenance 38,391 / 20,533 / 864): parsed **501 → 557**, grammar-gap 555 → 499, source units
+// fully covered **41 → 51** of 274, **0 sentences lost**. Sems verified on its targets —
+// `ni_p_ile380thr = the(Σsubject. prep_of(…)).1`.
+//
+// **IT COSTS A SECOND DERIVATION ON THE INDEFINITE, AND THAT IS A DELIBERATE STANCE** (2026-10-24).
+// `HeLa is a cell line` now has two parses: `is_a(hela, CellLine)` and
+// `∃x:CellLine. hela = x` — LOGICALLY EQUIVALENT, not a wrong reading. ENF would refuse the second,
+// as `ObliqueParticipial` refuses a route that "re-derives a reading plain application already
+// gives", and two uniqueness pins enforced it. They are relaxed to 2 here because ENF is a strong
+// default and COVERAGE is the non-negotiable: the alternative was losing the construction entirely,
+// at 56 sentences and 10 units, to avoid a redundant spelling of a proposition the grammar already
+// gets right. The cost is ranking and chart size, never a distorted claim.
+//
+// Narrowing it properly needs a way to say "do not fire where the predicate-nominal route already
+// covers it" — a DEFINITENESS feature in the category system (today `the_subj` and `a_subj` are
+// byte-identical, definiteness living only in the sem), or recasting the copula as a RULE so it can
+// carry a `ProvGuard`, which is per-rule and cannot key on an entry. Either is real design work.
+resource lexicon:identity_copula_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => eigentt:Eq(lexicon:Entity, x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:is_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:are_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:was_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+resource lexicon:were_identity : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — IDENTITY between two referring expressions.";
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:identity_copula_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "be";
+}
+
+// ── Copula over a DIMENSIONLESS MEASURED VALUE (D95 slice 7, decision 6's gloss, 2026-10-22) ──
+// "The observed-to-expected ratio is 0.94." The complement is `cat_numpred`, the category a bare
+// numeral seeds alongside `cat_num` and its cardinal determiners, over
+// `λx. ontology:has_quantity(x, u"1", q)`. ⟦cat_numpred⟧ = Entity → Prop, the same denotation the
+// `adj` complement carries, so these are the is/are/was/were copula entries with one argument
+// swapped and `copula_sem` (`λP.P`) unchanged.
+//
+// These four entries are the ONLY consumers of `cat_numpred`, and that is what makes the category
+// the fix rather than a guard. Decision 6 removed the numeral's measure-phrase seeding because a
+// bound marker took it and the modifier lift made it prenominal, giving `at least 1,000 cells` a
+// second reading over cells with a quantity of at least 1000. Restoring the predicate at `S[adj]\NP`
+// behind a provenance guard measured that defect straight back (2026-10-21): `at least` composed
+// with the leaf first, the composed adjective carried the combinator's provenance rather than the
+// leaf's, and the lift took it anyway. At `cat_numpred` nothing lifts it, no adjective-modifying
+// adverb composes with it, and no measure consumer sees it — only the copula.
+resource lexicon:is_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:are_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:was_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:were_copula_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula over a dimensionless measured value.";
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
 
 // ── Predicate-nominal `a` (D63 §8.5, Slice 3c) ────────────────────────
 // The PREDICATIVE indefinite article: "HeLa is **a cell line**". Distinct from the
@@ -417,6 +642,26 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:scope_bearing = true;
+}
+// very — degree modifier over an adjectival predicate ("is very essential", "a very weak signal").
+// Positive-degree counterpart of `not_adj` (`(S[dcl,adj]\NP)/(S[dcl,adj]\NP)`). One entry covers
+// both predicative (consumed by `is_adj`) and attributive (lifted to `cat_mod` via `UnaryKind::ModLift`
+// after forward application) positions without licensing verbal modification (*«very affects»).
+axiom lexicon:very_deg : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+resource lexicon:very_deg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), lexicon:very_deg(V, s))
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:very_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: degree modifier over an adjectival predicate ('is very essential', 'a very weak signal').";
+    lexicon:form     = "very";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:very_deg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "very";
 }
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`. Sense
 // `do`, shared with the question entries (see `lexicon:does_aux`).
@@ -541,6 +786,38 @@ resource lexicon:passive_sem : lexicon:SemTerm {
           : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
+
+// ── SENTENCE-INITIAL adverb, event-free (core-en `Adverb`/Initial) ──────────────
+// «Slowly the gene affects cells.» The adverb sits LEFT of the subject while the VP it modifies
+// sits right of it, so the position is a COMBINATORIAL problem, not a semantic one: the fronted
+// and medial readings are truth-conditionally identical for a manner adverb.
+//
+// WHY NOT `S/S`. `sentence_modifier_cats` builds `S/S` already, but with the IDENTITY sem, which is
+// right for discourse adverbs (`also`, `thus`) and WRONG for a manner adverb: `⟦S⟧ = Prop`, and
+// Luo & Shi's `ADV` is `(Entity -> Prop) -> (Entity -> Prop)` — it takes the PREDICATE and its
+// SUBJECT separately, which a saturated `Prop` no longer has. Giving `slowly` the transparent
+// `S/S` would make the sentence parse and MEAN the unmodified proposition, silently dropping the
+// adverb. That is a false reading, not a missing one.
+//
+// THE ROUTE THAT WORKS, and it needs no event variable. Modify the TYPE-RAISED SUBJECT instead:
+//   `(S/(S\NP)) / (S/(S\NP))`,   and `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`
+// so this term has exactly that category's denotation and reuses `ADV` verbatim:
+//   `λA. λQ. λV. Q(A(V))`
+// «Slowly the gene» is then `S/(S\NP)`, which applies to «affects cells» to give
+// `affects(gene, cells) ∧ adv_slowly(λx. affects(x, cells), gene)` — the medial reading exactly.
+//
+// Resolved from the chain by `adv_initial_lifts` (`kernel/src/dcg/rules/combinators.rs`) and applied
+// to the adverb's own sem, so the lift and this definition cannot drift apart — the same discipline
+// `passive_sem` above follows for the short passive.
+resource lexicon:adv_initial_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) =>
+          fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+          fun (V : lexicon:Entity -> Prop) => Q(A(V))
+          : ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) ->
+            (((lexicon:Entity -> Prop) -> Prop) -> ((lexicon:Entity -> Prop) -> Prop)) )
+    );
+}
 resource lexicon:is_passive : lexicon:LexicalEntry {
     core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
@@ -569,6 +846,30 @@ resource lexicon:were_passive : lexicon:LexicalEntry {
     core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+
+// ── The SHORT passive's NON-FINITE cells (measured 2026-10-26) ──────────────────
+// The four entries above are all FINITE, so until these the short passive was unreachable under a
+// modal and under the perfect, for EVERY verb: «The gene may be affected.» had no parse at all,
+// while «The gene may be affected by HeLa.» parsed, because the LONG passive does have its
+// non-finite entry (`be_passive_by`). One paradigm was complete and its twin stopped at `is`/`was`.
+// Same `passive_sem`, same unsaturated-TV argument; `num_any` subjects, since a non-finite
+// auxiliary carries no agreement. Seven of the eight page units this batch gained are these.
+resource lexicon:been_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: past participle of BE — SHORT passive under the perfect ('has been reported').";
+    lexicon:form     = "been";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
+resource lexicon:be_passive_short : lexicon:LexicalEntry {
+    core:description = "grammatical: base form of BE — SHORT passive under a modal ('may be reported').";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -837,6 +1138,492 @@ resource lexicon:but_subord : lexicon:LexicalEntry {
     lexicon:sense    = "but";
 }
 
+// ── FACTIVE subordinators (D62 2d, Fork A) ─────────────────────────────────
+// `because` / `although` / `while` presuppose BOTH clauses, and the decided treatment makes that
+// presupposition a typing requirement: `logic:Because : Π(p q:Prop) → p → q → Prop` takes proofs of
+// both. The parser never proves a clause — felicity is not truth — so the proof arguments are
+// HYPOTHETICAL.
+//
+// `lexicon:hypothesis_of` is the Prop sibling of `lexicon:anaphor_of` (the demonstrative's
+// restrictor-typed referent hole) and works the same way: it stands in the derivation as a closed
+// constant so the entry gate-passes and the term stays a `Prop` throughout composition, and the
+// FELICITY GATE freshens each occurrence into a typed free variable — a hole of kind
+// `ProofObligation`. Keeping the term a `Prop` during composition is what makes §5's projection
+// account fall out: negation and the modals apply to it normally and do not discharge the
+// hypothesis, so the obligation projects through them.
+//
+// It is an axiom inhabiting an arbitrary `Prop`, which is only sound because it never survives the
+// gate — exactly the discipline `anaphor_of : ∀(A:Set) → A` already carries for `Set`.
+axiom lexicon:hypothesis_of : forall (P : Prop) => P
+
+resource lexicon:because_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:Because(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:because_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: causal subordinator, FACTIVE ('because the assay works').";
+    lexicon:form     = "because";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:because_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "because";
+}
+resource lexicon:although_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:Although(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:although_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: concessive subordinator, FACTIVE ('although the assay fails').";
+    lexicon:form     = "although";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "although";
+}
+resource lexicon:while_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:While(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:while_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/concessive subordinator, FACTIVE ('while the cell divides').";
+    lexicon:form     = "while";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "while";
+}
+
+// `though` and `whilst` are the same factive relations under other spellings — they share
+// `although_sem` / `while_sem` rather than restating them, so the paradigm has one definition per
+// RELATION, not per surface.
+resource lexicon:though_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: concessive subordinator, FACTIVE ('though the assay fails').";
+    lexicon:form     = "though";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "though";
+}
+resource lexicon:whilst_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/concessive subordinator, FACTIVE ('whilst the cell divides').";
+    lexicon:form     = "whilst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whilst";
+}
+
+// ── `unless` and `whereas` (D62 2d, the two non-factive subordinators) ──────
+// These are the subordinators the findings note does NOT route through Fork A. Fork A
+// (`docs/notes/d62-subordinator-design-findings.md`) covers `because`/`although`/`while`, which are
+// FACTIVE: their decided treatment is `Because : Π(p q:Prop) → p → q → Prop` with hypothetical
+// proof variables threaded through the derivation — an engine extension, not a lexical row. These
+// two need neither.
+//
+// `unless` is `if`'s negative twin and uses the same native implication: "S₁ unless S₂" is
+// `¬⟦S₂⟧ → ⟦S₁⟧`, with intuitionistic `¬P = P → False`. Non-factive, no new logic type.
+resource lexicon:unless_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) => ((s2 -> logic:False) -> s1)
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:unless_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: negative conditional subordinator ('unless the assay works').";
+    lexicon:form     = "unless";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:unless_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "unless";
+}
+// `whereas` asserts BOTH clauses and contrasts them, which is `but`'s case exactly: the contrast is
+// rhetorical and not part of the typed claim, so it denotes the same proposition as the
+// `and`-coordination (the FINAL `but` decision in the findings note, verified against every `but`
+// in the WRN source). It reuses `but_sem` rather than restating it — one definition of what the
+// contrastive conjunction means.
+resource lexicon:whereas_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: contrastive subordinator ('whereas the control is clear').";
+    lexicon:form     = "whereas";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whereas";
+}
+
+// ── FRONTED subordinators — «Because X, Y» beside the «Y because X» above ──────
+// Every entry above is `(S\S)/S`: it takes its clause on the RIGHT and the result attaches to a
+// matrix clause on its LEFT. Fronted, the matrix is on the right, so the category needed is
+// `(S/S)/S` — which is exactly what `category::is_sentence_premodifier` names and what the
+// `AbsorbComma` fronted-modifier comma already consumes. Only the outer slash flips; the comma is
+// optional either way, which is how the fronted POSITION was isolated from the punctuation
+// (core-en battery, 2026-10-25: «The study failed because the gene affects cells.» parsed and the
+// fronted order did not, with or without the comma).
+//
+// Each sem is reused VERBATIM, which is why this is eight entries and not a design: `because_sem`
+// is `λs2. λs1. Because(s1, s2, …)` — it takes the SUBORDINATE clause first in both orders.
+//
+// `but` is excluded: «But Y, X» is a discourse connective, not a fronted subordinator. `when` has
+// no subordinator entry in either order, and no temporal relation to denote one with.
+
+resource lexicon:if_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('if the assay works, the study fails').";
+    lexicon:form     = "if";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "if";
+}
+resource lexicon:because_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('because the assay works, the study fails').";
+    lexicon:form     = "because";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:because_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "because";
+}
+resource lexicon:although_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('although the assay works, the study fails').";
+    lexicon:form     = "although";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "although";
+}
+resource lexicon:while_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('while the assay works, the study fails').";
+    lexicon:form     = "while";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "while";
+}
+resource lexicon:though_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('though the assay works, the study fails').";
+    lexicon:form     = "though";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "though";
+}
+resource lexicon:whilst_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whilst the assay works, the study fails').";
+    lexicon:form     = "whilst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whilst";
+}
+resource lexicon:unless_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('unless the assay works, the study fails').";
+    lexicon:form     = "unless";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:unless_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "unless";
+}
+resource lexicon:whereas_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED subordinator ('whereas the assay works, the study fails').";
+    lexicon:form     = "whereas";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whereas";
+}
+
+// ── `when` — temporal/generic, BOTH orders (measured 2026-10-28) ────────────────
+// No new axiom: `if_sem` is `λs2. λs1. (s2 -> s1)`, which is what generic `when` means here.
+//
+// CONDITIONAL, NOT FACTIVE, and the corpus makes the choice asymmetric. Four of the five `when`
+// units on the CNL page are generic and one is episodic. A factive treatment (`Because`'s shape)
+// would ASSERT the subordinate clause, which is FALSE on the four — «Efficiency is high when the
+// locus cooperates.» does not claim the locus cooperates. The conditional under-commits on the one
+// episodic unit but asserts nothing untrue; losing a fact is recoverable, asserting a falsehood is
+// not.
+//
+// DROPPED, and stated: temporality. Generic `when` quantifies over OCCASIONS and the event-free
+// design has no occasion variable to bind, so `when` denotes identically to `if` and
+// `lexicon:sense` keeps the surfaces apart — as `whereas` reuses `but_sem` and `though` reuses
+// `although_sem`. If the design acquires occasions, `when` and `if` separate there, together.
+resource lexicon:when_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/generic subordinator ('the study fails when the assay works').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
+}
+resource lexicon:when_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: FRONTED temporal/generic subordinator ('when the assay works, the study fails').";
+    lexicon:form     = "when";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "when";
+}
+
+// ── Indefinite pronouns (paradigm completion) ────────────────────────────────
+// An indefinite pronoun IS a quantified NP: `something` = "some thing", `everyone` = "every
+// person". So its category is the determiner's RESULT with the restrictor already fixed —
+// `S/(S\NP)` in subject position, the object-determiner shape in object position — and its
+// semantics is the determiner's sem with `A` instantiated at `lexicon:Entity`. These restate the
+// three quantifier sems at that instance rather than quantify over `Set`, because the restrictor
+// is no longer an argument.
+//
+// Measured need: `nothing` occurs 15 times in the XIAP report, the most frequent indefinite there
+// by a wide margin, and it "parsed" before this only because WordNet carries a NOUN `nothing` — a
+// wrong reading rather than a working one. `someone`, `somebody` and `nobody` were the same shape.
+//
+// `person` is NOT distinguished from `thing`: both restrict to `lexicon:Entity`. The one-/-body
+// forms should restrict to a person class; there is none in the chain to point at, so the
+// restriction is dropped rather than faked, and `everyone` is `every entity` here.
+resource lexicon:exists_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) =>
+            forall (C : Prop) => (forall (x : lexicon:Entity) => (V(x) -> C)) -> C
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:forall_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => forall (x : lexicon:Entity) => V(x)
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:no_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => forall (x : lexicon:Entity) => (V(x) -> logic:False)
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:obj_exists_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : lexicon:Entity) => (TV(x, subj) -> C)) -> C
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:obj_forall_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : lexicon:Entity) => TV(x, subj)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:obj_no_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : lexicon:Entity) => (TV(x, subj) -> logic:False)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
+resource lexicon:something_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "something";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "something";
+}
+
+resource lexicon:something_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "something";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "something";
+}
+
+resource lexicon:someone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "someone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "someone";
+}
+
+resource lexicon:someone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "someone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "someone";
+}
+
+resource lexicon:somebody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "somebody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "somebody";
+}
+
+resource lexicon:somebody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "somebody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "somebody";
+}
+
+resource lexicon:everything_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everything";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everything";
+}
+
+resource lexicon:everything_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everything";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everything";
+}
+
+resource lexicon:everyone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everyone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everyone";
+}
+
+resource lexicon:everyone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everyone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everyone";
+}
+
+resource lexicon:everybody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everybody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everybody";
+}
+
+resource lexicon:everybody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everybody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everybody";
+}
+
+resource lexicon:nothing_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nothing";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "nothing";
+}
+
+resource lexicon:nothing_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nothing";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "nothing";
+}
+
+resource lexicon:nobody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nobody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "nobody";
+}
+
+resource lexicon:nobody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nobody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "nobody";
+}
+
+resource lexicon:anything_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anything";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anything";
+}
+
+resource lexicon:anything_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anything";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anything";
+}
+
+resource lexicon:anyone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anyone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anyone";
+}
+
+resource lexicon:anyone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anyone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anyone";
+}
+
+resource lexicon:anybody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anybody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anybody";
+}
+
+resource lexicon:anybody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anybody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anybody";
+}
+
 // ── Referential pronouns (D62 §2e / D64 Phase A — the open-parse carrier) ──
 // A referential pronoun is categorially a plain NP (core-en `ProNP` = NP) whose semantics
 // is an UNRESOLVED referent — an open-parse *hole* (D64). The committed entry stores the
@@ -865,6 +1652,41 @@ resource lexicon:they_pron : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:anaphor_sem;
     lexicon:sem_type = type_expr( lexicon:Entity );
     lexicon:sense    = "they";
+}
+// Bare DEMONSTRATIVE pronouns — `this` / `these` / `those` standing alone as an argument
+// («This is the gene.»). The `this_subj` / `these_subj` family further down are DETERMINERS
+// (`this gene`); a bare demonstrative has no restrictor to type a hole with, so it takes
+// `lexicon:anaphor` (`: Entity`) and not the determiners' restrictor-typed `lexicon:anaphor_of`,
+// and resolves exactly as `it` / `they` do. Categorially it IS `it_pron` with another form — the
+// demonstrative pronoun is the pronoun mechanism applied to three more surfaces, not a new one.
+//
+// `that` is deliberately absent, and that was measured (2026-10-25) rather than assumed: with
+// `that_pron` in, grammar gaps fell 499 → 486 but SEVEN closed parses went OPEN, every one of them
+// `That <noun> …` — `that` as a determiner, where the bare NP creates a spurious apposition
+// carrying a hole. The other three forms have no determiner homograph in that position.
+resource lexicon:this_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: singular proximal demonstrative PRONOUN ('this is the gene').";
+    lexicon:form     = "this";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "this_pron";
+}
+resource lexicon:these_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural proximal demonstrative PRONOUN ('these are the genes').";
+    lexicon:form     = "these";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "these_pron";
+}
+resource lexicon:those_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural distal demonstrative PRONOUN ('those are the genes').";
+    lexicon:form     = "those";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "those_pron";
 }
 
 // `we` — DEICTIC 1st-person-plural pronoun. Unlike `it`/`they` it is NOT anaphoric: it
@@ -930,6 +1752,233 @@ resource lexicon:its_obj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "its";
 }
+// ── First/second/third-person possessive determiners (paradigm completion) ──
+// `its`/`their` below carry ONE number each (`cat_forall(sg|pl, …)`), which is a property of their
+// attested uses rather than of English: a possessive determiner does not agree with what it
+// possesses, so "my gene is" and "my genes are" are both well formed. The number cannot be BOUND
+// and threaded — `cat_forall`'s head-number is checked by `feat_meets`, a lattice meet, which a
+// bound variable cannot satisfy — so each form gets one entry per head number, exactly as `its`
+// and `their` do. (`its genes` / `their gene` are the same gap on the existing two; left alone
+// here rather than changed under cover of this batch.)
+//
+// Measured need: of the six broken possessive determiners, `your` alone occurs in 13 of the XIAP
+// report's grammar gaps — it is a report addressed to a person.
+
+resource lexicon:my_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), sg head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), sg head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), pl head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), pl head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:your_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), sg head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), sg head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), pl head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), pl head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:our_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), sg head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), sg head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), pl head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), pl head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:his_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), sg head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), sg head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), pl head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), pl head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:her_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), sg head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), sg head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), pl head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), pl head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "her";
+}
+
+// `its`/`their` carried ONE head number each (`its gene`, `their genes`), so `its genes` and
+// `their gene` did not compose. The first/second-person forms above take one entry per head number;
+// these complete the two that predate them, on the same shape.
+resource lexicon:its_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its functions'), pl head.";
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "its";
+}
+resource lexicon:its_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its functions'), pl head.";
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "its";
+}
+resource lexicon:their_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival'), sg head.";
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "their";
+}
+resource lexicon:their_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival'), sg head.";
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "their";
+}
 resource lexicon:their_subj : lexicon:LexicalEntry {
     core:description = "grammatical: third-person plural possessive determiner ('their survival').";
     lexicon:form     = "their";
@@ -945,6 +1994,57 @@ resource lexicon:their_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:poss_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "their";
+}
+// ── Possessive clitic `'s` (OpenCCG `core-en` `det.xsl` `PossS`) ────────────
+// Clitic counterpart of `PossPro` (`its`/`my`/`your`/`their`): where `PossPro` fixes the
+// possessor to `lexicon:anaphor`, `'s` takes the preceding noun phrase `cat_np(Entity, num_any)`
+// as a backward argument `p` and yields a `cat_forall` possessive determiner over
+// `lexicon:poss_of(A, x, p)`.
+resource lexicon:poss_s_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : lexicon:Entity) => fun (A : Set) => fun (V : A -> Prop) =>
+            forall (C : Prop) => (forall (x : A) => (lexicon:poss_of(A, x, p) -> V(x) -> C)) -> C
+          : lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) )
+    );
+}
+resource lexicon:poss_s_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : lexicon:Entity) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : T) => (lexicon:poss_of(T, x, p) -> TV(x, subj) -> C)) -> C
+          : lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) )
+    );
+}
+resource lexicon:poss_s_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in subject position, singular head ('the study's gene').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_s_subj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in object position, singular head ('affects the study's gene').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:poss_s_obj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in subject position, plural head ('the study's genes').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_s_subj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (A : Set) => (A -> Prop) -> Prop) );
+    lexicon:sense    = "'s";
+}
+resource lexicon:poss_s_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: possessive clitic `'s` in object position, plural head ('affects the study's genes').";
+    lexicon:form     = "'s";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:poss_s_obj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) );
+    lexicon:sense    = "'s";
 }
 
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
@@ -1551,8 +2651,6 @@ resource lexicon:to_nmod : lexicon:LexicalEntry {
 // seeded at the tight cap and need not be widened in — where the correct senses rank #0/#1 — instead
 // of losing to a widen-admitted noun pile. The WordNet PREDICATIVE adjective `alone` ("the child is
 // alone") stays a separate open-class entry; this adds only the post-nominal focus reading.
-// NB: pre-nominal `only`/`just` ("only this event") are the same `sole` operator but attach OUTSIDE
-// the determiner (NP-level focus), a distinct rule from this N-level refine — deferred.
 resource lexicon:sole_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => ontology:sole(x)
@@ -1566,6 +2664,44 @@ resource lexicon:alone_focus : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:sole_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "alone";
+}
+// ── Pre-nominal NP focus `only` (D61 faithfulness follow-up, 2026-11-05) ─────
+// Pre-nominal counterpart of post-nominal `alone` (`lexicon:alone_focus`), reusing
+// `ontology:sole : lexicon:Entity -> Prop`. Where `alone` refines a bare `cat_n` inside
+// the determiner ("each event alone"), `only` attaches OUTSIDE the determiner to the
+// generalized quantifier (`[only [an assay]]`, `[only [one pattern]]`, `[only [four residues]]`,
+// `[only [the count]]`), restricting its witness by `ontology:sole`.
+resource lexicon:only_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => logic:And(ontology:sole(x), V(x)))
+          : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:only_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+          fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) =>
+          fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => logic:And(ontology:sole(x), TV(x, s)))
+          : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:only_s : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-nominal exclusive focus particle on a subject or PP-object NP ('only an assay', 'only one pattern').";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:only_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "only";
+}
+resource lexicon:only_o : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-nominal exclusive focus particle on an object NP ('involve only four residues').";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:only_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "only";
 }
 
 // ── Comparative `than` marker (D63 §8.12 Slice 6-cmp) ─────────────────
@@ -2597,6 +3733,29 @@ resource lexicon:no_obj : lexicon:LexicalEntry {
     lexicon:sense    = "no";
 }
 
+// `neither` — the same SINGULAR negative determiner, over a two-element domain. The two-ness
+// presupposition is DROPPED, and that is the consistent choice rather than a shortcut: the
+// committed `both` — `neither`'s positive counterpart, with the identical presupposition — already
+// denotes with the plain plural existential. Giving `neither` a cardinality presupposition the
+// lexicon cannot state for `both` would make the pair inconsistent. Both move together when there
+// is a mechanism for cardinality presuppositions.
+resource lexicon:neither_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('neither gene affects cells').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:no_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "neither";
+}
+resource lexicon:neither_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner over a two-element domain ('affects neither gene').";
+    lexicon:form     = "neither";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_no_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "neither";
+}
+
 // ── the / this / that — definite + demonstrative determiners (D62 P2.2a) ──────
 // The highest-frequency closed-class gap on real scientific prose. Categorially these
 // ARE determiners (confirmed against references/openccg/grammars/core-en det.xsl), so
@@ -2642,6 +3801,35 @@ resource lexicon:the_obj_pl : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "the";
+}
+// PLAIN-NP definite — `the gene` as an argument rather than a generalised quantifier. The four
+// entries above are the only definite categories there were, and all four are type-raised:
+// `S/(S\NP)` as subject, `VP\(VP/NP)` as object, with no plain `cat_np` intermediate. Measured
+// consequences (2026-10-25): NP coordination over definites was unreachable — «The gene and the
+// protein affect cells.» failed while «A gene and a protein affect cells.» parsed, and ONE definite
+// conjunct sufficed to break it — and `UnaryKind::IdentityPredicate` never fired, because its
+// `cat_np` pattern never matched a definite.
+//
+// No new machinery: `ontology:the : forall (A : Set) => A` gives `the(T) : T`, and
+// `⟦cat_np(T, num)⟧ = T`, so the plain form is `cat_forall(num, λT. cat_np(T, num))` over
+// `λA. the(A)`, consumed by `CombKind::DepApply` exactly as the raised forms are. Measured as a
+// layer before merging: XIAP units 51 → 59, +2 core-en battery constructions, `encoded` and
+// `ambiguous` byte-identical.
+resource lexicon:the_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form ('the gene' as an argument).";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
+}
+resource lexicon:the_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article, PLAIN NP form, plural ('the genes').";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the_plain";
 }
 resource lexicon:this_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
@@ -2819,6 +4007,16 @@ resource lexicon:rc_which : lexicon:ReservedConstruct {
     lexicon:construct_form = "which";
     lexicon:construct_kind = lexicon:rk_wh_relativizer;
 }
+// `who` — the PERSONAL relativizer, `rk_relativizer` and NOT `rk_wh_relativizer` (2026-10-31).
+// The two kinds differ in exactly one respect: the wh- kind ALSO keys pied-piping (`prep which`,
+// `dcg/parse/unpacked.rs`). `who` does not pied-pipe — *«the reviewer of who» — it is `whom` that
+// does, and `whom` is a separate form. Declaring `who` as the wh- kind would license a
+// construction English does not have at this form. Measured as a layer before promotion: claim
+// units 66 → 67, grammar-gap 457 → 456, one unit converted, battery unchanged at 83 of 89.
+resource lexicon:rc_who : lexicon:ReservedConstruct {
+    lexicon:construct_form = "who";
+    lexicon:construct_kind = lexicon:rk_relativizer;
+}
 resource lexicon:rc_but : lexicon:ReservedConstruct {
     lexicon:construct_form = "but";
     lexicon:construct_kind = lexicon:rk_contrastive_but;
@@ -2826,6 +4024,15 @@ resource lexicon:rc_but : lexicon:ReservedConstruct {
 resource lexicon:rc_not : lexicon:ReservedConstruct {
     lexicon:construct_form = "not";
     lexicon:construct_kind = lexicon:rk_negator;
+}
+// `rather than` — the excluding coordinator, one construct over TWO tokens. `X rather than Y` is
+// `X ∧ ¬Y`, which is `but not`'s truth condition, so it shares that builder; what differs is the
+// correction it conveys, and that is not truth-conditional. The pair is declared rather than its
+// halves because neither half means this alone — `rather` is a degree adverb (`rather clear`) and
+// `than` is the comparative marker (`larger than`), and both readings must survive.
+resource lexicon:rc_rather_than : lexicon:ReservedConstruct {
+    lexicon:construct_form = "rather than";
+    lexicon:construct_kind = lexicon:rk_coord_rather_than;
 }
 resource lexicon:rc_each : lexicon:ReservedConstruct {
     lexicon:construct_form = "each";
@@ -5280,4 +6487,76 @@ resource lexicon:some_of_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:some_of_obj_sem;
     lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "some of";
+}
+
+// ── Existential `there` (`There is a gene.`, `There are genes.`, `There is no gene.`) ──────────
+// Consumes the finite copula's `cat_numpred` entry (`is`/`are`/`was`/`were`, binding its agreement
+// number `n = sg | pl`) and yields an application-only functor `S[dcl,fin] /⋆ (S[dcl,fin_any] /
+// (S[dcl,fin]\NP_n))` that scopes the post-verbal generalized quantifier over the trivial existence
+// predicate `λx:Entity. Eq(Entity, x, x)`.
+//
+// Keying the copula argument to `cat_numpred` restricts expletive `there` to `is`/`are`/`was`/`were`
+// (no content verb has `cat_numpred`), while threading `n` into the GQ's VP slot enforces number
+// agreement between the copula and the post-verbal NP (`There is a gene` and `There are genes` parse;
+// `*There is genes`, `*There are a gene`, and `*There affects a gene` are refused).
+//
+// `lexicon:sense` is intentionally omitted: `apply_sense_cap` keeps sense-less grammatical entries
+// unconditionally without consuming a sense-cap slot, so WordNet's locative adverb `there.r.00109151`
+// and noun `there.n.08489627` both survive at `SENSE_CAP = 2`.
+resource lexicon:there_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (cop : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) =>
+          fun (Q : (lexicon:Entity -> Prop) -> Prop) =>
+            Q(cop(fun (x : lexicon:Entity) => eigentt:Eq(lexicon:Entity, x, x)))
+          : ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) -> ((lexicon:Entity -> Prop) -> Prop) -> Prop )
+    );
+}
+resource lexicon:there_expl : lexicon:LexicalEntry {
+    core:description = "grammatical: existential expletive THERE ('There is a gene', 'There are two genes').";
+    lexicon:form     = "there";
+    lexicon:cat      = type_expr(
+        lexicon:cat_num_forall(fun (n : lexicon:Num) =>
+            lexicon:fwd(lexicon:m_app,
+                lexicon:fwd(lexicon:m_app,
+                    lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                    lexicon:fwd(lexicon:m_all,
+                        lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+                        lexicon:bwd(lexicon:m_all,
+                            lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                            lexicon:cat_np(lexicon:Entity, n)))),
+                lexicon:fwd(lexicon:m_all,
+                    lexicon:bwd(lexicon:m_all,
+                        lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                        lexicon:cat_np(lexicon:Entity, n)),
+                    lexicon:cat_numpred)))
+    );
+    lexicon:sem      = lexicon:there_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)) -> ((lexicon:Entity -> Prop) -> Prop) -> Prop );
+}
+
+// ── Infinitival `to` (`wants to report genes`, `showed the gene to be essential`) ───────────────
+// `to_inf` lifts a base-form VP `S[dcl,bse]\NP` to an infinitival VP `S[dcl,inf]\NP` with identity
+// semantics (`copula_sem`), consumed by subject-control verbs (`FrameKind::SubjectControl`, WordNet
+// frame 28: `(S\NP)/(S[dcl,inf]\NP)`).
+//
+// `to_ecm` lifts a base-form VP `S[dcl,bse]\NP` to `(cat_cp \⋆ NP)` with identity semantics, so an
+// ECM subject NP on its left (`[the gene] [to be essential]`) backward-applies to form a propositional
+// complement `cat_cp` (`essential(the(Gene))`) consumed by clause-taking verbs (`show`, `prove`,
+// `demonstrate`, `expect`, `find`). The `m_app` backward slash prevents composition, and `cat_cp` is
+// non-root so an unembedded `[NP to VP]` cannot stand as a matrix clause.
+resource lexicon:to_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: infinitival marker TO ('wants to report genes').";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_ecm : lexicon:LexicalEntry {
+    core:description = "grammatical: ECM infinitival marker TO ('showed the gene to be essential').";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_app, lexicon:cat_cp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
 }

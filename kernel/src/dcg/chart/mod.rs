@@ -23,6 +23,7 @@
 //! are still under `lookup` only because a few helpers have yet to be re-homed.)
 
 pub(crate) mod attribute;
+pub(crate) mod boundary;
 pub(crate) mod forest;
 pub(crate) mod packed;
 pub(crate) mod trace;

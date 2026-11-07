@@ -455,8 +455,16 @@ fn every_consumer_names_its_reading() {
 /// bound) or the bound first (`lt(u, b, q)`: above it), read off the pretty form, where the value is
 /// a bound variable `G#n` and the bound a literal `mk_quantity(…)`.
 fn value_first(pretty: &str, rel: &str) -> Option<bool> {
-    let at = pretty.find(&format!("{rel}(<term>, "))? + rel.len() + "(<term>, ".len();
-    Some(pretty[at..].starts_with("G#"))
+    // Skip the relation's UNIT argument generically instead of matching a literal `<term>`. This
+    // helper used to search for `{rel}(<term>, `, which hardcoded a `pretty_term` ELISION: the
+    // printer rendered every variant it did not special-case as `<term>`, `LitUnit` among them. The
+    // elision was removed 2026-10-25 (a unit and a rational are small, and eliding them made every
+    // measured-quantity sem partly unreadable), so the unit now prints as `u"K"` and the literal
+    // match found nothing. The assertion itself is unchanged — which OPERAND comes first.
+    let at = pretty.find(&format!("{rel}("))? + rel.len() + 1;
+    let rest = &pretty[at..];
+    let after_unit = rest.find(", ")? + ", ".len();
+    Some(rest[after_unit..].starts_with("G#"))
 }
 
 /// Slice 6a: a bound constrains the value a consumer takes (D95 implementation plan, slice 6). The

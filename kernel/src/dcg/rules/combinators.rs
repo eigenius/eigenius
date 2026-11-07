@@ -254,6 +254,14 @@ enum ProvGuard {
     /// composition output ([`Combinator::DetComposed`]) but a coordination of them (D95 slice 7d):
     /// applied alone it re-derives the determiner over the refined noun.
     LeftNotDetComposed,
+    /// The right operand — the forward-application ARGUMENT — is not an unmodified seed-time short-
+    /// passive participial lift ([`Combinator::ShortPassiveParticipial`]). For an unmodified leaf
+    /// participle (`was queried`), `was_passive` (`(S\NP)/((S[pss]\NP)/NP)`) already derives the short
+    /// passive; blocking `was_passive_by` (`(S\NP)/(S[pass]\NP)`) from forward-applying to the bare
+    /// `ShortPassiveParticipial` leaf prevents a duplicate derivation while allowing `was_passive_by`
+    /// once the `pass` VP has been modified or coordinated (`was [queried directly rather than
+    /// assumed]`).
+    RightNotShortPassiveParticipial,
 }
 
 impl ProvGuard {
@@ -270,6 +278,9 @@ impl ProvGuard {
             ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
             ProvGuard::LeftNotObliqueParticipial => left_prov != Combinator::ObliqueParticipial,
             ProvGuard::LeftNotDetComposed => left_prov != Combinator::DetComposed,
+            ProvGuard::RightNotShortPassiveParticipial => {
+                right_prov != Combinator::ShortPassiveParticipial
+            }
         }
     }
 }
@@ -693,7 +704,11 @@ fn comb_rules() -> &'static [CombRule] {
                     functor: Operand::Left,
                     slash: "fwd",
                 },
-                prov_guards: &[ProvGuard::LeftNotComposed, ProvGuard::LeftNotRaised],
+                prov_guards: &[
+                    ProvGuard::LeftNotComposed,
+                    ProvGuard::LeftNotRaised,
+                    ProvGuard::RightNotShortPassiveParticipial,
+                ],
             },
             CombRule {
                 name: "backward_app",
@@ -824,19 +839,25 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
     match recipe {
         SemRecipe::DetRefine { cat, t } => {
             let (v, z) = ("__refine_v", "__refine_z");
-            let sem = Exp::Lam(
-                Patt::Var(v.into()),
-                Box::new(Exp::App(
-                    Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(t))),
-                    Box::new(Exp::Lam(
-                        Patt::Var(z.into()),
-                        Box::new(Exp::App(
-                            Box::new(Exp::Var(v.into())),
-                            Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
-                        )),
+            let inner = Exp::App(
+                Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(t))),
+                Box::new(Exp::Lam(
+                    Patt::Var(z.into()),
+                    Box::new(Exp::App(
+                        Box::new(Exp::Var(v.into())),
+                        Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
                     )),
                 )),
             );
+            let body = if matches!(
+                slash_parts(&cat, "fwd"),
+                Some((_, res, _)) if is_ctor(res, "cat_np").is_some()
+            ) {
+                Exp::Fst(Box::new(inner))
+            } else {
+                inner
+            };
+            let sem = Exp::Lam(Patt::Var(v.into()), Box::new(body));
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }
         SemRecipe::DetModify {
@@ -1068,6 +1089,27 @@ enum Guard {
     /// `compound(x, kind_of(C))` duplicating the `compound_kind` classifier (D63 §7.5). Reads
     /// provenance, not the category — the same distinction `mod_lifts` already makes for `KindRaised`.
     NotKindRaised(Operand),
+    /// The named operand must NOT be a **bare referential pronoun** ([`Combinator::Pronoun`]).
+    ///
+    /// `named_compound` builds `Σx:C. compound(x, ⟦left⟧)`, so its left operand fills a DESIGNATOR
+    /// slot. A pronoun designates nothing until resolution, and English has no pronoun-premodifier
+    /// compound (`*it scores`; the possessive `its scores` is a determiner, handled elsewhere).
+    /// Measured on the base snapshot before this guard: «it scores» built
+    /// `cat_n(Σx:n05737153. compound(x, $anaphor$3_3), pl)` — "a score compounded with ⟨whatever
+    /// `it` refers to⟩".
+    ///
+    /// Reads PROVENANCE because the category cannot carry this: a pronoun is a plain `cat_np`,
+    /// identical in shape to a proper name's. The type index cannot carry it either — the obvious
+    /// cheaper fix, reusing [`Self::ProperName`] (whose own doc claims it "keeps close-naming
+    /// apposition off a pronoun"), was tried and MEASURED: grammar-gap 499 → 531, because this
+    /// corpus's named-entity compounds are built on OOV-augmented doc-local names that are not
+    /// concrete `EigonClass`es either, so the type test refuses `NOD2-to-NF-kB axis` along with
+    /// `it scores`. Pronominality is the property; it has to be tested directly.
+    ///
+    /// Like [`Self::NotKindRaised`] this guards the LEAF only. A pronoun that composed first would
+    /// lose the tag — contrived here (a pronoun reaches this rule directly), and the general fix is
+    /// a category-system distinction, not a tag.
+    NotPronoun(Operand),
     /// The bound type-index metavar must be a **genuine proper-name class** — a concrete `EigonClass`
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
@@ -1101,7 +1143,29 @@ enum Guard {
     /// [`super::constructions::appose_group`] has enforced this since 2026-07-26; the singular rule did
     /// not, so "[Germline mutations in the MMR gene] [MSH2]" still captured the designator — traced live
     /// as `cat_n(Σ__cmp_x:n07425011. … prep_in …, sg)` reaching this rule.
+    /// The named operand must NOT be a **superlative-refined** noun ([`is_superlative_refined`]).
+    ///
+    /// Carried by `pp_mod` alone, and it cannot be folded into [`Self::NotAdjectiveRefined`]: an
+    /// ORDINARY adjective-refined noun may take a PP, because both bracketings of "the large cell in
+    /// humans" flatten to the byte-identical Sigma. A superlative's restrictor quantifies over the
+    /// class, so the two bracketings state different things and only the PP-inside one is the
+    /// sentence's.
+    NotSuperlativeRefined(Operand),
     NotPpRefined(Operand),
+    /// The bound `Fin` metavar must be `adj` or `pass` — predicative adjectives (`is likely to…`, `is
+    /// able to…`) and passive participles (`is expected to…`, `is allowed to…`) taking a `to`-infinitive
+    /// complement.
+    FinIsAdjOrPass(&'static str),
+    /// The bound `Fin` metavar must be `fin` or `bse` (copular `is`/`are`/`was`/`were`/`be`).
+    FinIsFinOrBse(&'static str),
+    /// The `cat_pp` operand is a prepositional phrase, not a participial reduced relative.
+    NotParticipialPp(Operand),
+    /// The bound argument metavar of a VP-returning functor is not itself a VP `S\NP`.
+    NotVpArg(&'static str),
+    /// The operand is a lexical/derived adverb, not a PP/measure adjunct built by application.
+    IsAdverb(Operand),
+    /// The operand is not a composition output (`LeftNotComposed`).
+    NotComposed(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -1137,10 +1201,18 @@ impl Guard {
             Guard::NotCompoundRefined(_) => "NotCompoundRefined",
             Guard::NotAdjectiveRefined(_) => "NotAdjectiveRefined",
             Guard::NotKindRaised(_) => "NotKindRaised",
+            Guard::NotPronoun(_) => "NotPronoun",
             Guard::ProperName(_) => "ProperName",
             Guard::NotDerivedIndividual(_) => "NotDerivedIndividual",
             Guard::NotPlural(_) => "NotPlural",
+            Guard::NotSuperlativeRefined(_) => "NotSuperlativeRefined",
             Guard::NotPpRefined(_) => "NotPpRefined",
+            Guard::FinIsAdjOrPass(_) => "FinIsAdjOrPass",
+            Guard::FinIsFinOrBse(_) => "FinIsFinOrBse",
+            Guard::NotParticipialPp(_) => "NotParticipialPp",
+            Guard::NotVpArg(_) => "NotVpArg",
+            Guard::IsAdverb(_) => "IsAdverb",
+            Guard::NotComposed(_) => "NotComposed",
         }
     }
 
@@ -1148,14 +1220,23 @@ impl Guard {
     fn side(&self) -> &'static str {
         match self {
             Guard::NotCompoundRefined(o)
+            | Guard::NotSuperlativeRefined(o)
             | Guard::NotAdjectiveRefined(o)
             | Guard::NotKindRaised(o)
+            | Guard::NotPronoun(o)
             | Guard::NotDerivedIndividual(o)
-            | Guard::NotPpRefined(o) => match o {
+            | Guard::NotPpRefined(o)
+            | Guard::NotParticipialPp(o)
+            | Guard::IsAdverb(o)
+            | Guard::NotComposed(o) => match o {
                 Operand::Left => "L",
                 Operand::Right => "R",
             },
-            Guard::ProperName(_) | Guard::NotPlural(_) => "-",
+            Guard::ProperName(_)
+            | Guard::NotPlural(_)
+            | Guard::FinIsAdjOrPass(_)
+            | Guard::FinIsFinOrBse(_)
+            | Guard::NotVpArg(_) => "-",
         }
     }
 }
@@ -1165,7 +1246,17 @@ impl Guard {
         match self {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
+            Guard::NotSuperlativeRefined(op) => !is_superlative_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
+            Guard::NotPronoun(op) => {
+                let p = op.pick(left, right);
+                p.prov != Combinator::Pronoun
+                    && !matches!(
+                        is_ctor(&p.cat, "cat_np"),
+                        Some([Exp::EigonClass(iri), _])
+                            if iri.as_str() == "urn:eigenius:lexicon:ProperName"
+                    )
+            }
             Guard::NotDerivedIndividual(op) => {
                 op.pick(left, right).prov != Combinator::DerivedIndividual
             }
@@ -1176,6 +1267,40 @@ impl Guard {
             Guard::NotPlural(meta) => !matches!(
                 binds.get(*meta),
                 Some(Exp::InductiveCtor(_, n, _)) if n == "pl"
+            ),
+            Guard::FinIsAdjOrPass(meta) => matches!(
+                binds.get(*meta),
+                Some(Exp::InductiveCtor(_, n, _)) if n == "adj" || n == "pass"
+            ),
+            Guard::FinIsFinOrBse(meta) => matches!(
+                binds.get(*meta),
+                Some(Exp::InductiveCtor(_, n, _)) if n == "fin" || n == "bse"
+            ),
+            Guard::NotParticipialPp(op) => !matches!(
+                op.pick(left, right).prov,
+                Combinator::ShortPassiveParticipial | Combinator::GerParticipial
+            ),
+            Guard::NotVpArg(meta) => {
+                let Some(arg) = binds.get(*meta) else {
+                    return false;
+                };
+                if let Some((_m, res, slot)) = slash_parts(arg, "bwd") {
+                    if is_ctor(res, "cat_s").is_some() && is_ctor(slot, "cat_np").is_some() {
+                        return false;
+                    }
+                }
+                true
+            }
+            Guard::IsAdverb(op) => matches!(
+                op.pick(left, right).prov,
+                Combinator::Other | Combinator::ScopeOperator
+            ),
+            Guard::NotComposed(op) => !matches!(
+                op.pick(left, right).prov,
+                Combinator::ForwardComp
+                    | Combinator::CrossedComp
+                    | Combinator::BackwardComp
+                    | Combinator::BackwardApp
             ),
             // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
             // postmodifier cannot sit between a modifier and its head), so it does not care whether the
@@ -1215,6 +1340,62 @@ fn refine_rules() -> &'static [CatRule] {
                 guards: &[],
                 build: refine_mod_apply,
             },
+            // ATTRIBUTIVE SUPERLATIVE `[cat_sup_mod] [cat_n]` (`docs/notes/d63-comparative-phrasal.md`
+            // §7a, slice 1): `most <adj>` + head noun. Where a superlative modifies a noun the
+            // restrictor IS the comparison class, so this slice is sentence-local and needs no
+            // contextual hole — unlike the PREDICATIVE superlative ("the most alarming of the three"),
+            // whose class is supplied by the discourse (slice 2). No guards: an adjective-refined or
+            // compound head is a perfectly good comparison class ("the most useful piece of evidence").
+            CatRule {
+                name: "sup_apply",
+                left_pat: Ctor("cat_sup_mod", Vec::new()),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[],
+                build: refine_sup_apply,
+            },
+            // PARTITIVE SUPERLATIVE `[cat_sup_part] [cat_np]` (§7b): `most <adj> of` + the group NP
+            // — "the most dangerous of the traps". The right operand is a DETERMINED NP, not a head
+            // noun, and both halves the restrictor needs are on it: the comparison class in its
+            // CATEGORY's type index and the group entity in its SEM. No guards — `cat_sup_part` is
+            // seeded only over `most <adj> of`, so the trigger is already the construction.
+            // POST-NOMINAL SUPERLATIVE `[cat_n] [cat_sup_mod]` (§7b, 2026-10-29): "the function
+            // [most relevant to X]". Head noun is the LEFT. Same restrictor and same comparison
+            // class as `sup_apply` — only the surface order differs, which is why it shares
+            // `refine_sup_apply`'s builder through an operand flag rather than duplicating it.
+            //
+            // Keyed on `cat_sup_mod_post`, which only the RELATIONAL `most` produces, so neither a
+            // bare post-nominal adjective ("*the gene essential") nor a bare superlative one
+            // ("*the suggestion most want") can reach it — see `cat_sup_mod_post_cat` for the
+            // measurement that made this a separate category instead of a guard.
+            CatRule {
+                name: "sup_apply_post",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: Ctor("cat_sup_mod_post", Vec::new()),
+                guards: &[Guard::NotSuperlativeRefined(Operand::Left)],
+                build: refine_sup_apply_post,
+            },
+            CatRule {
+                name: "sup_partitive",
+                left_pat: Ctor("cat_sup_part", Vec::new()),
+                right_pat: Ctor("cat_np", vec![Var("T"), Var("num")]),
+                guards: &[],
+                build: refine_sup_partitive,
+            },
+            // Coordinated nominal modifier before a head noun (`the cIAP2 and MALT1 fusion`):
+            // `[cat_group(_, conn_and, _)] [cat_n(C, num)]` → `cat_n(Σx:C. ∧_m compound(x, m), num)`.
+            CatRule {
+                name: "group_compound",
+                left_pat: Ctor(
+                    "cat_group",
+                    vec![Var("_"), Ctor("conn_and", vec![]), Var("_")],
+                ),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Right),
+                    Guard::NotAdjectiveRefined(Operand::Right),
+                ],
+                build: refine_group_compound,
+            },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
             // not itself be a compound result. Adjective-outside NF (§3.3): nor an adjective-refined
             // one — an adjective on the head attaches OUTSIDE the compound, not before it.
@@ -1226,6 +1407,7 @@ fn refine_rules() -> &'static [CatRule] {
                     Guard::NotCompoundRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Right),
                     Guard::NotKindRaised(Operand::Left),
+                    Guard::NotPronoun(Operand::Left),
                     // Same PP-adjacency constraint its sibling `kind_compound` carries (32bfd21): a
                     // PP-postmodified modifier would need its PP to sit between it and the head.
                     Guard::NotPpRefined(Operand::Left),
@@ -1271,6 +1453,60 @@ fn refine_rules() -> &'static [CatRule] {
                     // removes spurious ambiguity, it does not choose a meaning. Found by
                     // `grammar_rule_guard_matrix` (this rule had no guards at all).
                     Guard::NotCompoundRefined(Operand::Left),
+                    // A SUPERLATIVE-refined head takes no PP: its restrictor quantifies over the
+                    // comparison class, so "[[most useful] piece] of evidence" would compare against
+                    // every piece rather than every piece of evidence. Forcing the PP inside leaves
+                    // "[most useful] [piece of evidence]" as the single derivation, with the class the
+                    // sentence means. See [`is_superlative_refined`].
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_pp_mod,
+            },
+            // Post-nominal `to`-infinitive relative modifier (`no case reports to anchor on`,
+            // `a way to do X`): `[cat_n(C, num)] [S[dcl,inf]\NP]` → `cat_n(Σx:C. right(x), num)`.
+            CatRule {
+                name: "inf_rel_vp",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_pp_mod,
+            },
+            // Post-nominal object-gapped `to`-infinitive relative modifier (`another family to check`,
+            // `nothing to fall back on`): `[cat_n(C, num)] [(S[dcl,inf]\NP)/NP]`.
+            CatRule {
+                name: "inf_rel_tv",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_inf_rel_tv,
+            },
+            // Contact object relative clause (`the allele they tested`):
+            // `[cat_n(C, num)] [S[dcl,fin]/NP]` → `cat_n(Σx:C. right(x), num)`.
+            CatRule {
+                name: "contact_rel_obj",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: fwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
                 ],
                 build: refine_pp_mod,
             },
@@ -1304,6 +1540,66 @@ pub(crate) fn cat_mod_cat() -> Exp {
     )
 }
 
+/// The **superlative modifier** category `cat_sup_mod` — a maximality operator awaiting its head
+/// noun, carrying the adjective's SCALE in its sem (`deg_A : Entity -> core:float`, what a gradable
+/// adjective's `cat_measure` supplies and what the comparative `more_deg` already consumes). Nullary
+/// and Rust-only, exactly like [`cat_mod_cat`], so no ontology edit and no reseed.
+///
+/// DISTINCT from `cat_mod` rather than a provenance tag on one: the comparison class is the head
+/// noun's own type, which only the refine rule has, so superlativity must survive composition to
+/// reach it — and a provenance tag guards the leaf only (`docs/notes/d63-comparative-phrasal.md`
+/// §7a, slice 1).
+pub(crate) fn cat_sup_mod_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_mod".into(),
+        Vec::new(),
+    )
+}
+
+/// The **partitive superlative** category `cat_sup_part` — `most <adj> of`, a maximality operator
+/// awaiting the GROUP its comparison class is, carrying the same scale in its sem as
+/// [`cat_sup_mod_cat`]. Nullary and Rust-only, so no ontology edit and no reseed.
+///
+/// Distinct from `cat_sup_mod` because what it consumes is distinct: `cat_sup_mod` takes a head noun
+/// and quantifies over that noun's TYPE, while this takes a determined `cat_np` and quantifies over
+/// the group ENTITY its sem denotes. The two cannot share a category without `sup_apply` also firing
+/// on "most useful the cell", which
+/// [`dispatch_tests::superlative_does_not_refine_a_noun_phrase`] pins as refused.
+pub(crate) fn cat_sup_part_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_part".into(),
+        Vec::new(),
+    )
+}
+
+/// The **post-nominal superlative** category `cat_sup_mod_post` — what `most <relational-adj>`
+/// becomes once its complement is consumed ("most relevant **to** X"). Nullary and Rust-only.
+///
+/// Distinct from [`cat_sup_mod_cat`] because English distinguishes them: a bare post-nominal
+/// adjective is ungrammatical (*"the gene essential"), and the licensed post-nominal AP is the one
+/// carrying a COMPLEMENT. Only the relational `most`
+/// (`(cat_sup_mod_post/cat_pp_arg(P)) / (cat_measure/cat_pp_arg(P))`, seeded in
+/// `parse::seed`) produces it, so a scale that takes no complement can never reach the post-nominal
+/// slot.
+///
+/// Measured, and this is why it is a separate category rather than a guard on `cat_sup_mod`
+/// (`2026-10-29`): with [`sup_apply_post`](refine_sup_apply_post) keyed on plain `cat_sup_mod`, a
+/// page sentence where `most` is ADVERBIAL over a verb — «the trap that I would most want removed»
+/// — acquired 40 readings, every one of them maximizing `deg_a02023430`, WordNet's
+/// *destitute/indigent/needy*. The lexicon carries an adjective sense for that verb, so
+/// `most <verb>` composed as a bare superlative and this rule gave it somewhere to land. A
+/// complement-less scale cannot reach `cat_sup_mod_post`, so the derivation does not exist rather
+/// than being filtered out.
+pub(crate) fn cat_sup_mod_post_cat() -> Exp {
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_sup_mod_post".into(),
+        Vec::new(),
+    )
+}
+
 /// **Modifier lift** (M1: adjectives): re-categorise a modifier-eligible item into a standalone
 /// [`cat_mod_cat`], so a modifier can meet another modifier (coordinate) before it meets the head
 /// noun. A genuine attributive adjective `S[adj]\NP` lifts with its sem UNCHANGED (already `λx. adj(x)`);
@@ -1319,13 +1615,34 @@ pub(crate) fn cat_mod_cat() -> Exp {
 /// [`is_adjective_cat`] simply does not match it. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
 /// shift), mirroring `bare_nominal_shifts`.
 pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
-    if super::super::category::is_adjective_cat(it.cat()) && it.prov() != Combinator::KindRaised {
+    if super::super::category::is_adjective_cat(it.cat())
+        && !matches!(it.prov(), Combinator::KindRaised)
+    {
         return vec![Item::from_parts(
             cat_mod_cat(),
             it.sem().clone(),
             Combinator::Other,
             it.cost(),
         )];
+    }
+    if is_ctor(it.cat(), "cat_factor").is_some() {
+        if let Ok(rel) = Iri::parse("urn:eigenius:ontology:has_quantity") {
+            let x = "FAC#x";
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let body = app(
+                app(
+                    app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                    Exp::LitUnit(crate::units::Unit::dimensionless()),
+                ),
+                it.sem().clone(),
+            );
+            return vec![Item::from_parts(
+                cat_mod_cat(),
+                Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+                Combinator::Other,
+                it.cost(),
+            )];
+        }
     }
     Vec::new()
 }
@@ -1431,7 +1748,7 @@ pub(crate) fn front_adjunct_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
             "bwd",
             vec![
                 m_all.clone(),
-                s.clone(),
+                ctor("cat_s", vec![mood.clone(), var("__fr_F2")]),
                 ctor("cat_np", vec![var(FRONT_T), var(FRONT_N)]),
             ],
         );
@@ -1528,6 +1845,264 @@ pub(crate) fn oblique_participial_lifts(it: &Item) -> Vec<Item> {
     }
 }
 
+/// SHORT-PASSIVE participial lift — the second producer of `pass`, and the one the agentless
+/// reduced relative needs.
+///
+/// `reduced_relative` fires only on `S[dcl,pass]\NP`, and until this existed the only route to
+/// `pass` was `gq_prep_passive_agent` — the long passive's by-phrase. So "the deficiency predicted
+/// by the model" had a reduced relative and "the method used", "the resource queried in the study"
+/// and "the release queried recently" did not, though they are the same construction with the agent
+/// left out. Measured on the XIAP report, the participial post-modifier is one of the two largest
+/// constructional gaps (`docs/notes/uab-xiap-grammar-gaps.md`).
+///
+/// `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, with the agent existentially closed by
+/// `lexicon:passive_sem` (`λTV. λp. ∃a. TV(p, a)`, the impredicative ∃). That term is RESOLVED FROM
+/// THE CHAIN, not rebuilt here, so this and the finite short passive (`is`/`was` taking the same
+/// unsaturated TV, D63 §8.9 Slice 6-aux) cannot drift apart — they are one definition of what the
+/// passive means, used at two categories.
+///
+/// **The UNSATURATED functor is the guard.** Lifting the saturated `pss` is what built
+/// relativizer-less SUBJECT relatives ("*the man ate the food" for "the man that ate"); once the
+/// object slot is filled this no longer matches, exactly as `is_passive` stops matching "*BRCA1 is
+/// affected HeLa". It is also what leaves the agent slot available to close: after saturation the
+/// agent is gone and only the patient reading survives.
+///
+/// Seed-time, like [`oblique_participial_lifts`] and for the same reason: both chart drivers run the
+/// `UnaryShift` table inside `for len in 2..=n`, so a shift never sees a single-token cell, and
+/// `queried` is one.
+pub(crate) fn short_passive_participial_lifts(
+    it: &Item,
+    passive_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Vec<Item> {
+    let Some(vp) = short_passive_participial_cat(it.cat()) else {
+        return Vec::new();
+    };
+    let sem = Exp::App(Box::new(passive_sem.clone()), Box::new(it.sem().clone()));
+    // The VP itself, so a VP-adjunct (an adverb, a PP) can attach before the span is shifted.
+    let mut out = vec![Item::from_parts(
+        vp.clone(),
+        sem.clone(),
+        Combinator::ShortPassiveParticipial,
+        it.cost(),
+    )];
+    // AND the shifted post-modifier, because the UNMODIFIED participle is one token and
+    // `reduced_relative` is a `UnaryShift` — both chart drivers run the shift table inside
+    // `for len in 2..=n`, so a leaf never reaches it. Applying the shift function here rather than
+    // repeating its mapping keeps `pass → cat_pp` defined once.
+    if let Some(pp) = super::constructions::reduced_relative(&vp, layer) {
+        out.push(Item::from_parts(
+            pp,
+            sem,
+            Combinator::ShortPassiveParticipial,
+            it.cost(),
+        ));
+    }
+    out
+}
+
+/// `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, or `None` for any other category.
+///
+/// The result's subject is the OBJECT slot's NP — the patient is what the passive promotes — and the
+/// agent slot (the source's own subject) is the one `passive_sem` closes.
+fn short_passive_participial_cat(cat: &Exp) -> Option<Exp> {
+    use super::super::category::{is_ctor, slash_parts};
+    let (_mode, vp, obj) = slash_parts(cat, "fwd")?;
+    is_ctor(obj, "cat_np")?;
+    let (vmode, s, subj) = slash_parts(vp, "bwd")?;
+    is_ctor(subj, "cat_np")?;
+    let [mood, voice] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    let Exp::InductiveCtor(fin_decl, voice_name, _) = voice else {
+        return None;
+    };
+    if voice_name != "pss" {
+        return None;
+    }
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(
+        decl.clone(),
+        "bwd".into(),
+        vec![
+            // The VP slash's own modality, not the functor's — the derived category must not relax
+            // what may consume it.
+            vmode.clone(),
+            Exp::InductiveCtor(
+                decl.clone(),
+                "cat_s".into(),
+                vec![
+                    mood.clone(),
+                    Exp::InductiveCtor(fin_decl.clone(), "pass".into(), Vec::new()),
+                ],
+            ),
+            obj.clone(),
+        ],
+    ))
+}
+
+/// POST-nominal ACTIVE participial lift at the LEAF — the `ger` half of what
+/// [`short_passive_participial_lifts`] does for `pass`.
+///
+/// An INTRANSITIVE present participle is already saturated at the leaf ("waiting" is
+/// `S[dcl,ger]\NP`, one token), and both chart drivers run the `UnaryShift` table inside
+/// `for len in 2..=n`, so [`super::constructions::reduced_relative`] never reaches it. The
+/// TRANSITIVE case needs nothing here: "carrying" is `(S[dcl,ger]\NP)/cat_np`, saturates over
+/// "carrying the variant" — two tokens or more — and the shift table covers that span.
+///
+/// Applying `reduced_relative` rather than restating its mapping keeps `ger → cat_pp` defined once,
+/// exactly as the short-passive lift does for `pass`. Category-only, cost unchanged.
+pub(crate) fn ger_participial_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    if !is_saturated_ger_vp(it.cat()) {
+        return Vec::new();
+    }
+    match super::constructions::reduced_relative(it.cat(), layer) {
+        Some(pp) => vec![Item::from_parts(
+            pp,
+            it.sem().clone(),
+            Combinator::GerParticipial,
+            it.cost(),
+        )],
+        None => Vec::new(),
+    }
+}
+
+/// Whether `cat` is a saturated subject-gapped present participle `S[dcl,ger]\NP`.
+///
+/// The SATURATION test is what keeps the transitive functor `(S[dcl,ger]\NP)/cat_np` out of the
+/// leaf route: it is a `fwd`, so `slash_parts(.., "bwd")` refuses it, and it reaches the shift
+/// later over the span that includes its object.
+fn is_saturated_ger_vp(cat: &Exp) -> bool {
+    use super::super::category::{is_ctor, slash_parts};
+    let Some((_m, s, subj)) = slash_parts(cat, "bwd") else {
+        return false;
+    };
+    if is_ctor(subj, "cat_np").is_none() {
+        return false;
+    }
+    let Some([mood, voice]) = is_ctor(s, "cat_s") else {
+        return false;
+    };
+    matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl")
+        && matches!(voice, Exp::InductiveCtor(_, n, _) if n == "ger")
+}
+
+/// SENTENCE-INITIAL adverb lift — `VP/VP` → `(S/(S\NP))/(S/(S\NP))`, so a fronted adverb can
+/// attach to the LEFT of the subject («Slowly the gene affects cells.»).
+///
+/// The position is a COMBINATORIAL problem, not a semantic one: fronted and medial are
+/// truth-conditionally identical for a manner adverb, and the adverb's own `ADV` term is reused
+/// unchanged. What blocks the usual CCG category `S/S` is that `⟦S⟧ = Prop` while `ADV` is
+/// `(Entity -> Prop) -> (Entity -> Prop)` — it needs the predicate and its subject separately, and a
+/// saturated `Prop` has neither. (`category::sentence_modifier_cats` does build `S/S`, with the
+/// IDENTITY sem; that is right for discourse adverbs and would make a manner adverb parse while
+/// MEANING the unmodified proposition.) Modifying the TYPE-RAISED SUBJECT keeps the predicate in
+/// reach, since `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`.
+///
+/// `lexicon:adv_initial_sem` (`λA. λQ. λV. Q(A(V))`) is RESOLVED FROM THE CHAIN and applied to the
+/// adverb's sem, so this and the lexicon cannot drift apart — the discipline
+/// [`short_passive_participial_lifts`] follows for `lexicon:passive_sem`.
+///
+/// Seed-time: both chart drivers run the `UnaryShift` table inside `for len in 2..=n`, and an
+/// adverb is one token.
+pub(crate) fn adv_initial_lifts(it: &Item, adv_initial_sem: &Exp) -> Vec<Item> {
+    let Some(cat) = adv_initial_cat(it.cat()) else {
+        return Vec::new();
+    };
+    let sem = Exp::App(
+        Box::new(adv_initial_sem.clone()),
+        Box::new(it.sem().clone()),
+    );
+    vec![Item::from_parts(
+        cat,
+        sem,
+        Combinator::AdvInitial,
+        it.cost(),
+    )]
+}
+
+/// Whether `cat` is already a lexical subject-GQ modifier `(S/(S\NP))/(S/(S\NP))` (such as
+/// `only_focus_subj`), so seeding does not also lift an open-class manner-adverb entry on the same
+/// surface into a competing `AdvInitial` reading.
+pub(crate) fn is_subj_gq_modifier(cat: &Exp) -> bool {
+    use super::super::category::{is_ctor, slash_parts};
+    let Some((_m, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    if res != arg {
+        return false;
+    }
+    let Some((_gm, s1, vp)) = slash_parts(arg, "fwd") else {
+        return false;
+    };
+    let Some((_vm, s2, np)) = slash_parts(vp, "bwd") else {
+        return false;
+    };
+    is_ctor(s1, "cat_s").is_some()
+        && is_ctor(s2, "cat_s").is_some()
+        && is_ctor(np, "cat_np").is_some()
+}
+
+/// `VP/VP` → `(S/(S\NP))/(S/(S\NP))`, or `None` for any other category.
+///
+/// Only the FORWARD pre-modifier lifts. The backward VP modifier already attaches after the verb,
+/// and lifting it too would give every adverb a second route to the same reading.
+///
+/// The result's type and feature slots are free `Exp::Var`s, which is what lets one category meet
+/// every raised subject: after `DepApply` a raised subject is a concrete
+/// `fwd(cat_s(dcl,f1), bwd(cat_s(dcl,f2), cat_np(C,n)))`, and `cat_np` unifies as
+/// `unify_type` on the class and `unify_feat` on the number, so a `Var` binds in both.
+fn adv_initial_cat(cat: &Exp) -> Option<Exp> {
+    use super::super::category::{is_ctor, slash_parts};
+    let (m, res, arg) = slash_parts(cat, "fwd")?;
+    // A MODIFIER: result and argument are the same category.
+    if res != arg {
+        return None;
+    }
+    // …and that category is a VP, `cat_s(dcl, _) \ cat_np(_, _)`.
+    let (_vm, sent, subj) = slash_parts(arg, "bwd")?;
+    let sargs = is_ctor(sent, "cat_s")?;
+    let mood = sargs.first()?;
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(
+        sargs.get(1),
+        Some(Exp::InductiveCtor(_, n, _)) if n == "fin"
+    ) && !matches!(sargs.get(1), Some(Exp::Var(_)))
+    {
+        return None;
+    }
+    is_ctor(subj, "cat_np")?;
+
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return None;
+    };
+    let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(decl.clone(), n.to_string(), args);
+    let var = |n: &str| Exp::Var(n.to_string());
+    let raised = ctor(
+        "fwd",
+        vec![
+            m.clone(),
+            ctor("cat_s", vec![mood.clone(), var("ADVI#f1")]),
+            ctor(
+                "bwd",
+                vec![
+                    m.clone(),
+                    ctor("cat_s", vec![mood.clone(), var("ADVI#f2")]),
+                    ctor("cat_np", vec![var("ADVI#T"), var("ADVI#n")]),
+                ],
+            ),
+        ],
+    );
+    Some(ctor("fwd", vec![m.clone(), raised.clone(), raised]))
+}
+
 /// `(S[dcl,pss]\NP)/cat_pp_arg(P)` → `cat_pp/cat_pp_arg(P)`, or `None` for any other category.
 /// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
 /// preposition-agnostic PP frames) still has to be matched by whatever fills it.
@@ -1571,8 +2146,11 @@ const PARTICIPIAL_MOD_PENALTY: u32 = 12;
 /// `(S[dcl,pss]\NP)/NP` (sem `TV`), or `None` for any other category. The `∃` is the impredicative
 /// encoding used by `closed-class.esl`'s `passive_sem` (`∀C:Prop. (∀a. TV(x,a) → C) → C`), so the
 /// modifier reading and the finite short passive denote identically.
-fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
+pub(crate) fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
     use super::super::category::{is_ctor, slash_parts};
+    if is_saturated_ger_vp(cat) {
+        return Some(tv.clone());
+    }
     let (_m, vp, obj) = slash_parts(cat, "fwd")?;
     is_ctor(obj, "cat_np")?;
     let (_vm, s, subj) = slash_parts(vp, "bwd")?;
@@ -1618,11 +2196,216 @@ fn refine_mod_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Lay
     })
 }
 
+/// `[cat_sup_mod] [cat_n]` — the attributive superlative. The scale `mu` rides on the left item's
+/// sem; the comparison class is the head noun's type `C`, bound by the trigger.
+///
+/// **This is a rule and not a lexical entry because `C` has to be CONCRETE where the sem is built.**
+/// The scale is fixed at `Entity -> core:float`, and coercive subtyping (Luo 2012) reaches `Entity`
+/// from a concrete class only — a universally quantified `T : Set` is a subtype of nothing. A
+/// `(Num·forall T:Set. N[T,n]) / cat_measure` entry was tried on 2026-10-28 and the checker rejected
+/// it (`TermIllTyped: Var("TC#1") != EigonClass(lexicon:Entity)`), however the category was shaped.
+/// Here `C` arrives concrete, so `mu(x)` checks.
+///
+/// `ge` rather than `gt`: `x` is trivially `>=` itself, so the maximum needs no `y != x` clause.
+fn refine_sup_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    sup_refine(binds, right, left.sem(), layer)
+}
+
+/// POST-NOMINAL superlative `[cat_n] [cat_sup_mod]` — "the function most relevant to X". The head
+/// noun is the LEFT operand and the scale the RIGHT one; the restrictor built is identical to
+/// [`refine_sup_apply`]'s, so both go through [`sup_refine`].
+fn refine_sup_apply_post(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    sup_refine(binds, left, right.sem(), layer)
+}
+
+/// `Σx:C. ∀(y : C). ge(μ(x), μ(y))` over the head `noun` and the scale `mu` — the superlative's one
+/// restrictor, shared by the pre- and post-nominal rules.
+fn sup_refine(binds: &CatSubst, noun: &Item, mu: &Exp, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(noun, binds);
+    let mu = mu.clone();
+    let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        // forall (y : C). ge(mu(x), mu(y)) — x is maximal on the adjective's scale among C.
+        //
+        // `C` is the noun type as it ARRIVES, which is what makes this non-circular: the Sigma being
+        // built here is not its own comparison class. When `C` is already refined its `y` is a PAIR,
+        // so the scale reads the witness (`fst y`) — the projection a definite description takes for
+        // the same reason (`the(Sigma ...).1`), landing on a concrete class that coerces to `Entity`.
+        // `x` needs no projection: when `C` is refined, `refine_conjoin` binds it at the Sigma's
+        // BASE. (That branch is conditional on `logic:And` resolving on the chain, which it always
+        // does in a seeded store; the same assumption every sibling refine builder makes when it
+        // applies an `Entity -> Prop` restrictor to `x`.)
+        let y = SUPERLATIVE_Y;
+        let y_scaled = match &c {
+            Exp::Sig(_, _, _) => Exp::Fst(Box::new(Exp::Var(y.into()))),
+            _ => Exp::Var(y.into()),
+        };
+        Exp::Pi(
+            Patt::Var(y.into()),
+            Box::new(c.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(
+                        crate::ontology::iri::Iri::parse("urn:eigenius:measurements:ge")
+                            .expect("static ge IRI"),
+                    )),
+                    Box::new(scale(Exp::Var(x.into()))),
+                )),
+                Box::new(scale(y_scaled)),
+            )),
+        )
+    })
+}
+
+/// **Partitive superlative** `[cat_sup_part] [cat_np(T, num)]` → the fused-head noun
+/// `Σx:T. has_proportion(g, λy. ge(μ(x), μ(y)), 1)` — "the most dangerous **of the traps**"
+/// (`docs/notes/d63-comparative-phrasal.md` §7b).
+///
+/// The comparison class arrives as a GROUP ENTITY, which the ontology keeps opaque (`card`,
+/// `median_over`, `has_proportion`), so slice 1's `∀(y : C)` over a type has nothing to range over.
+/// `has_proportion(g, P, 1)` IS that quantification — it is the encoding of `all of` and `each of`
+/// (`closed-class.esl`) — so the maximum needs no new axiom and no reseed.
+///
+/// `y` is an `Entity`: `has_proportion`'s predicate ranges over the group's members, which are
+/// opaque entities, so unlike [`refine_sup_apply`] no `Fst` projection is needed on it. `x` is bound
+/// by `refine_conjoin` at the Σ's base exactly as there.
+///
+/// The Σ's base is `T`, the NP's own type — read off the CATEGORY, which is the half of this that
+/// is not available to an ESL entry (`cat_forall`/`DepApply` consumes `cat_n` only; see
+/// `dispatch_tests::a_dependent_entry_cannot_bind_the_class_off_a_determined_np`). It states that
+/// `x` is a trap, NOT that `x ∈ g` — only a `member_of` relation could say that, and adding one
+/// would make the group transparent here while it stays opaque everywhere else. Dropping the
+/// conjunct UNDER-claims; quantifying over `T` instead of `g` would OVER-claim, reading the sentence
+/// as maximal among traps in general and discarding the restriction the text states.
+///
+/// Number is `sg`: the fused head is singular ("the most dangerous ONE of the traps") whatever the
+/// group's number.
+///
+/// **It does NOT inherit slice 1's `NotSuperlativeRefined` refusal, and that is deliberate.**
+/// [`is_superlative_refined`] matches `∀(y : C). ge(…)` and so does not see this restrictor, which
+/// means `pp_mod` will attach a following PP to the fused head. For the ATTRIBUTIVE superlative that
+/// bracketing is spurious — the class is the head noun, so a PP belonging to the class has to sit
+/// INSIDE it ("[most useful] [piece of evidence]"). The partitive's class is already closed off by
+/// the `of`-phrase: "the most dangerous of the traps in the lab" has the PP inside the group NP
+/// (built before `of` ever applies) OR on the fused head, and those are two real English readings of
+/// two different claims. Refusing the second would lose one of them.
+fn refine_sup_partitive(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let decl = match right.cat() {
+        Exp::InductiveCtor(iri, _, _) => iri.clone(),
+        _ => unreachable!("the sup_partitive trigger matched a non-inductive NP category"),
+    };
+    let t = binds
+        .get("T")
+        .expect("sup_partitive trigger binds T")
+        .clone();
+    let group = right.sem().clone();
+    let mu = left.sem().clone();
+    let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+    // `sg` on the GROUP's own feature declaration. A category ctor can be built on `list_decl`
+    // (`match_cat` compares the ctor NAME), but a FEATURE goes through `feat_meets`, which is
+    // structural equality on the whole `InductiveCtor` — IRI included. A hand-built `sg` on the
+    // wrong decl meets nothing, and the determiner silently refuses the noun.
+    let sg = match binds.get("num").expect("sup_partitive trigger binds num") {
+        Exp::InductiveCtor(iri, _, _) => Exp::InductiveCtor(iri.clone(), "sg".into(), Vec::new()),
+        other => other.clone(),
+    };
+    refine_conjoin(&decl, &t, &sg, layer, |x| {
+        let ge = Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::EigonAxiom(
+                    crate::ontology::iri::Iri::parse("urn:eigenius:measurements:ge")
+                        .expect("static ge IRI"),
+                )),
+                Box::new(scale(Exp::Var(x.into()))),
+            )),
+            Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+        );
+        let every = Exp::Lam(Patt::Var(SUPERLATIVE_Y.into()), Box::new(ge));
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(
+                        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:has_proportion")
+                            .expect("static has_proportion IRI"),
+                    )),
+                    Box::new(group.clone()),
+                )),
+                Box::new(every),
+            )),
+            Box::new(whole_proportion()),
+        )
+    })
+}
+
+/// The proportion `1` at the dimensionless unit — `(units:mk_quantity(1, 0) : units:Quantity(u"1"))`,
+/// the same term `all of` and `each of` carry in `closed-class.esl`. Annotated because the unit is
+/// the type's parameter and the constructor's arguments do not carry it.
+fn whole_proportion() -> Exp {
+    let quantity = crate::ontology::well_known::iri(crate::units::convert::QUANTITY);
+    Exp::Ann(
+        Box::new(Exp::InductiveCtor(
+            quantity.clone(),
+            "mk_quantity".into(),
+            vec![
+                Exp::LitRat(
+                    crate::numeric::Rational::new(1.into(), 1.into()).expect("1/1 is rational"),
+                ),
+                Exp::LitInt(0),
+            ],
+        )),
+        Box::new(Exp::const_applied(
+            quantity,
+            Vec::new(),
+            vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
+        )),
+    )
+}
+
 /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
 fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
     refine_conjoin(&decl, &c, &noun_num, layer, |x| {
         app2("urn:eigenius:ontology:compound", x, left.sem().clone())
+    })
+}
+
+/// Coordinated nominal modifier `[cat_group] [cat_n]` → `Σx:C. ∧_m compound(x, m)`.
+fn refine_group_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let members = super::constructions::group_members(left.sem())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| vec![left.sem().clone()]);
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        let mut it = members
+            .iter()
+            .map(|m| app2("urn:eigenius:ontology:compound", x, m.clone()));
+        let first = it.next().expect("non-empty members");
+        it.fold(first, |acc, next| {
+            Exp::const_applied(and.clone(), Vec::new(), vec![acc, next])
+        })
+    })
+}
+
+/// Post-nominal object-gapped `to`-infinitive modifier (`[cat_n(C, num)] [(S[dcl,inf]\NP)/NP]`):
+/// `Σx:C. right(x, speaker)`.
+fn refine_inf_rel_tv(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(left, binds);
+    let spk = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:speaker")
+            .expect("static speaker IRI"),
+    );
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(right.sem().clone()),
+                Box::new(Exp::Var(x.into())),
+            )),
+            Box::new(spk.clone()),
+        )
     })
 }
 
@@ -1679,7 +2462,7 @@ fn slash_mode_name(mode: &Exp) -> Option<&str> {
 /// Whether a slash bearing `mode` may be consumed by the HARMONIC composition rules — keyed to
 /// `⋄` (194), so it admits `m_harm` and its subtypes `m_perm_left`/`m_perm_right`/`m_all`, and
 /// refuses `m_app` (application only) and the two crossed modes.
-fn harmonic_licenses(mode: &Exp) -> bool {
+pub(crate) fn harmonic_licenses(mode: &Exp) -> bool {
     matches!(
         slash_mode_name(mode),
         Some("m_harm" | "m_perm_left" | "m_perm_right" | "m_all")
@@ -1726,9 +2509,14 @@ fn bwd_pat(res: CatPat, arg: CatPat) -> CatPat {
 fn vp_pat() -> CatPat {
     bwd_pat(any_s_pat(), any_np_pat())
 }
-/// A type-raised subject GQ `S/(S\NP)` — the right operand every GQ-prep rule consumes.
+/// A type-raised subject GQ `S/(S\NP)` (`m_all` outer slash) — the right operand every GQ-prep rule
+/// consumes. Keyed to `m_all` so application-only subject functors (`gerund_subject`'s `S /⋆ (S\NP_sg)`)
+/// apply only to finite VPs and do not enter preposition-object raising.
 fn raised_gq_pat() -> CatPat {
-    fwd_pat(any_s_pat(), vp_pat())
+    CatPat::Ctor(
+        "fwd",
+        vec![CatPat::Ctor("m_all", vec![]), any_s_pat(), vp_pat()],
+    )
 }
 
 /// The agentive-passive `by`'s functor RESULT — `(S[pass]\NP) \ ((S[pss]\NP)/NP)`: a passive patient-VP
@@ -1736,6 +2524,23 @@ fn raised_gq_pat() -> CatPat {
 /// `bwd` whose left is a VP and right is a `fwd`), so `gq_prep_passive_agent` stays trigger-disjoint.
 fn passive_agent_res_pat() -> CatPat {
     bwd_pat(vp_pat(), fwd_pat(vp_pat(), any_np_pat()))
+}
+
+/// A saturated gerund VP `S[dcl,ger]\NP` as the object of a preposition (`without finding X`, `by
+/// querying Y`, `before tallying`). Binds the subject slot's type index `ger_subj_ty` so
+/// [`ger_prep_apply`] can nominalize the gerund VP as `kind_of(Σs:ger_subj_ty. V(s)) : Entity`,
+/// matching [`super::constructions::gerund_subject`].
+fn ger_vp_pat() -> CatPat {
+    bwd_pat(
+        CatPat::Ctor(
+            "cat_s",
+            vec![
+                CatPat::Ctor("dcl", vec![]),
+                CatPat::Ctor("ger", vec![]),
+            ],
+        ),
+        CatPat::Ctor("cat_np", vec![CatPat::Var("ger_subj_ty"), wild()]),
+    )
 }
 
 /// The "other grammar" rule table (built once). Priority = order: close-naming apposition first, then
@@ -1800,6 +2605,306 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_passive_agent,
+            },
+            // Gerund-VP-as-prep-object, PpMod: `[cat_pp/NP] [S[dcl,ger]\NP]` → `cat_pp` ("method for
+            // querying the database").
+            CatRule {
+                name: "ger_prep_ppmod",
+                left_pat: fwd_pat(Ctor("cat_pp", vec![]), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Means/manner `by` + gerund VP (`by querying X`, `by tallying Y`): `by` has no general
+            // `by_prep` VP-adjunct entry in `closed-class.esl` (to avoid competing with `by_agent` on
+            // passive NPs), but `by` + a saturated gerund VP is unambiguously a VP adjunct. Keyed on
+            // `by_arg`'s `cat_pp_arg(prep_by)/NP` before the generic `ger_prep_argmarker`.
+            CatRule {
+                name: "ger_prep_by_vpadjunct",
+                left_pat: fwd_pat(
+                    Ctor("cat_pp_arg", vec![Ctor("prep_by", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_by_vpadjunct,
+            },
+            // Gerund-VP-as-prep-object, ArgMarker: `[cat_pp_arg/NP] [S[dcl,ger]\NP]` → `cat_pp_arg`
+            // ("compatible with reaching adulthood").
+            CatRule {
+                name: "ger_prep_argmarker",
+                left_pat: fwd_pat(Ctor("cat_pp_arg", vec![wild()]), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Gerund-VP-as-prep-object, VpAdjunct: `[(S\NP)\(S\NP)/NP] [S[dcl,ger]\NP]` → VP modifier
+            // ("without finding X", "by querying Y", "before tallying").
+            CatRule {
+                name: "ger_prep_vpadjunct",
+                left_pat: fwd_pat(bwd_pat(vp_pat(), vp_pat()), any_np_pat()),
+                right_pat: ger_vp_pat(),
+                guards: &[],
+                build: ger_prep_apply,
+            },
+            // Predicative adjective / passive participle + `to`-infinitive complement:
+            // `[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,adj|pass]\NP` ("likely to V", "able to V",
+            // "expected to V", "allowed to V"). Conjoins the predicate with the infinitive VP over the
+            // shared subject (`λx. And(left(x), right(x))`).
+            CatRule {
+                name: "pred_infinitive",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("pred_fin")]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("inf", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[Guard::FinIsAdjOrPass("pred_fin")],
+                build: build_pred_infinitive,
+            },
+            // Classifier + cardinal numeral designator (`Codon 380`, `chromosome X position 123,900,532`,
+            // `table 1`): `[cat_n(sortal, sortalnum)] [cat_num]` → `cat_np(base_class(sortal), sg)`
+            // denoting `the_count(sortal, q)`.
+            CatRule {
+                name: "name_numeral",
+                left_pat: Ctor("cat_n", vec![Var("sortal"), Var("sortalnum")]),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[Guard::NotPpRefined(Operand::Left)],
+                build: build_name_numeral,
+            },
+            // Essive `as` + predicative adjective (`classifies X as Benign`, `treats X as pathogenic`):
+            // `[cat_pp_arg(prep_as)/NP] [S[dcl,adj]\NP]` → `cat_pp_arg(prep_as)`.
+            CatRule {
+                name: "as_adj_arg",
+                left_pat: fwd_pat(
+                    Ctor("cat_pp_arg", vec![Ctor("prep_as", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    Ctor("cat_np", vec![Var("adj_subj_ty"), wild()]),
+                ),
+                guards: &[],
+                build: as_adj_apply,
+            },
+            // Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + prepositional phrase `cat_pp`
+            // (`That is for the canonical transcript.`, `is in a male`, `was in the middle of X`).
+            CatRule {
+                name: "copula_pp",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("cop_fin")]),
+                        Ctor("cat_np", vec![Var("cop_ty"), Var("cop_num")]),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                right_pat: Ctor("cat_pp", vec![]),
+                guards: &[
+                    Guard::FinIsFinOrBse("cop_fin"),
+                    Guard::NotParticipialPp(Operand::Right),
+                ],
+                build: build_copula_pp,
+            },
+            // Predicative adjective + prepositional phrase (`reachable by a single nucleotide`,
+            // `absent in X`): `[S[dcl,adj]\NP] [cat_pp]` → `S[dcl,adj]\NP`.
+            CatRule {
+                name: "adj_pp_mod",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_pp", vec![]),
+                guards: &[Guard::NotParticipialPp(Operand::Right)],
+                build: build_pred_infinitive,
+            },
+            // Epistemic predicative adjective + passive participle (`is very likely tolerated`):
+            // `[S[dcl,adj]\NP] [S[dcl,pass]\NP]` → `S[dcl,adj]\NP`.
+            CatRule {
+                name: "adj_pass_mod",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("pass", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[],
+                build: build_pred_infinitive,
+            },
+            // Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
+            // `[cat_n(sortal, n_num)] [S[dcl,adj]\NP]` → `S[dcl,pred]\NP`.
+            CatRule {
+                name: "noun_adj_pred",
+                left_pat: Ctor("cat_n", vec![Var("sortal"), Var("n_num")]),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotPlural("n_num"),
+                    Guard::NotPpRefined(Operand::Left),
+                ],
+                build: build_noun_adj_pred,
+            },
+            // VP-adjunct PP on an unsaturated transitive gerund (`leaving as a vague worry`):
+            // `[(S[dcl,ger]\NP)/NP] [(S[dcl,ger]\NP)\(S[dcl,ger]\NP)]` → `(S[dcl,ger]\NP)/NP`.
+            CatRule {
+                name: "ger_tv_vpadjunct",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                guards: &[],
+                build: build_vp_functor_bwd_adv,
+            },
+            // Post-verbal VP-adjunct PP on an object-extracted finite clause
+            // (`that Tse and colleagues actually map to the dimer interface`):
+            // `[S[dcl,fin]/NP] [(S[dcl,fin]\NP)\(S[dcl,fin]\NP)]` → `S[dcl,fin]/NP`.
+            CatRule {
+                name: "obj_gap_clause_vpadjunct",
+                left_pat: fwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                        any_np_pat(),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                guards: &[],
+                build: build_obj_gap_clause_vpadjunct,
+            },
+            // Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
+            // `[(S[dcl,ger]\NP)/NP] [S[dcl,adj]\NP]` → `(S[dcl,ger]\NP)/NP`.
+            CatRule {
+                name: "ger_tv_adj",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("ger", vec![])]),
+                        any_np_pat(),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[],
+                build: build_ger_tv_adj,
+            },
+            // Post-verbal / post-copular adverb on an unsaturated VP-returning functor
+            // (`is therefore 0`, `is therefore a statement…`, `points directly at X`, `stating precisely`):
+            // `[(S[dcl,f]\NP)/Z] [(S[dcl,f]\NP)\(S[dcl,f]\NP)]` → `(S[dcl,f]\NP)/Z`.
+            CatRule {
+                name: "vp_functor_bwd_adv",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_ty"), Var("vf_num")]),
+                    ),
+                    Var("vf_arg"),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_adv_ty"), Var("vf_adv_num")]),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("vf_fin")]),
+                        Ctor("cat_np", vec![Var("vf_adv_ty"), Var("vf_adv_num")]),
+                    ),
+                ),
+                guards: &[
+                    Guard::NotVpArg("vf_arg"),
+                    Guard::IsAdverb(Operand::Right),
+                    Guard::NotComposed(Operand::Left),
+                ],
+                build: build_vp_functor_bwd_adv,
+            },
+            // Transitive verb + bare numeral object (`scores 0.72`, `exceeds 0.7`, `equals 1`):
+            // `[(S[dcl,tv_fin]\NP)/NP] [cat_num]` → `S[dcl,tv_fin]\NP`.
+            CatRule {
+                name: "tv_num_obj",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                        Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                    ),
+                    Ctor("cat_np", vec![Var("tv_obj_ty"), Var("tv_obj_num")]),
+                ),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_num_obj,
+            },
+            // Oblique-complement transitive verb + bare numeral object (`scores 0.72 on X`):
+            // `[((S[dcl,tv_fin]\NP)/cat_pp_arg(Prep))/NP] [cat_num]` → `(S[dcl,tv_fin]\NP)/cat_pp_arg(Prep)`.
+            CatRule {
+                name: "dtv_num_obj",
+                left_pat: fwd_pat(
+                    fwd_pat(
+                        bwd_pat(
+                            Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                            Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                        ),
+                        Ctor("cat_pp_arg", vec![Var("tv_prep")]),
+                    ),
+                    Ctor("cat_np", vec![Var("tv_obj_ty"), Var("tv_obj_num")]),
+                ),
+                right_pat: Ctor("cat_num", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_num_obj,
+            },
+            // Predicative adjective + `that`/`whether` complement clause (`is explicit that S`):
+            // `[S[dcl,adj]\NP] [cat_cp]` → `S[dcl,pred]\NP`.
+            CatRule {
+                name: "adj_cp_comp",
+                left_pat: bwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_cp", vec![]),
+                guards: &[],
+                build: build_adj_cp_comp,
+            },
+            // Transitive verb + `that`/`whether` complement clause when the verb's clausal frame
+            // is absent from WordNet (`caution that S`, `warn that S`):
+            // `[(S[dcl,tv_fin]\NP)/NP] [cat_cp]` → `S[dcl,tv_fin]\NP`.
+            CatRule {
+                name: "tv_cp_comp",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("tv_fin")]),
+                        Ctor("cat_np", vec![Var("tv_subj_ty"), Var("tv_subj_num")]),
+                    ),
+                    any_np_pat(),
+                ),
+                right_pat: Ctor("cat_cp", vec![]),
+                guards: &[Guard::NotComposed(Operand::Left)],
+                build: build_tv_cp_comp,
             },
         ]
     });
@@ -1873,7 +2978,15 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
     // sem are the same Σ, exactly as [`super::constructions::relativize`] and the named-compound rule
     // build theirs, and the `Compound` provenance already means "builds a refined noun `cat_n(Σ…)`".
     let (decl, num) = match left.cat() {
-        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => (d.clone(), largs[1].clone()),
+        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => {
+            let num = match &largs[1] {
+                Exp::InductiveCtor(nd, n, _) if n == "mass" || n == "name" => {
+                    Exp::InductiveCtor(nd.clone(), "sg".into(), Vec::new())
+                }
+                other => other.clone(),
+            };
+            (d.clone(), num)
+        }
         _ => unreachable!("the name rule requires a cat_n left + cat_np right"),
     };
     let cat = Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), num]);
@@ -1946,6 +3059,9 @@ fn gq_prep_passive_agent(
 }
 
 /// GQ-as-prep-object, VP-adjunct: `λV.λs. Q(λx. prep_sem(x)(V)(s))` — result `(S\NP)\(S\NP)`.
+/// Tagged [`Combinator::ForwardApp`] (like plain-NP preposition application) so a sentence-initial
+/// PP with a quantified object (`In a study, …`, `In every cell, …`) is lifted by
+/// [`front_adjunct_lifts`].
 fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let (x, v, s) = ("__pobj_x", "__pobj_V", "__pobj_s");
     let applied = Exp::App(
@@ -1966,7 +3082,7 @@ fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<
         Patt::Var(v.into()),
         Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(scoped))),
     );
-    Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
 /// GQ-as-prep-object, argument marker: `Q(prep_sem)` — the raised GQ applied to the transparent
@@ -1974,6 +3090,384 @@ fn gq_prep_vpadjunct(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<
 fn gq_prep_argmarker(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sem = Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone()));
     Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
+}
+
+/// Gerund-VP-as-prep-object (`without finding X`, `before tallying`, `compatible with reaching
+/// adulthood`): nominalize the saturated gerund VP `right : Entity → Prop` as the reified kind
+/// entity `kind_of(Σs:ger_subj_ty. right(s)) : Entity` (matching
+/// [`super::constructions::gerund_subject`]) and apply the preposition functor `left` directly to it.
+fn ger_prep_apply(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let subj_ty = binds
+        .get("ger_subj_ty")
+        .expect("ger_vp_pat binds ger_subj_ty")
+        .clone();
+    let s_var = "__ger_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let ger_entity = super::super::category::kind_of(sig);
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(ger_entity));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Means/manner `by` + gerund VP (`by querying X`, `by tallying Y`) → finite VP adjunct
+/// `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)` with sem `λV. λs. And(V(s), prep_by(s, kind_of(Σx. right(x))))`.
+fn ger_prep_by_vpadjunct(
+    binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let subj_ty = binds
+        .get("ger_subj_ty")
+        .expect("ger_vp_pat binds ger_subj_ty")
+        .clone();
+    let s_var = "__ger_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let ger_entity = super::super::category::kind_of(sig);
+
+    let (m_all, _res, np_any) =
+        slash_parts(left.cat(), "fwd").expect("ger_prep_by_vpadjunct matched fwd left");
+    let (_m_r, s_ger, _np_r) =
+        slash_parts(right.cat(), "bwd").expect("ger_prep_by_vpadjunct matched bwd right");
+    let Some([dcl, ger]) = is_ctor(s_ger, "cat_s") else {
+        unreachable!("ger_vp_pat matched cat_s");
+    };
+    let Exp::InductiveCtor(cat_decl, _, _) = left.cat() else {
+        unreachable!("left cat is an InductiveCtor");
+    };
+    let Exp::InductiveCtor(fin_decl, _, _) = ger else {
+        unreachable!("ger is an InductiveCtor");
+    };
+    let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl.clone(), fin]);
+    let vp_fin = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all.clone(), s_fin, np_any.clone()],
+    );
+    let vpadj_cat = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all.clone(), vp_fin.clone(), vp_fin],
+    );
+
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let (v, s) = ("__by_ger_V", "__by_ger_s");
+    let v_s = Exp::App(Box::new(Exp::Var(v.into())), Box::new(Exp::Var(s.into())));
+    let prep_by_s = app2("urn:eigenius:ontology:prep_by", s, ger_entity);
+    let conj = Exp::const_applied(and, Vec::new(), vec![v_s, prep_by_s]);
+    let sem = Exp::Lam(
+        Patt::Var(v.into()),
+        Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(conj))),
+    );
+    Item::from_parts(vpadj_cat, sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// If `cat` is a predicative adjective VP `bwd(m, cat_s(mood, adj), np)`, rewrite its finiteness
+/// feature from `adj` to `pred` so post-modified predicative adjectives (`likely to V`, `reachable
+/// by X`, `likely tolerated`) remain selectable by the copula, negation, and forward adverbs
+/// (`pred ⊑ adj`) without lifting to pre-nominal `cat_mod` (`is_adjective_cat` requires `adj`).
+fn as_pred_vp_cat(cat: &Exp) -> Exp {
+    if let Exp::InductiveCtor(c_decl, bwd_name, bwd_args) = cat {
+        if bwd_name == "bwd" && bwd_args.len() == 3 {
+            if let Exp::InductiveCtor(s_decl, s_name, s_args) = &bwd_args[1] {
+                if s_name == "cat_s" && s_args.len() == 2 {
+                    if let Exp::InductiveCtor(f_decl, f_name, _) = &s_args[1] {
+                        if f_name == "adj" {
+                            let pred =
+                                Exp::InductiveCtor(f_decl.clone(), "pred".into(), Vec::new());
+                            let s_pred = Exp::InductiveCtor(
+                                s_decl.clone(),
+                                "cat_s".into(),
+                                vec![s_args[0].clone(), pred],
+                            );
+                            return Exp::InductiveCtor(
+                                c_decl.clone(),
+                                "bwd".into(),
+                                vec![bwd_args[0].clone(), s_pred, bwd_args[2].clone()],
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cat.clone()
+}
+
+/// Predicative adjective / passive participle + `to`-infinitive complement
+/// (`[S[dcl,adj|pass]\NP] [S[dcl,inf]\NP]` → `S[dcl,pred|pass]\NP`, e.g. `likely to V`, `able to V`,
+/// `expected to V`, `allowed to V`): conjoin the two predicates over the shared subject
+/// `λx. logic:And(left(x), right(x))`. Tagged [`Combinator::BackwardApp`] so a passive participle
+/// modified by a `to`-infinitive is no longer blocked by
+/// [`ProvGuard::RightNotShortPassiveParticipial`] when `is_passive_by`/`was_passive_by` applies.
+fn build_pred_infinitive(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__pred_inf_x";
+    let l_app = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(left.cat()),
+        sem,
+        Combinator::BackwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Classifier + cardinal numeral designator (`Codon 380`, `chromosome X position 123,900,532`,
+/// `table 1`): `cat_np(base_class(sortal), sg)` with `ontology:the_count(sortal, q)`.
+fn build_name_numeral(
+    binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let sortal = binds
+        .get("sortal")
+        .expect("name_numeral trigger binds sortal")
+        .clone();
+    let base = super::super::category::base_class(&sortal);
+    let the_count = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the_count")
+            .expect("valid the_count iri"),
+    );
+    let raw_sem = Exp::App(
+        Box::new(Exp::App(Box::new(the_count), Box::new(sortal.clone()))),
+        Box::new(right.sem().clone()),
+    );
+    let sem = if matches!(sortal, Exp::Sig(..)) {
+        Exp::Fst(Box::new(raw_sem))
+    } else {
+        raw_sem
+    };
+    let (decl, num_decl) = match left.cat() {
+        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => match &largs[1] {
+            Exp::InductiveCtor(nd, _, _) => (d.clone(), nd.clone()),
+            _ => unreachable!("cat_n second arg is Num ctor"),
+        },
+        _ => unreachable!("name_numeral requires cat_n left"),
+    };
+    let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
+    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![base, sg]);
+    Item::from_parts(cat, sem, Combinator::DerivedIndividual, Cost::ZERO)
+}
+
+/// Essive `as` + predicative adjective (`as Benign`, `as pathogenic`): nominalize the adjective
+/// predicate `right : Entity -> Prop` as `kind_of(Σs:adj_subj_ty. right(s)) : Entity` and apply
+/// `left.sem()`.
+fn as_adj_apply(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let subj_ty = binds
+        .get("adj_subj_ty")
+        .expect("as_adj_arg binds adj_subj_ty")
+        .clone();
+    let s_var = "__as_adj_s";
+    let body = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(s_var.into())),
+    );
+    let sig = Exp::Sig(Patt::Var(s_var.into()), Box::new(subj_ty), Box::new(body));
+    let adj_entity = super::super::category::kind_of(sig);
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(adj_entity));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + prepositional phrase `cat_pp`
+/// (`That is for the canonical transcript.`, `is in a male`): apply the copula functor directly to
+/// the `cat_pp` predicate (`Entity -> Prop`).
+fn build_copula_pp(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(right.sem().clone()));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
+/// `λx. And(right(x), compound_kind(x, left))` with output category `S[dcl,pred]\NP`.
+fn build_noun_adj_pred(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__n_adj_x";
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let l_app = app2("urn:eigenius:ontology:compound_kind", x, left.sem().clone());
+    let body = Exp::const_applied(and, Vec::new(), vec![r_app, l_app]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(right.cat()),
+        sem,
+        Combinator::BackwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
+/// `λobj. λsubj. And(left(obj, subj), right(obj))`.
+fn build_ger_tv_adj(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let (obj, subj) = ("__tv_adj_o", "__tv_adj_s");
+    let l_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(left.sem().clone()),
+            Box::new(Exp::Var(obj.into())),
+        )),
+        Box::new(Exp::Var(subj.into())),
+    );
+    let r_app = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(obj.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
+    let sem = Exp::Lam(
+        Patt::Var(obj.into()),
+        Box::new(Exp::Lam(Patt::Var(subj.into()), Box::new(body))),
+    );
+    Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
+}
+
+/// Post-verbal / post-copular backward adverb on an unsaturated VP-returning functor
+/// (`[(S[dcl,f]\NP)/Z] [(S[dcl,f]\NP)\(S[dcl,f]\NP)]` → `(S[dcl,f]\NP)/Z`):
+/// `λz. right(left(z))`.
+fn build_vp_functor_bwd_adv(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let z = "__vf_adv_z";
+    let l_z = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(z.into())),
+    );
+    let body = Exp::App(Box::new(right.sem().clone()), Box::new(l_z));
+    let sem = Exp::Lam(Patt::Var(z.into()), Box::new(body));
+    Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
+}
+
+/// Post-verbal VP-adjunct PP on an object-extracted finite clause
+/// (`[S[dcl,fin]/NP] [(S[dcl,fin]\NP)\(S[dcl,fin]\NP)]` → `S[dcl,fin]/NP`):
+/// `right(left)`.
+fn build_obj_gap_clause_vpadjunct(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let sem = Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone()));
+    Item::from_parts(left.cat().clone(), sem, Combinator::ForwardComp, Cost::ZERO)
+}
+
+/// Transitive / ditransitive verb + bare numeral object (`scores 0.72`, `exceeds 0.7`):
+/// nominalizes the bare numeral as `ontology:the_count(tv_obj_ty, right)` and applies `left`.
+fn build_tv_num_obj(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let obj_ty = binds.get("tv_obj_ty").cloned().unwrap_or_else(|| {
+        Exp::EigonClass(
+            crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity")
+                .expect("valid Entity iri"),
+        )
+    });
+    let the_count = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the_count")
+            .expect("valid the_count iri"),
+    );
+    let num_ent = Exp::App(
+        Box::new(Exp::App(Box::new(the_count), Box::new(obj_ty))),
+        Box::new(right.sem().clone()),
+    );
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(num_ent));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
+/// Predicative adjective + complement clause `cat_cp` (`is explicit that S`):
+/// `λx. And(left(x), right)` with output category `S[dcl,pred]\NP`.
+fn build_adj_cp_comp(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let x = "__adj_cp_x";
+    let l_app = Exp::App(
+        Box::new(left.sem().clone()),
+        Box::new(Exp::Var(x.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, right.sem().clone()]);
+    let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
+    Item::from_parts(
+        as_pred_vp_cat(left.cat()),
+        sem,
+        Combinator::ForwardApp,
+        Cost::ZERO,
+    )
+}
+
+/// Transitive verb + complement clause `cat_cp` (`caution that S`, `warn that S`):
+/// `λs. And(left(s, s), right)`.
+fn build_tv_cp_comp(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+) -> Item {
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let s = "__tv_cp_s";
+    let l_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(left.sem().clone()),
+            Box::new(Exp::Var(s.into())),
+        )),
+        Box::new(Exp::Var(s.into())),
+    );
+    let body = Exp::const_applied(and, Vec::new(), vec![l_app, right.sem().clone()]);
+    let sem = Exp::Lam(Patt::Var(s.into()), Box::new(body));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
 /// Coordination/distributive rules — the packed-forest **carve-out** (Harper 1994 pitfall): these
@@ -2002,6 +3496,44 @@ fn apply_group(
                     Combinator::Other,
                     Cost::ZERO,
                 ));
+            }
+        }
+    }
+    // Distributive SUBJECT in object extraction: a `cat_group` subject meeting an unsaturated
+    // transitive verb `(S\NP)/NP` distributes over the verb for each extracted object `o`.
+    if let (Some([c, _conn, gnum]), Some((m_tv, vp, obj_slot))) = (
+        is_ctor(left.cat(), "cat_group"),
+        slash_parts(right.cat(), "fwd"),
+    ) {
+        if is_ctor(obj_slot, "cat_np").is_some() {
+            if let Some((_m_vp, result, slot)) = slash_parts(vp, "bwd") {
+                let num_agrees =
+                    matches!(is_ctor(slot, "cat_np"), Some([_, snum]) if feat_meets(gnum, snum));
+                if num_agrees && group_member_fits(slot, c, layer) {
+                    let o_var = "__grp_ext_o";
+                    let vp_sem = Exp::App(
+                        Box::new(right.sem().clone()),
+                        Box::new(Exp::Var(o_var.into())),
+                    );
+                    if let Some(dist_body) =
+                        distribute(left.cat(), left.sem(), &vp_sem, layer, rctx)
+                    {
+                        if let Exp::InductiveCtor(cat_decl, _, _) = right.cat() {
+                            let res_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "fwd".into(),
+                                vec![m_tv.clone(), result.clone(), obj_slot.clone()],
+                            );
+                            let sem = Exp::Lam(Patt::Var(o_var.into()), Box::new(dist_body));
+                            return Some(Item::from_parts(
+                                res_cat,
+                                sem,
+                                Combinator::ForwardComp,
+                                Cost::ZERO,
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
@@ -2130,6 +3662,11 @@ pub fn apply_core(
 
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
 pub(crate) const COMPOUND_X: &str = "__cmp_x";
+
+/// The superlative restrictor's universally quantified variable. Canonical for the same reason
+/// [`COMPOUND_X`] is: two derivations that reach the same claim must produce the BYTE-IDENTICAL
+/// restrictor, or they survive packing as alpha-variants.
+const SUPERLATIVE_Y: &str = "__sup_y";
 
 /// The head a composed determiner's modifier refines while the head noun is still to come (D95 slice
 /// 7d, decision 14): the variable the determiner's type is abstracted over.
@@ -2433,6 +3970,47 @@ fn is_compound_refined(cat: &Exp) -> bool {
 /// meaning-distinct adjective-inside compound (`red blood cell`) is licensed by the lexicon as a
 /// multiword unit (§4), never rebuilt here. Intersective adjectives in compounds are not yet in scope
 /// (absent from this corpus's residual). The adequacy battery witnesses no reading lost.
+/// Whether `cat` is a common noun refined by an ATTRIBUTIVE SUPERLATIVE — a restrictor conjunct
+/// `forall (y : C). ge(mu(x), mu(y))`, what [`refine_sup_apply`] builds.
+///
+/// This restrictor MENTIONS ITS OWN COMPARISON CLASS, which no other modifier's does, and that makes
+/// it the one restrictor that is NOT order-invariant: `[most useful] [piece of evidence]` quantifies
+/// over pieces OF EVIDENCE while `[[most useful] piece] of evidence` quantifies over pieces, and
+/// `conjoin_canonical`'s canonical conjunct order cannot collapse two Sigma that differ inside a
+/// binder. Those are different claims — the second is strictly stronger and is not what the sentence
+/// says — so a superlative-refined noun takes no further modifier: the superlative sits OUTSIDE every
+/// one of them. That is the adjective-outside-compound normal form (D63 nominal modification §3.3)
+/// applied one level up, which is why [`is_adjective_refined`] reports a superlative too.
+pub(super) fn is_superlative_refined(cat: &Exp) -> bool {
+    let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
+        return false;
+    };
+    fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+                flatten_and(args[0], out);
+                flatten_and(args[1], out);
+                return;
+            }
+        }
+        out.push(e);
+    }
+    let mut conjuncts = Vec::new();
+    flatten_and(body, &mut conjuncts);
+    conjuncts.iter().any(|c| {
+        // The conjunct is the quantifier itself, so match the binder before the spine — `ge` sits in
+        // its BODY, not at the conjunct's head.
+        let Exp::Pi(_, _, inner) = c else {
+            return false;
+        };
+        let mut head = &**inner;
+        while let Exp::App(f, _) | Exp::Ann(f, _) = head {
+            head = f;
+        }
+        matches!(head, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:measurements:ge")
+    })
+}
+
 pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
     let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
         return false;
@@ -2504,7 +4082,7 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
             if iri.as_str() == "urn:eigenius:measurements:gt"
                 || iri.as_str() == "urn:eigenius:measurements:lt")
             || mentions_verb_frame(c)
-    })
+    }) || is_superlative_refined(cat)
 }
 
 /// The **number** argument of a `cat_n(_, num)` category (`sg` / `pl` / `mass` / `num_any`), or
@@ -3224,6 +4802,284 @@ mod dispatch_tests {
     }
 
     #[test]
+    fn superlative_refines_a_plain_noun_with_a_maximality_restrictor() {
+        // `most useful` + `cell` -> `Sigma x:Cell. forall y:Cell. ge(deg(x), deg(y))`. The scale rides
+        // on the `cat_sup_mod` sem; the comparison class is the HEAD NOUN's type, which is why this is
+        // a rule (there `C` is concrete and `deg : Entity -> float` applies) and not a lexical entry.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Cell");
+        let l = mk_item(cat_sup_mod_cat(), mu.clone());
+        let r = mk_item(n(head.clone()), head.clone());
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_sup_mod + cat_n -> refined noun");
+
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let expected = Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            Box::new(head.clone()),
+            Box::new(Exp::Pi(
+                Patt::Var(SUPERLATIVE_Y.into()),
+                Box::new(head),
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        // `ge`, not `gt`: x is trivially >= itself, so no `y != x` clause is needed.
+                        Box::new(ax("urn:eigenius:measurements:ge")),
+                        Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+                    )),
+                    Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+                )),
+            )),
+        );
+        assert_eq!(got.cat(), &n(expected.clone()));
+        assert_eq!(got.sem(), &expected);
+    }
+
+    #[test]
+    fn a_superlative_refined_noun_takes_no_pp_but_an_adjective_refined_one_does() {
+        // The superlative's restrictor quantifies over the comparison class, so the two bracketings of
+        // "the most useful piece of evidence" are DIFFERENT claims and `conjoin_canonical` cannot
+        // collapse them. `pp_mod` therefore refuses a superlative-refined head, leaving
+        // "[most useful] [piece of evidence]" — the reading with the class the sentence means.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Piece");
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let sup_restr = Exp::Pi(
+            Patt::Var(SUPERLATIVE_Y.into()),
+            Box::new(head.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:measurements:ge")),
+                    Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+                )),
+                Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+            )),
+        );
+        let sup = sigma_cmp(head.clone(), sup_restr);
+        assert!(is_superlative_refined(&n(sup.clone())));
+        // …and the adjective-outside normal form reports it, which is what keeps it out of the
+        // compound rules without a second guard on each of them.
+        assert!(is_adjective_refined(&n(sup.clone())));
+
+        let pp = mk_item(
+            ct("cat_pp", vec![]),
+            Exp::Lam(
+                Patt::Var("w".into()),
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:ontology:prep_of")),
+                    Box::new(Exp::Var("w".into())),
+                )),
+            ),
+        );
+        let sup_noun = mk_item(n(sup.clone()), sup);
+        assert!(
+            apply(
+                &sup_noun,
+                &pp,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_none(),
+            "a superlative-refined noun takes no PP"
+        );
+
+        // CONTROL: an ordinary gradable-adjective refinement still does — both of ITS bracketings
+        // flatten to the same Sigma, so there is nothing to collapse.
+        let adj_restr = Exp::App(
+            Box::new(ax("urn:eigenius:measurements:gt")),
+            Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+        );
+        let adj = sigma_cmp(head, adj_restr);
+        assert!(!is_superlative_refined(&n(adj.clone())));
+        let adj_noun = mk_item(n(adj.clone()), adj);
+        assert!(
+            apply(
+                &adj_noun,
+                &pp,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_some(),
+            "an adjective-refined noun still takes a PP"
+        );
+    }
+
+    #[test]
+    fn superlative_does_not_refine_a_noun_phrase() {
+        // The trigger is `[cat_sup_mod] [cat_n]`. A full NP is already determined — "most useful the
+        // cell" is not English, and letting the rule see `cat_np` would build a comparison class out
+        // of a referring expression.
+        let mu = ax("urn:eigenius:lexicon:deg_useful");
+        let head = cls("urn:eigenius:lexicon:Cell");
+        let l = mk_item(cat_sup_mod_cat(), mu);
+        let r = mk_item(np(head.clone()), head);
+        assert!(apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none());
+    }
+
+    #[test]
+    fn partitive_superlative_maximizes_over_the_group_not_over_the_type() {
+        // `most dangerous of` + `the traps` -> the fused-head noun
+        // `Σx:Trap. has_proportion(the(Trap), λy. ge(μ(x), μ(y)), 1)`.
+        let mu = ax("urn:eigenius:lexicon:deg_dangerous");
+        let trap = cls("urn:eigenius:lexicon:Trap");
+        let group = Exp::App(
+            Box::new(ax("urn:eigenius:ontology:the")),
+            Box::new(trap.clone()),
+        );
+        let l = mk_item(cat_sup_part_cat(), mu.clone());
+        let r = mk_item(ct("cat_np", vec![trap.clone(), plural()]), group.clone());
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_sup_part + cat_np -> the fused-head noun");
+
+        let scale = |e: Exp| Exp::App(Box::new(mu.clone()), Box::new(e));
+        let ge = Exp::App(
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:measurements:ge")),
+                Box::new(scale(Exp::Var(COMPOUND_X.into()))),
+            )),
+            Box::new(scale(Exp::Var(SUPERLATIVE_Y.into()))),
+        );
+        let expected = Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            // The Σ's base is the NP's TYPE: the encoding still says `x` is a trap.
+            Box::new(trap.clone()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(ax("urn:eigenius:ontology:has_proportion")),
+                        // The maximality is over the GROUP ENTITY, not over the type — this is the
+                        // whole point: quantifying over `Trap` would read the sentence as maximal
+                        // among traps in general and discard "of the traps".
+                        Box::new(group),
+                    )),
+                    Box::new(Exp::Lam(Patt::Var(SUPERLATIVE_Y.into()), Box::new(ge))),
+                )),
+                // Proportion 1 — `all of`'s own encoding, hence no new axiom.
+                Box::new(whole_proportion()),
+            )),
+        );
+        assert_eq!(got.sem(), &expected);
+        // The result is a NOUN awaiting its determiner ("THE most dangerous of the traps"), and
+        // singular whatever the group's number.
+        assert_eq!(got.cat(), &ct("cat_n", vec![expected, ct("sg", vec![])]));
+    }
+
+    /// The partitive rule must not fire on a bare noun, and the ATTRIBUTIVE one must not fire on the
+    /// group NP — the two superlative categories consume disjoint things, which is why they are two
+    /// categories and not one with a guard.
+    #[test]
+    fn the_two_superlative_categories_do_not_cross() {
+        let mu = ax("urn:eigenius:lexicon:deg_dangerous");
+        let trap = cls("urn:eigenius:lexicon:Trap");
+        let ctx = crate::dcg::rules::RightContext::Other;
+        let noun = mk_item(ct("cat_n", vec![trap.clone(), plural()]), trap.clone());
+        let np_item = mk_item(ct("cat_np", vec![trap.clone(), plural()]), trap);
+
+        assert!(
+            apply(
+                &mk_item(cat_sup_part_cat(), mu.clone()),
+                &noun,
+                &layer(),
+                ctx
+            )
+            .is_none(),
+            "`most dangerous of` must not take a bare head noun"
+        );
+        assert!(
+            apply(&mk_item(cat_sup_mod_cat(), mu), &np_item, &layer(), ctx).is_none(),
+            "`most dangerous` must not take a determined NP"
+        );
+    }
+
+    /// **The partitive superlative's open question (D63 §7b): does ONE node carry both the class
+    /// TYPE and the group ENTITY?** `the genes` is `the_plain_np_pl`
+    /// (`cat_forall(pl, λT. cat_np(T, pl))`, `closed-class.esl`) dep-applied to its head noun. This
+    /// pins the two halves a partitive superlative needs: the noun's type survives into the NP's
+    /// CATEGORY, and the group entity is its SEM. A rule matching `cat_np(T, num)` therefore has
+    /// both in hand, so `Σx:T. has_proportion(g, λy. ge(μ(x), μ(y)), 1)` is buildable.
+    #[test]
+    fn a_definite_plural_np_carries_its_class_type_and_its_group_entity_at_one_node() {
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        let the = mk_item(the_plain_np_pl_cat(), the_sem());
+        let noun = mk_item(ct("cat_n", vec![gene.clone(), plural()]), gene.clone());
+        let np = apply(
+            &the,
+            &noun,
+            &layer(),
+            crate::dcg::rules::RightContext::Other,
+        )
+        .expect("the + plural noun -> a plain NP");
+
+        // (a) the CLASS: the noun's type is the NP category's first index, not erased to `Entity`.
+        assert_eq!(np.cat(), &ct("cat_np", vec![gene.clone(), plural()]));
+        // (b) the GROUP: the sem is `the` applied to that SAME type — un-reduced `App`, β-reducing
+        // to `the(Gene)`. Class and group are therefore not two independently-sourced things: the
+        // group entity is built FROM the category's type index, at this one node.
+        assert_eq!(
+            np.sem(),
+            &Exp::App(Box::new(the_sem()), Box::new(gene.clone())),
+            "the NP's sem must be `the` over the category's own type index"
+        );
+        // (c) a rule pattern reads the class off the category — what `name` already does with
+        // `Var(\"namety\")`, so this needs no new matching machinery.
+        let mut binds = crate::dcg::category::CatSubst::new();
+        assert!(crate::dcg::category::match_cat(
+            &CatPat::Ctor("cat_np", vec![CatPat::Var("T"), CatPat::Var("num")]),
+            np.cat(),
+            &mut binds
+        ));
+        assert_eq!(binds.get("T"), Some(&gene));
+    }
+
+    /// The same question's NEGATIVE half: `cat_forall` + `DepApply` consumes `cat_n` ONLY, so an
+    /// ESL entry cannot bind the class off a determined NP. The partitive superlative is therefore
+    /// kernel work (a `CatRule`), not three resources — unlike the free relative.
+    #[test]
+    fn a_dependent_entry_cannot_bind_the_class_off_a_determined_np() {
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        let dependent = mk_item(the_plain_np_pl_cat(), the_sem());
+        let ctx = crate::dcg::rules::RightContext::Other;
+
+        // CONTROL: the identical left operand DOES fire on the bare noun, so a `None` below is
+        // the right operand's category and nothing else about this fixture.
+        let bare = mk_item(ct("cat_n", vec![gene.clone(), plural()]), gene.clone());
+        assert!(apply(&dependent, &bare, &layer(), ctx).is_some());
+
+        let determined = mk_item(ct("cat_np", vec![gene.clone(), plural()]), gene);
+        assert!(
+            apply(&dependent, &determined, &layer(), ctx).is_none(),
+            "DepApply must not fire on a cat_np right operand"
+        );
+    }
+
+    /// `the_plain_np_pl`'s category, as `ontologies/lexicon/closed-class.esl` declares it:
+    /// `cat_forall(pl, λT. cat_np(T, pl))`.
+    fn the_plain_np_pl_cat() -> Exp {
+        ct(
+            "cat_forall",
+            vec![
+                plural(),
+                Exp::Lam(
+                    Patt::Var("T".into()),
+                    Box::new(ct("cat_np", vec![Exp::Var("T".into()), plural()])),
+                ),
+            ],
+        )
+    }
+    /// `the_plain_sem`: `fun (A : Set) => ontology:the(A)`.
+    fn the_sem() -> Exp {
+        Exp::Lam(
+            Patt::Var("A".into()),
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:ontology:the")),
+                Box::new(Exp::Var("A".into())),
+            )),
+        )
+    }
+    fn plural() -> Exp {
+        ct("pl", vec![])
+    }
+
+    #[test]
     fn conjoin_canonical_is_order_independent() {
         // The residual-multiplicity fix: two modifiers attached in EITHER CKY order must yield the
         // BYTE-IDENTICAL Σ restrictor, so the two derivations pack + subsume instead of surviving as
@@ -3539,7 +5395,7 @@ mod dispatch_tests {
             "result is the VP-adjunct (S\\NP)\\(S\\NP)"
         );
         assert_eq!(got.sem(), &expected_sem);
-        assert_eq!(got.prov(), Combinator::Other);
+        assert_eq!(got.prov(), Combinator::ForwardApp);
     }
 
     // ── universal combinators (Phase 2b): application, composition, dependent determiner ──
@@ -3644,6 +5500,58 @@ mod dispatch_tests {
     // These three tests are the WITNESS that the mode machinery does what the lattice says, and they
     // are deliberately written BEFORE any lexical entry is tightened to `m_app`: the migration ships
     // with every slash at `m_all`, so without them nothing would exercise a non-permissive mode.
+
+    // ── the sentence-initial adverb lift's CATEGORY transform ───────────────────────────────────
+    //
+    // The behavioural test needs an adverb, which comes from WordNet and so from a snapshot; this
+    // pins the pure category function instead, including the two shapes it must REFUSE.
+
+    #[test]
+    fn adv_initial_lifts_the_forward_vp_premodifier() {
+        let vp = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("fin", vec![])]),
+                ct("cat_np", vec![ct("Entity", vec![]), ct("num_any", vec![])]),
+            ],
+        );
+        let premod = ct("fwd", vec![vp.clone(), vp.clone()]);
+        let lifted = super::adv_initial_cat(&premod).expect("the forward VP pre-modifier lifts");
+
+        // `X/X` over a RAISED subject, and the two X's are the same category.
+        let (_m, res, arg) = super::super::super::category::slash_parts(&lifted, "fwd")
+            .expect("the lift is a forward slash");
+        assert_eq!(res, arg, "the lift is a modifier: result == argument");
+
+        // …and that X is `S/(S\NP)`, not a VP.
+        let (_m2, s_res, s_arg) = super::super::super::category::slash_parts(res, "fwd")
+            .expect("the modified category is itself a forward slash (a raised subject)");
+        assert!(
+            super::super::super::category::is_ctor(s_res, "cat_s").is_some(),
+            "a raised subject yields S, got {s_res:?}"
+        );
+        assert!(
+            super::super::super::category::slash_parts(s_arg, "bwd").is_some(),
+            "a raised subject takes a VP, got {s_arg:?}"
+        );
+    }
+
+    #[test]
+    fn adv_initial_refuses_the_backward_modifier_and_non_modifiers() {
+        let vp = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("fin", vec![])]),
+                ct("cat_np", vec![ct("Entity", vec![]), ct("num_any", vec![])]),
+            ],
+        );
+        // The BACKWARD VP modifier already attaches after the verb; lifting it too would give every
+        // adverb a second route to the same reading.
+        assert!(super::adv_initial_cat(&ct("bwd", vec![vp.clone(), vp.clone()])).is_none());
+        // A forward slash whose result and argument differ is a functor, not a modifier.
+        let other = ct("cat_np", vec![ct("Entity", vec![]), ct("sg", vec![])]);
+        assert!(super::adv_initial_cat(&ct("fwd", vec![vp, other])).is_none());
+    }
 
     #[test]
     fn application_only_slash_refuses_composition() {

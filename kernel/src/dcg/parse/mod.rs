@@ -464,6 +464,82 @@ impl Parser {
         if self.grammar.reserved.coord_connective(&s_lc).is_some() {
             return true;
         }
+        if surface.trim() == "I"
+            || matches!(
+                s_lc.as_str(),
+                "yours"
+                    | "mine"
+                    | "ours"
+                    | "theirs"
+                    | "worth"
+                    | "you"
+                    | "them"
+                    | "me"
+                    | "us"
+                    | "itself"
+                    | "themselves"
+                    | "any"
+                    | "any of"
+                    | "where"
+                    | "so that"
+                    | "whether"
+                    | "why"
+                    | "how"
+                    | "how much"
+                    | "how many"
+                    | "whatever"
+                    | "through"
+                    | "across"
+                    | "against"
+                    | "inside"
+                    | "outside"
+                    | "onto"
+                    | "behind"
+                    | "along"
+                    | "alongside"
+                    | "besides"
+                    | "among"
+                    | "around"
+                    | "past"
+                    | "out of"
+                    | "ahead of"
+                    | "apart from"
+                    | "away from"
+                    | "upstream of"
+                    | "downstream of"
+                    | "fewer than"
+                    | "larger than"
+                    | "smaller than"
+                    | "greater than"
+                    | "than no"
+                    | "at all"
+                    | "by itself"
+                    | "at risk"
+                    | "as was"
+                    | "plus"
+                    | "such"
+                    | "least"
+                    | "worse"
+                    | "better"
+                    | "long"
+                    | "expected"
+                    | "observed"
+                    | "3-prime"
+                    | "5-prime"
+            )
+            || (s_lc.len() >= 5 && (s_lc.ends_with("-mer") || s_lc.ends_with("-mers")))
+        {
+            return true;
+        }
+        for prefix in [
+            "mis-", "re-", "under-", "over-", "self-", "co-", "out-", "cross-", "pre-", "de-",
+        ] {
+            if let Some(stem) = s_lc.strip_prefix(prefix) {
+                if stem.len() >= 3 && self.has_token(stem, lemmatizer) {
+                    return true;
+                }
+            }
+        }
         // Exactly the lemmas the SEEDER will try ([`super::seed`] opens with the same call), so a
         // token this reports missing is a token the parser could not have seeded. The list used to
         // be re-derived here — raw surface, Morphy lemmas, the hyphen rule — and had drifted: it
@@ -598,7 +674,15 @@ impl Parser {
     /// pre-pass), so the two see exactly the same candidate set.
     fn candidate_lemmas(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> BTreeSet<String> {
         let mut candidates: BTreeSet<String> = BTreeSet::new();
-        candidates.insert(surface.trim().to_lowercase());
+        let trimmed = surface.trim();
+        candidates.insert(trimmed.to_lowercase());
+        if let Some(stem) = trimmed
+            .strip_suffix('s')
+            .filter(|st| st.len() >= 2 && all_caps_symbol(st))
+        {
+            candidates.insert(stem.to_lowercase());
+            return candidates;
+        }
         for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
             for lemma in lemmatizer.lemmas(surface, pos) {
                 candidates.insert(lemma.trim().to_lowercase());
@@ -702,6 +786,11 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>, WidenTrace) {
+        // One sentence = one gap report, however many cap rungs the widen ladder runs
+        // (`chart::boundary`). Clearing here, at the per-SENTENCE entry point, is what makes the
+        // per-rung dedup inside the instrument mean "this rung repeats the previous rung" rather than
+        // "this sentence repeats the previous sentence".
+        super::chart::boundary::reset_rung_dedup();
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
         // when packing is enabled, the combinatory-core spike is off, and this sentence is not
         // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).
@@ -1148,7 +1237,13 @@ impl Parser {
                 // Deliberately NOT measurable with the cap-only instrument: this whole function is
                 // gated on `sense_ranker`, so cap-only never executes it. Its reach was measured
                 // instead as rank-key misses against the tracked recording — see the commit.
-                let surface_all_caps = all_caps_symbol(surface.trim());
+                let surface_all_caps = all_caps_symbol(surface.trim())
+                    || surface
+                        .trim()
+                        .chars()
+                        .skip(1)
+                        .any(|c| c.is_ascii_uppercase())
+                    || surface.trim().chars().any(|c| c.is_ascii_digit());
                 for c in self.candidate_lemmas(&surface, lemmatizer) {
                     for e in self.scoped(self.lex.entries_for(&c), scope) {
                         if !surface_all_caps && all_caps_symbol(&e.form) {

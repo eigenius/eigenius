@@ -26,6 +26,7 @@ The medium contained 2 μg ml⁻¹ puromycin.	has_quantity	1/500 m^-3·kg	method
 The diet contained 625 mg kg⁻¹ doxycycline.	has_quantity	1/1600	methods: diet containing 625 mg kg⁻¹ doxycycline hyclate
 The cells were electroporated with 50 ng plasmid.	adv_with has_quantity	1/20000000000 kg	methods: electroporated with … 50 ng pmaxOrange_GG
 The temperature was 37 °C.	has_quantity	6203/20 K	D95: the temperature was 37 °C
+The distance was 3.46 Å.	has_quantity	173/500000000000 m	D95 slice 7: the ångström, added 2026-10-22 for the structural contacts
 The concentration was 10 μM.	has_quantity	1/100 m^-3·mol	CNL: a predicated concentration
 The medium was replaced after 24 h.	adv_after_value	86400 s	methods: After 24 h, the medium was replaced
 After 24 h, the medium was replaced.	adv_after_value	86400 s	methods: After 24 h, the medium was replaced

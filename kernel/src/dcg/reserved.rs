@@ -62,6 +62,15 @@ pub(crate) enum ReservedKind {
     ContrastiveBut,
     /// `not` — the second token of `but not` (verbal do-support negation elsewhere).
     Negator,
+    /// `rather than` — the EXCLUDING coordinator, a single construct over TWO tokens.
+    ///
+    /// Truth-conditionally `X ∧ ¬Y`, which is `but not`'s condition, so it shares that rule's
+    /// builder; the correction it conveys is not truth-conditional. It is declared as a PAIR,
+    /// unlike `but not`, because neither half carries the meaning alone — `rather` is a degree
+    /// adverb (`rather clear`), `than` the comparative marker (`larger than`) — and keying the
+    /// halves would have put both of those readings at risk. `but` and `not` are each reserved in
+    /// their own right, so they correctly stay two kinds.
+    CoordRatherThan,
     /// `each` — first token of the reciprocal `each other`.
     ReciprocalEach,
     /// `other` — second token of the reciprocal `each other`.
@@ -82,6 +91,7 @@ impl ReservedKind {
             "urn:eigenius:lexicon:rk_wh_relativizer" => Self::WhRelativizer,
             "urn:eigenius:lexicon:rk_contrastive_but" => Self::ContrastiveBut,
             "urn:eigenius:lexicon:rk_negator" => Self::Negator,
+            "urn:eigenius:lexicon:rk_coord_rather_than" => Self::CoordRatherThan,
             "urn:eigenius:lexicon:rk_reciprocal_each" => Self::ReciprocalEach,
             "urn:eigenius:lexicon:rk_reciprocal_other" => Self::ReciprocalOther,
             _ => return None,
@@ -105,6 +115,10 @@ impl ReservedKind {
 #[derive(Clone, Default)]
 pub(crate) struct ReservedTable {
     by_form: BTreeMap<String, ReservedKind>,
+    /// Constructs whose `construct_form` spans several tokens, keyed by the token sequence. A fixed
+    /// phrase whose halves do not carry its meaning alone (`rather than`) belongs here; two tokens
+    /// that are each reserved and compose (`but` + `not`) stay in `by_form` as separate kinds.
+    by_phrase: BTreeMap<Vec<String>, ReservedKind>,
 }
 
 impl ReservedTable {
@@ -114,11 +128,12 @@ impl ReservedTable {
     /// skipped. Forms are lower-cased to match the parser's lookup key.
     pub fn load(layer: &Arc<Layer>) -> Self {
         let mut by_form = BTreeMap::new();
+        let mut by_phrase = BTreeMap::new();
         let (Ok(form_prop), Ok(kind_prop)) = (
             Iri::parse("urn:eigenius:lexicon:construct_form"),
             Iri::parse("urn:eigenius:lexicon:construct_kind"),
         ) else {
-            return ReservedTable { by_form };
+            return ReservedTable { by_form, by_phrase };
         };
         for subj in typed_resource_iris(layer, &["urn:eigenius:lexicon:ReservedConstruct"]) {
             let Some(r) = layer.resolve(&subj) else {
@@ -131,11 +146,35 @@ impl ReservedTable {
                 continue;
             };
             let key = form.trim().to_lowercase();
-            if !key.is_empty() {
+            if key.is_empty() {
+                continue;
+            }
+            if key.contains(char::is_whitespace) {
+                by_phrase.insert(key.split_whitespace().map(str::to_string).collect(), k);
+            } else {
                 by_form.insert(key, k);
             }
         }
-        ReservedTable { by_form }
+        ReservedTable { by_form, by_phrase }
+    }
+
+    /// The longest multi-token construct starting at `tokens[at]`, as `(kind, token count)`.
+    ///
+    /// Longest-match, so a future longer phrase cannot be masked by a shorter prefix of itself.
+    /// Case-folded like [`Self::kind`]: a reserved construct is grammar, not vocabulary.
+    pub fn phrase_at(&self, tokens: &[&str], at: usize) -> Option<(ReservedKind, usize)> {
+        let max = self.by_phrase.keys().map(Vec::len).max()?;
+        let mut best: Option<(ReservedKind, usize)> = None;
+        for n in 2..=max {
+            let Some(window) = tokens.get(at..at + n) else {
+                break;
+            };
+            let key: Vec<String> = window.iter().map(|t| t.to_lowercase()).collect();
+            if let Some(k) = self.by_phrase.get(&key) {
+                best = Some((*k, n));
+            }
+        }
+        best
     }
 
     /// The kind of `token`, if it is a reserved construct.
@@ -181,5 +220,46 @@ impl ReservedTable {
             Some(ReservedKind::Comma) => Some(super::rules::constructions::LIST_CONN),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Multi-token constructs match a token SEQUENCE, and leave their halves alone.
+    ///
+    /// That last part is the reason `rather than` is declared as a pair rather than as two kinds:
+    /// `rather` is a degree adverb («rather clear») and `than` the comparative marker («larger
+    /// than»), and reserving either surface on its own would take that reading away.
+    #[test]
+    fn a_multi_token_construct_matches_the_sequence_and_not_its_halves() {
+        let head = crate::bootstrap::bootstrap()
+            .expect("bootstrap")
+            .head()
+            .clone();
+        let t = ReservedTable::load(&head);
+
+        let toks = [
+            "measured", "the", "result", "rather", "than", "the", "control",
+        ];
+        assert_eq!(
+            t.phrase_at(&toks, 3),
+            Some((ReservedKind::CoordRatherThan, 2)),
+            "`rather than` is one construct, two tokens wide"
+        );
+        for at in [0, 1, 2, 4, 5, 6] {
+            assert_eq!(t.phrase_at(&toks, at), None, "no phrase starts at {at}");
+        }
+        // The halves stay unreserved, so their lexical entries still seed.
+        assert_eq!(t.kind("rather"), None);
+        assert_eq!(t.kind("than"), None);
+        // Case is folded: a reserved construct is grammar, not vocabulary.
+        assert_eq!(
+            t.phrase_at(&["Rather", "Than", "x"], 0),
+            Some((ReservedKind::CoordRatherThan, 2))
+        );
+        // A truncated window cannot match.
+        assert_eq!(t.phrase_at(&["rather"], 0), None);
     }
 }

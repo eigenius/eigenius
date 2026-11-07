@@ -84,6 +84,60 @@ pub fn coordinate_but_not_sem(cat: &Exp, a: &Exp, b: &Exp, layer: &Arc<Layer>) -
     but_not_coord(&and, &denote, a, b, 0, layer)
 }
 
+/// Contrastive prop-ending coordination (`a but not b`, `a rather than b`) with the same bare-kind
+/// object-GQ raising ([`raise_kind_to_object_gq`]) and object-GQ type-generalization ([`common_cat`])
+/// that [`coordinate_prop`] provides for `and`/`or`.
+///
+/// Without this, `coordinate_but_not_sem` required exact bidirectional unification
+/// ([`cats_coordinate`]), so two determined object GQs of distinct noun classes (`the complete set
+/// rather than a selection`) or a bare kind paired with a determined object GQ failed to coordinate.
+pub fn coordinate_but_not_prop(
+    l_cat: &Exp,
+    l_sem: &Exp,
+    r_cat: &Exp,
+    r_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    if is_ctor(r_cat, "cat_coord").is_some() || sem_is_coordination(r_sem) {
+        return None;
+    }
+    let (l_raised, r_raised);
+    let (l_cat, l_sem, r_cat, r_sem) = if is_ctor(l_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(l_cat, l_sem, r_cat) {
+            Some((c, m)) => {
+                l_raised = (c, m);
+                (&l_raised.0, &l_raised.1, r_cat, r_sem)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else if is_ctor(r_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(r_cat, r_sem, l_cat) {
+            Some((c, m)) => {
+                r_raised = (c, m);
+                (l_cat, l_sem, &r_raised.0, &r_raised.1)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else {
+        (l_cat, l_sem, r_cat, r_sem)
+    };
+    let base_cat = if cats_coordinate(l_cat, r_cat, layer) {
+        l_cat.clone()
+    } else {
+        match common_cat(l_cat, r_cat, layer) {
+            Some(gen)
+                if is_ctor(&gen, "bwd").is_some()
+                    && denote_cat(&gen).map(|d| prop_ending(&d)).unwrap_or(false) =>
+            {
+                gen
+            }
+            _ => return None,
+        }
+    };
+    let sem = coordinate_but_not_sem(&base_cat, l_sem, r_sem, layer)?;
+    Some((base_cat, sem))
+}
+
 fn but_not_coord(
     and: &Iri,
     denote: &Exp,
@@ -451,7 +505,7 @@ fn list_term(members: &[Exp]) -> Exp {
 
 /// The members of a group sem (a `List` cons-chain), in order. `None` if the sem
 /// is not a well-formed `cons`/`nil` chain.
-fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
+pub(crate) fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
     let mut out = Vec::new();
     let mut cur = sem;
     loop {
@@ -613,8 +667,31 @@ pub fn coordinate_np(
         conn_name.into(),
         vec![],
     );
-    let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
-    let group_cat = Exp::InductiveCtor(cat_decl, "cat_group".into(), vec![c, conn, pl]);
+    // AGREEMENT IS CONNECTIVE-DEPENDENT. `and` is plural whatever its conjuncts; `or` takes
+    // PROXIMITY agreement — the verb agrees with the NEAREST conjunct ("the gene or the proteins
+    // affect", "the proteins or the gene affects"). Both were hardcoded `pl`, which inverts the
+    // `or` case exactly. Measured 2026-10-26 before the fix:
+    //
+    //   «The gene or the protein affects cells.»  GAP    (grammatical)
+    //   «The gene or the protein affect cells.»   parses (ungrammatical)
+    //   «The gene or the protein is essential.»   GAP    (grammatical)
+    //   «The gene or the protein are essential.»  parses (ungrammatical)
+    //
+    // `and` was right already and is untouched — «The gene and the protein affects cells.»
+    // correctly fails. A neutral `conn_list` (a bare comma) also stays plural: it is not yet
+    // finalized, and the trailing `and`/`or` re-enters here with the nearest conjunct in hand.
+    let pl = || Exp::InductiveCtor(num_decl.clone(), "pl".into(), vec![]);
+    let num = if conn_name == "conn_or" {
+        // The right conjunct is always a single NP (left-branching — a group never sits on the
+        // right), so its number IS the nearest conjunct's.
+        is_ctor(r_cat, "cat_np")
+            .and_then(|a| a.get(1))
+            .cloned()
+            .unwrap_or_else(pl)
+    } else {
+        pl()
+    };
+    let group_cat = Exp::InductiveCtor(cat_decl, "cat_group".into(), vec![c, conn, num]);
     Some((group_cat, list_term(&all)))
 }
 
@@ -694,6 +771,9 @@ fn np_conjunct(
         return None;
     };
     let ty = args.first()?.clone();
+    if matches!(&ty, Exp::EigonClass(iri) if iri.as_str() == "urn:eigenius:lexicon:ProperName") {
+        return None;
+    }
     let Exp::InductiveCtor(num_decl, _, _) = args.get(1)? else {
         return None;
     };
@@ -1289,6 +1369,10 @@ pub fn type_raise(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)
     if name != "cat_np" || args.len() != 2 {
         return None;
     }
+    if matches!(&args[0], Exp::EigonClass(iri) if iri.as_str() == "urn:eigenius:lexicon:ProperName")
+    {
+        return None;
+    }
     // The fixed target `S = cat_s(dcl, fin)` — a finite declarative clause (the body
     // of a restrictive relative). `Mood`/`Fin` are sibling inductives, resolved from
     // the layer (as `coordinate_np` resolves `Conn`); `cat_s`/`fwd`/`bwd` reuse the
@@ -1467,7 +1551,7 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger" || n == "pass") {
         return None;
     }
     let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
@@ -1496,6 +1580,64 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
         )),
     );
     Some((ss, new_sem))
+}
+
+/// **Gerund VP subject** (core-en `unary-rules.xsl`, nominalized-VP subject shift): a saturated
+/// subject-gapped present-participle VP `cat_s(dcl, ger)\NP_T` ("Reporting genes", "Reverting the
+/// stop") becomes a singular finite-clause subject functor `S[dcl,fin] /⋆ (S[dcl,fin]\NP_sg)` over
+/// the nominalized kind `ontology:kind_of(Σs:T. body(s)) : Entity` (`λV. V(kind_of(Σs:T. body(s)))`).
+///
+/// The outer slash carries `m_app` (`⋆`, application-only) so the shifted subject can only
+/// forward-apply to a complete finite VP (`is essential`, `should restore …`), never forward-compose
+/// or enter the `gq_prep_*` rules, and the inner subject slot is fixed at `sg` so singular agreement
+/// holds (`Reporting genes is essential` parses; `*Reporting genes are essential` is refused).
+pub fn gerund_subject(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return None;
+    };
+    let (_m, s, np) = slash_parts(cat, "bwd")?;
+    let [mood, fin] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
+        return None;
+    }
+    let [subj_ty, _] = is_ctor(np, "cat_np")? else {
+        return None;
+    };
+    let mood_d = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin_d = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
+    let num_d = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
+    let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
+    let fin_c = Exp::InductiveCtor(fin_d, "fin".into(), vec![]);
+    let sg = Exp::InductiveCtor(num_d, "sg".into(), vec![]);
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, fin_c]);
+    let np_sg = Exp::InductiveCtor(cat_decl.clone(), "cat_np".into(), vec![entity, sg]);
+    let m_all = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_ALL)?;
+    let m_app = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_APP)?;
+    let vp_fin = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all, s_fin.clone(), np_sg],
+    );
+    let subj_cat = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![m_app, s_fin, vp_fin]);
+    let (s_var, v_var) = ("__ger_s", "__ger_V");
+    let body = Exp::App(Box::new(sem.clone()), Box::new(Exp::Var(s_var.into())));
+    let sigma = Exp::Sig(
+        Patt::Var(s_var.into()),
+        Box::new(subj_ty.clone()),
+        Box::new(body),
+    );
+    let nom = crate::dcg::category::kind_of(sigma);
+    let new_sem = Exp::Lam(
+        Patt::Var(v_var.into()),
+        Box::new(Exp::App(Box::new(Exp::Var(v_var.into())), Box::new(nom))),
+    );
+    Some((subj_cat, new_sem))
 }
 
 /// **Reduced relative** (core-en `unary-rules.xsl`, the `rrel` type-changing rule): a subject-gapped
@@ -1554,6 +1696,53 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 ///   "… compared to MSS cell lines"           64 ->  64   set-identical, 0 lost / 0 added
 /// ```
 ///
+/// **`ger` is licensed alongside `pass`; `pss` stays out.** The ACTIVE participial post-modifier —
+/// "a patient [carrying the variant]", "the gene [encoding a helicase]" — is the same mapping over
+/// the same `Entity → Prop` denotation. What differs is which slot the modified noun fills: for
+/// `pass` the PATIENT, for `ger` the AGENT, and English licenses both ("the DNA induced by WRN",
+/// "the man eating the sandwich"). The argument that refuses `pss` does not reach `ger`: `pss`
+/// saturated is a finite-LOOKING active VP, so shifting it builds "*the man ate the food" for "the
+/// man that ate", while `carrying` has no finite homograph at all.
+///
+/// **`adj` is REFUSED, measured (`2026-10-29`, D63 §7b).** A post-nominal AP ("the function
+/// relevant to the disease") is `cat_s(dcl, adj)\\NP` over the same `Entity → Prop` denotation, so
+/// licensing it here looks like the same move `ger` was. It is not, and the page says so:
+///
+/// ```text
+///                        page         readings   skeletons   claim units
+///   base                 gap 460       41,381      5,294          64
+///   + `adj`              gap 458       41,405      5,380          64
+/// ```
+///
+/// Four units changed disposition and NONE of them is a post-nominal AP. The one that converted
+/// outright is a RESULTATIVE small clause — `make <NP> <AP>`, as in «the study made the gene worse
+/// than the protein» — for which the grammar has no route at all. The shift gave it 24 readings
+/// that all attach the AP as a post-nominal restrictor on the OBJECT: "produce a gene THAT IS
+/// worse", not "make the gene worse". That is a different claim, so the widening converts an honest
+/// gap into readings of a construction the sentence is not.
+///
+/// It also does not reach what it was added for. The page's post-nominal AP is SUPERLATIVE —
+/// "the function **most** relevant to …" — which needs `most` over a phrasal scale and a
+/// post-nominal attachment, neither of which this shift supplies. Both are keyed on `most`
+/// ([`super::combinators::cat_sup_mod_cat`]), so they cannot touch `make X worse than Y`.
+///
+/// Before this, the active participial had NO route, and the gap counts UNDERSTATED it — three probe
+/// sentences appeared to parse, and the sems say what they parsed as (2026-10-14):
+///
+/// ```text
+///   "The gene encoding a helicase is essential."
+///     gt(deg_a01580306(the(Σg. compound_kind(g, Σh. compound_kind(h, Σx. compound_kind(x, n05436752))))), …)
+///   "A patient waiting was found."
+///     ΠG#0:Prop. ΠG#1:C0542399. gt(deg_a01450713(G#1), std_a01450713) → G#0 → G#0
+/// ```
+///
+/// The first is a three-deep COMPOUND NOUN PILE (gene-encoding-helicase); the second resolved
+/// `waiting` as an ADJECTIVE degree. Neither is a modifier reading.
+///
+/// The TRANSITIVE case reaches this shift on its own: `carrying` is `(S[dcl,ger]\NP)/cat_np` and
+/// saturates over `carrying the variant`, which is >= 2 tokens. The INTRANSITIVE is saturated at the
+/// leaf, so it needs the seed-time half, [`super::combinators::ger_participial_lifts`].
+///
 /// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
 /// (backward) form rather than its object-gap (forward) one, because that is the participial case —
 /// the same asymmetry as [`front_participial`], which is this rule's sentence-level counterpart
@@ -1570,7 +1759,7 @@ pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pass") {
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pass" || n == "ger") {
         return None;
     }
     let _ = layer;
@@ -1640,6 +1829,46 @@ mod tests {
     }
     fn decl_s() -> Exp {
         ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])])
+    }
+
+    // ── reduced_relative: which finiteness features shift to a post-nominal modifier ──
+
+    /// A test layer with no declarations — `reduced_relative` reads none (its `layer` argument is
+    /// discarded), so the bare builder is enough to exercise the feature set.
+    fn bare_layer() -> Arc<Layer> {
+        Arc::new(
+            crate::layer::LayerBuilder::new("constructions-reduced-relative-test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        )
+    }
+    fn subject_gapped(fin: &str) -> Exp {
+        ctor(
+            "bwd",
+            vec![
+                ctor("cat_s", vec![ctor("dcl", vec![]), ctor(fin, vec![])]),
+                np(cls("urn:eigenius:lexicon:Entity")),
+            ],
+        )
+    }
+
+    /// `pass` and `ger` shift; `adj` and `pss` do NOT. `adj` is the measured refusal (see the doc
+    /// comment): licensing a bare predicative AP here gave a RESULTATIVE small clause 24
+    /// post-nominal-modifier readings and reached no post-nominal AP on the page.
+    #[test]
+    fn the_shift_licenses_pass_and_ger_and_refuses_adj_pss_and_fin() {
+        let layer = bare_layer();
+        for fin in ["pass", "ger"] {
+            assert!(
+                reduced_relative(&subject_gapped(fin), &layer).is_some(),
+                "{fin} must shift"
+            );
+        }
+        for fin in ["adj", "pss", "fin"] {
+            assert!(
+                reduced_relative(&subject_gapped(fin), &layer).is_none(),
+                "{fin} must NOT shift"
+            );
+        }
     }
 
     // ── coordinate_np: a bare-KIND conjunct is realised as an entity via `kind_of` ──

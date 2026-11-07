@@ -202,6 +202,10 @@ pub(crate) enum FrameKind {
     /// 5 ("----s something Adjective", object-predicate `consider X important`) is a distinct category,
     /// still deferred.
     LinkingAdj,
+    /// Subject-control infinitival verb — WordNet frame 28 ("Somebody ----s to INFINITIVE"):
+    /// `want`/`try`/`fail`/`tend`/`appear`/`seem` + a `to`-infinitive VP (`S[dcl,inf]\NP`).
+    /// An opaque `(Entity → Prop) → Entity → Prop` axiom, category `(S[dcl,fin]\NP)/(S[dcl,inf]\NP)`.
+    SubjectControl,
     /// Essive / object-predicative — the `identify / regard / describe / classify X AS Y` construction
     /// (D63 §5.3). WordNet's frame inventory does NOT capture the `as`-complement (frame 14 is the
     /// double-object "give" frame), so this kind is not assigned by [`classify`]; it is added per-lemma
@@ -222,6 +226,7 @@ impl FrameKind {
             FrameKind::PpOblique(Some(prep)) => format!("p_{}", prep_slug(prep)),
             FrameKind::Clausal => "c".into(),
             FrameKind::LinkingAdj => "j".into(),
+            FrameKind::SubjectControl => "sc".into(),
             FrameKind::Essive => "as".into(),
         }
     }
@@ -240,9 +245,11 @@ impl FrameKind {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
             FrameKind::Clausal => format!("Prop -> {ENTITY_TOP} -> Prop"),
-            // Linking verb: takes the predicative-adjective's denotation (`Entity → Prop`) then the
-            // subject — an opaque relation between the subject and the property.
-            FrameKind::LinkingAdj => format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop"),
+            // Linking or subject-control verb: takes the complement VP's denotation (`Entity → Prop`)
+            // then the subject — an opaque relation between the subject and the property.
+            FrameKind::LinkingAdj | FrameKind::SubjectControl => {
+                format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop")
+            }
         }
     }
 
@@ -289,6 +296,11 @@ impl FrameKind {
             FrameKind::LinkingAdj => format!(
                 "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
             ),
+            // Subject-control verb: `(S[dcl,fin]\NP)/(S[dcl,inf]\NP)` — consumes a `to`-infinitive
+            // VP (`to report genes`) and yields a finite VP.
+            FrameKind::SubjectControl => format!(
+                "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), {obj}))"
+            ),
         }
     }
 }
@@ -299,7 +311,8 @@ impl FrameKind {
 ///   - 5 — object-predicate small clause (`----s something Adjective`, `consider X important`) — a
 ///     distinct `((S\NP)/adj)/NP` category, still deferred;
 ///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`, only 26 emitted);
-///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
+///   - 28 — subject-control `to`-infinitive (`Somebody ----s to INFINITIVE`) → [`FrameKind::SubjectControl`];
+///   - 24, 25, 30, 32, 33, 35 — object control / bare infinitive / V-ing (deferred).
 ///
 /// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to somebody" 12/27,
 /// "----s on something" 13, "is ----ing PP" 4, "Somebody ----s PP" 22) — map to
@@ -325,7 +338,8 @@ pub(crate) fn classify(frame: u8) -> Option<FrameKind> {
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
         26 => Some(FrameKind::Clausal),       // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
-        _ => None, // 5 object-predicate (`consider X important`); 29,34 whether; 24,25,28,30,32,33,35 control/raising
+        28 => Some(FrameKind::SubjectControl), // "Somebody ----s to INFINITIVE"
+        _ => None, // 5 object-predicate (`consider X important`); 29,34 whether; 24,25,30,32,33,35 control/raising
     }
 }
 
@@ -1716,6 +1730,8 @@ mod tests {
         // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
         assert_eq!(classify(6), Some(FrameKind::LinkingAdj));
         assert_eq!(classify(7), Some(FrameKind::LinkingAdj));
+        // frame 28 "Somebody ----s to INFINITIVE" → subject-control verb.
+        assert_eq!(classify(28), Some(FrameKind::SubjectControl));
         // still-deferred higher-order frames → None (never guessed).
         assert_eq!(classify(5), None); // object-predicate small clause (`consider X important`)
         assert_eq!(classify(29), None); // whether CLAUSE (interrogative — deferred)

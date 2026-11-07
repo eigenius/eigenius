@@ -37,6 +37,11 @@ use crate::nbe::term::Exp;
 /// *apply*).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Combinator {
+    /// A **bare referential pronoun** leaf (`it`, `they`, the bare demonstratives) — an NP whose sem
+    /// is the referent hole itself. Carried so a rule can refuse one where the CATEGORY cannot tell
+    /// it apart: a pronoun is categorially a plain `cat_np` (core-en `ProNP` = NP), identical to a
+    /// proper name's. `named_compound` is the rule that needs it — see `Guard::NotPronoun`.
+    Pronoun,
     /// Forward application (`>`) or the dependent `cat_forall` application.
     ForwardApp,
     /// Backward application (`<`).
@@ -135,6 +140,50 @@ pub enum Combinator {
     /// `cat_pp` across two nodes (the routes split by provenance, so `Sig` keeps them apart) where the
     /// shift route it replaced carried one.
     ObliqueParticipial,
+    /// A **seed-time SHORT-PASSIVE participial lift** (`short_passive_participial_lifts`): the
+    /// agentless passive participle VP, `S[dcl,pass]\NP`, built from the still-unsaturated
+    /// transitive past participle `(S[dcl,pss]\NP)/NP` with the agent existentially closed.
+    ///
+    /// It exists because `pass` had exactly ONE producer — `gq_prep_passive_agent`, the long
+    /// passive's by-phrase — and [`crate::dcg::rules::constructions::reduced_relative`] fires only
+    /// on `pass`. So a reduced relative could be built for "the deficiency predicted by the model"
+    /// and not for "the method used", "the resource queried in the study" or "the release queried
+    /// recently", which are the same construction with the agent left out.
+    ///
+    /// The semantics is `lexicon:passive_sem` — `λTV. λp. ∃a. TV(p, a)` — resolved from the chain
+    /// rather than rebuilt here, so the participial and the finite short passive (`is`/`was` +
+    /// unsaturated TV, D63 §8.9 Slice 6-aux) cannot drift apart.
+    ///
+    /// **Unsaturated is the guard, not a check.** Lifting the SATURATED `pss` is what built
+    /// relativizer-less SUBJECT relatives ("*the man ate the food" for "the man that ate"); once the
+    /// object slot is filled this no longer matches, exactly as `is_passive` stops matching
+    /// "affected BRCA1". Taking the functor is also what keeps the agent slot available to close.
+    ShortPassiveParticipial,
+    /// A **seed-time ACTIVE participial lift** (`ger_participial_lifts`): a saturated one-token
+    /// present participle `S[dcl,ger]\NP` shifted to the noun post-modifier `cat_pp`.
+    ///
+    /// The `ger` half of what [`Self::ShortPassiveParticipial`] does for `pass`, and needed for the
+    /// same mechanical reason: both chart drivers run the `UnaryShift` table inside
+    /// `for len in 2..=n`, so [`crate::dcg::rules::constructions::reduced_relative`] never sees a
+    /// single-token cell, and an INTRANSITIVE participle ("waiting") is one. The transitive
+    /// ("carrying the variant") saturates over >= 2 tokens and reaches the shift unaided, so this
+    /// does not fire on it.
+    GerParticipial,
+    /// A **seed-time SENTENCE-INITIAL adverb lift** (`adv_initial_lifts`): the forward VP
+    /// pre-modifier `VP/VP` lifted to a modifier of the TYPE-RAISED SUBJECT,
+    /// `(S/(S\NP))/(S/(S\NP))`, so a fronted adverb can attach left of the subject.
+    ///
+    /// `S/S` is the usual CCG category here (core-en's `Adverb`/Initial) and is NOT available
+    /// event-free: `⟦S⟧ = Prop`, while `ADV` is `(Entity -> Prop) -> (Entity -> Prop)` and needs the
+    /// predicate and its subject separately. `sentence_modifier_cats` does build `S/S`, but with the
+    /// identity sem — right for discourse adverbs, and for a manner adverb it would make the
+    /// sentence parse while MEANING the unmodified proposition. Modifying the raised subject keeps
+    /// the predicate in reach: `⟦S/(S\NP)⟧ = (Entity -> Prop) -> Prop`, and `lexicon:adv_initial_sem`
+    /// (`λA. λQ. λV. Q(A(V))`) has exactly that category's denotation while reusing `ADV` verbatim.
+    ///
+    /// Seed-time for the same mechanical reason as the participial lifts: both chart drivers run the
+    /// `UnaryShift` table inside `for len in 2..=n`, and an adverb is one token.
+    AdvInitial,
     /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
     /// (sentential negation `not`, the modals, do-support). Set once at seeding by
     /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the
@@ -406,6 +455,11 @@ impl Item {
         self.category.cost
     }
     /// Replace the sem in place (the per-span hole freshening).
+    /// Replace the producing combinator. Used at SEED time only, to mark a leaf whose category
+    /// cannot carry the distinction a rule needs (see [`Combinator::Pronoun`]).
+    pub fn set_prov(&mut self, prov: Combinator) {
+        self.category.prov = prov;
+    }
     pub fn set_sem(&mut self, sem: Exp) {
         self.semantics.sem = sem;
     }

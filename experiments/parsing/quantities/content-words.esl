@@ -80,6 +80,14 @@ resource corpus:temperature_n : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "temperature";
 }
+class corpus:Distance : lexicon:Entity { }
+resource corpus:distance_n : lexicon:LexicalEntry {
+    lexicon:form     = "distance";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Distance, lexicon:sg) );
+    lexicon:sem      = corpus:Distance;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "distance";
+}
 class corpus:Concentration : lexicon:Entity { }
 resource corpus:concentration_n : lexicon:LexicalEntry {
     lexicon:form     = "concentration";

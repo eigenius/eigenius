@@ -4,8 +4,9 @@
 type-theoretic semantics, plus our synthesis. Supersedes the tentative "uniform opaque
 binary" plan that the D62 implementation plan carried in its §2d (that plan and the three-round
 expert correspondence that prompted this note were deleted `2026-08-19`; this note is the surviving
-record of their conclusions). Not yet implemented — the two forks in §4 are the user's calls, and
-`because`/`although`/`while` remain absent from the closed-class lexicon.
+record of their conclusions). **Fork A is IMPLEMENTED (`2026-10-13`)** — see §6 item 3, which also
+records why the engine extension was smaller than this note expected. Both forks are resolved and
+`because`/`although`/`while` are in the closed-class lexicon.
 
 ## 1. What the expert confirmed
 
@@ -195,7 +196,34 @@ cost is Fork A's engine work (threading the hypotheses through the derivation).
    proposition as `and`-coordination. Zero kernel change, no new axiom. Contrast-preserving
    `logic:But` + kernel transparency ([#27](https://github.com/eigenius/eigenius/issues/27))
    are the documented upgrade for when discourse structure is load-bearing.
-3. **`because`/`although`/`while`** — Fork A = v2 factive-dependent; **gated on the expert
-   confirming the §5 scoping account** + the proof-variable engine extension.
+3. **`because`/`although`/`while`** — Fork A = v2 factive-dependent. **IMPLEMENTED `2026-10-13`.**
+   The gate was lifted by §7's round-3 confirmation of the scoping account, and the engine extension
+   turned out far smaller than this note anticipated, because the **demonstrative's hole protocol
+   already had the shape**.
+
+   `logic:Because | Although | While : Π(p q:Prop) → p → q → Prop`, each its own opaque primitive
+   (collapsing `because` onto `And` would drop the causal claim, and there is no causal or temporal
+   relation to reduce it to). The proof arguments come from `lexicon:hypothesis_of : ∀(P:Prop) → P`,
+   the `Prop` sibling of `lexicon:anaphor_of : ∀(A:Set) → A`, and it works the same way: it stands in
+   the derivation as a CLOSED CONSTANT, so the entry gate-passes with
+   `sem_type = ⟦(S\S)/S⟧ = Prop → Prop → Prop` unchanged and the term stays a `Prop` through
+   composition; the FELICITY GATE then freshens each occurrence into a typed free variable.
+
+   **That is why no hypothesis had to be threaded through the derivation.** This note assumed a
+   clause must contribute `h_p : p` in a context the parser does not have. Keeping the placeholder
+   inside the term means composition never sees a non-`Prop`, so negation and the modals apply to it
+   normally and do NOT discharge it — §5's projection account falls out of the placeholder's
+   position rather than from new machinery. `⟦·⟧` is untouched; the gate gains one arm on a
+   traversal it already ran.
+
+   Carried as `HoleKind::ProofObligation`, which `parse/felicity.rs` had already reserved as "a
+   planned future arm". The hole stands at its own clause's proposition, and the D64 resolver cannot
+   fill it: the type pre-filter vetoes every entity candidate and fails closed before the proposer is
+   asked. So a factive clause yields an OPEN parse whose obligations leave the parser, which is what
+   §5 specifies.
+
+   Still open from §7: **plugs**. Attitude verbs (`shows`, D63 §8.11) must BIND their complement's
+   obligations and do not, so an embedded factive presupposition still projects to the author's
+   context rather than staying in the subject's belief state.
 4. **`however`/`thus`** — anaphoric; deferred to the pronoun/D64 anaphora slice (2e).
 5. Speech-act `because`, counterfactuals, donkey anaphora — flagged, out of fragment.

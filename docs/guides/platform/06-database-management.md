@@ -71,7 +71,7 @@ The schema-version check fires *first* — there's no point validating ontology 
 
 ### Manifest drift check
 
-The kernel also records a SHA-256 manifest of the embedded ontologies on first start — all twenty of them, in `BOOTSTRAP_CHAIN` order, as `<name>:<sha256_hex>` lines over the raw source bytes. On every subsequent restart, it re-hashes the embedded sources and compares to the stored manifest. The same array drives the chain build, so no layer can be hashed and not booted, or booted and not hashed.
+The kernel also records a SHA-256 manifest of the embedded ontologies on first start — all twenty-one of them, in `BOOTSTRAP_CHAIN` order, as `<name>:<sha256_hex>` lines over each source's **presentation-insensitive** form — ESL reduced to its token kinds, JSON canonicalised per resource — so a reworded comment or a reflowed line does not drift the manifest. On every subsequent restart, it re-hashes the embedded sources and compares to the stored manifest. The same array drives the chain build, so no layer can be hashed and not booted, or booted and not hashed.
 
 If the hashes differ — typically because you upgraded `eigenius` to a version that ships different bootstrap ontology JSON — the kernel refuses to start with `ManifestDrift`. The error names the differing file(s).
 

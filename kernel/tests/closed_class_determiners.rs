@@ -1605,6 +1605,230 @@ fn plural_definite_the_parses() {
     );
 }
 
+/// `rather than` is the EXCLUDING coordinator, and it means what `but not` means.
+///
+/// `X rather than Y` is `X ∧ ¬Y`: the two differ in the correction `rather than` conveys, which is
+/// not truth-conditional, so one builder serves both and this test asserts the sems are equal. What
+/// differs is the trigger — `rather than` is ONE reserved construct over two tokens, declared as a
+/// pair, because neither half carries the meaning alone. The pair declaration is also what leaves
+/// `rather`'s degree-adverb reading and `than`'s comparative-marker reading untouched
+/// (`kernel/tests/comparative_than.rs` holds the latter).
+#[test]
+fn rather_than_is_the_excluding_coordinator() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let f = index.parse("HeLa affects BRCA1 rather than HeLa", &Identity);
+    assert!(!f.is_empty(), "`rather than` parses");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.starts_with("And(") && sem.contains("False"),
+        "affirms O₁, negates O₂ (`→ False`): {sem}"
+    );
+
+    // Same truth condition as `but not`, to the term.
+    let b = index.parse("HeLa affects BRCA1 but not HeLa", &Identity);
+    assert!(!b.is_empty(), "the `but not` control parses");
+    assert_eq!(
+        sem,
+        pretty_term(b[0].sem()),
+        "`rather than` and `but not` build the same term"
+    );
+}
+
+/// A possessive determiner does not agree with what it possesses.
+///
+/// `its`/`their` hardcode the possessed noun's number (`cat_forall(sg|pl, …)`) — a property of
+/// their attested uses, not of English. The first/second-person forms added for the XIAP report
+/// BIND that number with `cat_num_forall` and thread it to the subject NP, so both numbers compose
+/// and subject-verb agreement still routes: «my gene affects …» and «my genes affect …».
+///
+/// `your` alone is in 13 of that report's grammar gaps — it is addressed to a person.
+#[test]
+fn a_possessive_determiner_takes_either_number() {
+    let (_layer, index) = index_over_bootstrap();
+
+    for s in [
+        "my gene affects HeLa",
+        "my genes affect HeLa",
+        "your gene affects HeLa",
+        "your genes affect HeLa",
+        "our gene affects HeLa",
+        "his gene affects HeLa",
+        "her gene affects HeLa",
+        "HeLa affects my gene",
+        "HeLa affects your genes",
+        // `its`/`their` carried one head number each until the paradigm was completed.
+        "its genes affect HeLa",
+        "their gene affects HeLa",
+    ] {
+        let (c, o) = index.parse_open(s, &PluralS);
+        assert!(!c.is_empty() || !o.is_empty(), "{s:?} must compose");
+    }
+    // The possessor is a referent hole, exactly as `its` gives — so these are OPEN parses, and the
+    // sem carries `poss_of`.
+    let (_c, open) = index.parse_open("my gene affects HeLa", &PluralS);
+    let sem = pretty_term(open.first().expect("an open parse").item.sem());
+    assert!(
+        sem.contains("poss_of"),
+        "the possessive relation is built: {sem}"
+    );
+}
+
+/// `unless` is `if`'s negative twin; `whereas` is `but`'s case.
+///
+/// Both are the subordinators the D62 findings note does NOT route through Fork A — that covers
+/// `because`/`although`/`while`, which are FACTIVE and whose decided treatment needs hypothetical
+/// proof variables threaded through the derivation, an engine extension rather than a lexical row.
+/// These two need neither: `unless` is native implication over an intuitionistic negation, and
+/// `whereas` denotes the same proposition as the `and`-coordination, reusing `but_sem`.
+#[test]
+fn unless_is_negative_implication_and_whereas_is_contrastive_conjunction() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let f = index.parse("HeLa affects BRCA1 unless HeLa affects BRCA1", &Identity);
+    assert!(!f.is_empty(), "`unless` composes");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.contains("False"),
+        "the antecedent is negated (`→ False`): {sem}"
+    );
+
+    let w = index.parse("HeLa affects BRCA1 whereas HeLa affects BRCA1", &Identity);
+    assert!(!w.is_empty(), "`whereas` composes");
+    let wsem = pretty_term(w[0].sem());
+    assert!(
+        wsem.starts_with("And("),
+        "both clauses are asserted, as for `but`: {wsem}"
+    );
+    assert_eq!(
+        wsem,
+        pretty_term(index.parse("HeLa affects BRCA1 but HeLa affects BRCA1", &Identity)[0].sem()),
+        "`whereas` denotes what `but` denotes"
+    );
+}
+
+/// An indefinite pronoun is a QUANTIFIED NP, not an entity.
+///
+/// `nothing` occurs 15 times in the XIAP report — the most frequent indefinite there — and it
+/// "parsed" before this only because WordNet carries a NOUN `nothing`. That is a wrong reading, not
+/// a working one, and the same held for `someone`, `somebody` and `nobody`. So the test is on the
+/// SEM, not on whether a parse exists: the negative forms must build `→ False` and the universal
+/// forms a `forall`.
+#[test]
+fn an_indefinite_pronoun_quantifies() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let sem_of = |s: &str| -> String {
+        let (c, o) = index.parse_open(s, &Identity);
+        let it = c
+            .first()
+            .map(|i| i.sem().clone())
+            .or_else(|| o.first().map(|p| p.item.sem().clone()))
+            .unwrap_or_else(|| panic!("{s:?} must compose"));
+        pretty_term(&it)
+    };
+
+    // Negative: ∀x. ¬V(x) — the `→ False` is the whole point, and a noun reading has none.
+    for s in ["nothing affects HeLa", "nobody affects HeLa"] {
+        let sem = sem_of(s);
+        assert!(sem.contains("False"), "{s:?} must negate: {sem}");
+    }
+    // Universal and existential compose, in both positions.
+    for s in [
+        "everything affects HeLa",
+        "everyone affects HeLa",
+        "something affects HeLa",
+        "someone affects HeLa",
+        "anyone affects HeLa",
+        "HeLa affects nothing",
+        "HeLa affects everything",
+        "HeLa affects something",
+    ] {
+        let _ = sem_of(s);
+    }
+    // The negative is not merely an entity: it differs from the existential's sem.
+    assert_ne!(
+        sem_of("nothing affects HeLa"),
+        sem_of("something affects HeLa"),
+        "the negative and the existential cannot denote the same thing"
+    );
+}
+
+/// A FACTIVE subordinator exports its presuppositions as proof obligations (D62 2d, Fork A).
+///
+/// `because`/`although`/`while` presuppose both clauses, and the decided treatment makes that a
+/// typing requirement: `logic:Because : Π(p q:Prop) → p → q → Prop` takes PROOFS of both. The parser
+/// never proves a clause, so the arguments are hypothetical — `lexicon:hypothesis_of(P)` stands in
+/// the derivation as a closed constant (so the entry gate-passes and the term stays a `Prop`
+/// through composition) and the felicity gate freshens each into a typed free variable.
+///
+/// The result is an OPEN parse with two `ProofObligation` holes, each carried at its own clause's
+/// proposition. It can never close by anaphora — there is no antecedent for a proof — which is the
+/// point: the obligation leaves the parser for the justification layer to discharge or fail on.
+#[test]
+fn a_factive_subordinator_exports_proof_obligations() {
+    use eigenius_kernel::dcg::HoleKind;
+    let (_layer, index) = index_over_bootstrap();
+
+    for (word, head) in [
+        ("because", "Because"),
+        ("although", "Although"),
+        ("while", "While"),
+        // Same relations, other spellings — they share the sems rather than restate them.
+        ("though", "Although"),
+        ("whilst", "While"),
+    ] {
+        let s = format!("HeLa affects BRCA1 {word} HeLa affects BRCA1");
+        let (closed, open) = index.parse_open(&s, &Identity);
+        assert!(
+            closed.is_empty(),
+            "{word}: a factive clause cannot close — its presuppositions are undischarged"
+        );
+        let p = open
+            .first()
+            .unwrap_or_else(|| panic!("{word}: must give an OPEN parse"));
+        let proofs: Vec<_> = p
+            .holes
+            .iter()
+            .filter(|h| h.kind == HoleKind::ProofObligation)
+            .collect();
+        assert_eq!(
+            proofs.len(),
+            2,
+            "{word}: one obligation per clause, got {:?}",
+            p.holes.iter().map(|h| &h.var).collect::<Vec<_>>()
+        );
+        let sem = pretty_term(p.item.sem());
+        assert!(
+            sem.contains(head),
+            "{word}: the relation is the typed content, not a conjunction: {sem}"
+        );
+        // Each obligation is carried at a PROPOSITION — its own clause — not at `Entity`.
+        for h in proofs {
+            let ty = pretty_term(&h.ty);
+            assert!(
+                ty.contains("affect"),
+                "{word}: the hole stands at its clause's proposition, got {ty}"
+            );
+        }
+    }
+}
+
+/// `cannot` is ONE token with no entry; `can not` is two tokens that both have one.
+///
+/// This is the control for splitting `cannot` in the lexer rather than minting a bespoke entry:
+/// if the split form parses, the split reuses `can` and `not` and needs no new semantics — and no
+/// reseed, since it is a preprocessing change rather than an ontology one.
+#[test]
+fn can_not_parses_as_two_tokens() {
+    let (_layer, index) = index_over_bootstrap();
+    let (c, o) = index.parse_open("HeLa can not affect BRCA1", &Identity);
+    assert!(
+        !c.is_empty() || !o.is_empty(),
+        "`can not` composes from the existing modal + negator"
+    );
+}
+
 #[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively
@@ -4662,12 +4886,20 @@ fn distributive_np_coordination_parses() {
 
 #[test]
 fn disjunctive_np_coordination_distributes_with_or() {
-    // "HeLa or BRCA1 affect HeLa": an `or`-group distributes with ∨ →
+    // "HeLa or BRCA1 affects HeLa": an `or`-group distributes with ∨ →
     // affects(hela, hela) ∨ affects(hela, brca1) : Prop.
-    assert_parses_to_prop("HeLa or BRCA1 affect HeLa");
+    //
+    // The verb is SINGULAR. This test pinned the plural `affect` until 2026-10-26, which is
+    // ungrammatical for `or` over singular conjuncts — English gives `or` PROXIMITY agreement, so
+    // the verb agrees with the nearest conjunct. `coordinate_np` hardcoded the group's number to
+    // `pl` for every connective, which inverted the `or` case exactly: it accepted this plural and
+    // rejected the grammatical singular. Fixing the agreement made the old input fail, correctly.
+    // What the test asserts — that an `or`-group distributes into one `logic:Or` per member — is
+    // unchanged.
+    assert_parses_to_prop("HeLa or BRCA1 affects HeLa");
 
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa or BRCA1 affect HeLa", &Identity);
+    let forest = index.parse("HeLa or BRCA1 affects HeLa", &Identity);
     assert_eq!(
         forest.len(),
         1,
@@ -5213,7 +5445,21 @@ fn predicate_nominal_parses_to_is_a() {
     // the copula lifts it; the subject applies → is_a(hela, CellLine) : Prop.
     let (layer, index) = index_over_bootstrap();
     let forest = index.parse("HeLa is a cell line", &Identity);
-    assert_eq!(forest.len(), 1, "exactly one predicate-nominal parse");
+    // TWO parses since the identity copula (2026-10-24), and that is a DELIBERATE STANCE rather
+    // than a weakened assertion. The second is `∃x:CellLine. hela = x` — LOGICALLY EQUIVALENT to
+    // `is_a(hela, CellLine)`, not a wrong reading. ENF would refuse it, as `ObliqueParticipial`
+    // refuses a route that "re-derives a reading plain application already gives". It is admitted
+    // because ENF is a strong default and COVERAGE is the non-negotiable: refusing it meant losing
+    // the definite predicate nominal entirely (`X is the N` — identity, which membership cannot
+    // express), measured at 56 sentences and 10 source units on the UAB corpus with 0 losses.
+    // The cost is ranking and chart size, never a distorted claim. Narrowing it needs a definiteness
+    // feature in the category system — `the_subj` and `a_subj` are byte-identical today — or the
+    // copula recast as a rule so it can carry a `ProvGuard`. See `lexicon:is_identity`.
+    assert_eq!(
+        forest.len(),
+        2,
+        "the is_a predicate-nominal parse and the equivalent identity parse"
+    );
     assert_eq!(
         sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
