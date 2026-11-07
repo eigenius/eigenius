@@ -420,6 +420,28 @@ impl Parser {
                 .flat_map(|it| self.grammar.kind_raised_nps(it, &self.grammar.dets.a, "sg"))
                 .collect();
             out.extend(sg_shifts);
+            if !matches!(trimmed, "I" | "A" | "HeLa" | "5A" | "MSS" | "MSI")
+                && trimmed.chars().any(|c| c.is_ascii_alphabetic())
+                && out.iter().any(|it| is_ctor(it.cat(), "cat_n").is_some())
+                && !out.iter().any(|it| {
+                    matches!(
+                        is_ctor(it.cat(), "cat_n"),
+                        Some([_, Exp::InductiveCtor(_, n, _)]) if n == "mass"
+                    )
+                })
+            {
+                if let (Some(cat_decl), Some(num_decl), Ok(ent_iri)) = (
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
+                    Iri::parse("urn:eigenius:lexicon:Entity"),
+                ) {
+                    let ent_cls = Exp::EigonClass(ent_iri);
+                    let mass = Exp::InductiveCtor(num_decl, "mass".into(), Vec::new());
+                    let n_mass =
+                        Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), mass]);
+                    out.push(Item::new(n_mass, ent_cls));
+                }
+            }
         }
         // Non-finite backward VP adverb expansion: imported `data.adv` entries carry only the finite
         // backward category `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)`. Emit the four non-finite verbal
@@ -433,6 +455,34 @@ impl Parser {
                     .map(|cat| Item::from_parts(cat, it.sem().clone(), it.prov(), it.cost()))
             })
             .collect();
+        if !nonfinite_advs.is_empty() && s_lc != "not" {
+            let adv_cost = nonfinite_advs[0].cost();
+            let adv_prov = nonfinite_advs[0].prov();
+            if let (Some(cat_decl), Some(m_all)) = (
+                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
+                super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
+            ) {
+                let ident = Exp::Lam(
+                    Patt::Var("ADV#x".to_string()),
+                    Box::new(Exp::Var("ADV#x".to_string())),
+                );
+                let pp_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_pp".into(), Vec::new());
+                let fwd_pp = Exp::InductiveCtor(
+                    cat_decl.clone(),
+                    "fwd".into(),
+                    vec![m_all.clone(), pp_cat.clone(), pp_cat],
+                );
+                out.push(Item::from_parts(fwd_pp, ident.clone(), adv_prov, adv_cost));
+                let meas_cat =
+                    Exp::InductiveCtor(cat_decl.clone(), "cat_measure".into(), Vec::new());
+                let fwd_meas = Exp::InductiveCtor(
+                    cat_decl,
+                    "fwd".into(),
+                    vec![m_all, meas_cat.clone(), meas_cat],
+                );
+                out.push(Item::from_parts(fwd_meas, ident, adv_prov, adv_cost));
+            }
+        }
         out.extend(nonfinite_advs);
         out
     }
@@ -980,7 +1030,7 @@ impl Parser {
                 Some(fin_decl),
                 Some(num_decl),
                 Some(m_all),
-                Some(not_iri),
+                Some(false_iri),
                 Ok(ent_iri),
             ) = (
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
@@ -988,7 +1038,7 @@ impl Parser {
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Fin"),
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
                 super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:Not"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
                 Iri::parse("urn:eigenius:lexicon:Entity"),
             ) {
                 let dcl = Exp::InductiveCtor(mood_decl, "dcl".into(), Vec::new());
@@ -1025,7 +1075,8 @@ impl Parser {
                     )),
                     Box::new(Exp::Var(s_v.into())),
                 );
-                let neg_body = Exp::const_applied(not_iri, Vec::new(), vec![app_tv]);
+                let neg_body =
+                    Exp::Arrow(Box::new(app_tv), Box::new(Exp::Const(false_iri, Vec::new())));
                 let sem = Exp::Lam(
                     Patt::Var(tv_v.into()),
                     Box::new(Exp::Lam(
@@ -1537,7 +1588,7 @@ impl Parser {
                 Some(num_decl),
                 Some(m_all),
                 Some(adj_cat),
-                Some(true_iri),
+                Some(false_iri),
                 Some(and_iri),
                 Ok(ent_iri),
             ) = (
@@ -1545,7 +1596,7 @@ impl Parser {
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
                 super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
                 predicative_adjective_cat(&self.grammar.layer),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
                 inductive_iri(&self.grammar.layer, "urn:eigenius:logic:And"),
                 Iri::parse("urn:eigenius:lexicon:Entity"),
             ) {
@@ -1566,6 +1617,37 @@ impl Parser {
                     vec![m_all.clone(), pp_cat, adj_cat.clone()],
                 );
                 out.push(Item::new(as_pp_adj, ident));
+                if let Some(prep_decl) =
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Prep")
+                {
+                    let prep_as = Exp::InductiveCtor(prep_decl, "prep_as".into(), Vec::new());
+                    let pp_as =
+                        Exp::InductiveCtor(cat_decl.clone(), "cat_pp_arg".into(), vec![prep_as]);
+                    let adj_pp_as = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "fwd".into(),
+                        vec![m_all.clone(), adj_cat.clone(), pp_as],
+                    );
+                    let eq_cat = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "fwd".into(),
+                        vec![m_all.clone(), adj_pp_as, adj_cat.clone()],
+                    );
+                    let eq_sem = Exp::Lam(
+                        Patt::Var("__eq_P".into()),
+                        Box::new(Exp::Lam(
+                            Patt::Var("__eq_y".into()),
+                            Box::new(Exp::Lam(
+                                Patt::Var("__eq_x".into()),
+                                Box::new(Exp::App(
+                                    Box::new(Exp::Var("__eq_P".into())),
+                                    Box::new(Exp::Var("__eq_x".into())),
+                                )),
+                            )),
+                        )),
+                    );
+                    out.push(Item::new(eq_cat, eq_sem));
+                }
                 let num_any = Exp::InductiveCtor(num_decl, "num_any".into(), Vec::new());
                 let np_any = Exp::InductiveCtor(
                     cat_decl.clone(),
@@ -1575,9 +1657,10 @@ impl Parser {
                 let as_np_adj = Exp::InductiveCtor(
                     cat_decl.clone(),
                     "fwd".into(),
-                    vec![m_all.clone(), adj_cat.clone(), np_any],
+                    vec![m_all.clone(), adj_cat.clone(), np_any.clone()],
                 );
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                let false_prop = Exp::Const(false_iri, Vec::new());
+                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                 let sem_np = Exp::Lam(
                     Patt::Var("__as_y".into()),
                     Box::new(Exp::Lam(
@@ -1609,6 +1692,19 @@ impl Parser {
                                 Box::new(Exp::Lam(Patt::Var(x_v.into()), Box::new(conj))),
                             )),
                         );
+                        let sem_vp_np = Exp::Lam(
+                            Patt::Var("__as_vp_y".into()),
+                            Box::new(Exp::Lam(
+                                Patt::Var(v_v.into()),
+                                Box::new(Exp::Lam(
+                                    Patt::Var(x_v.into()),
+                                    Box::new(Exp::App(
+                                        Box::new(Exp::Var(v_v.into())),
+                                        Box::new(Exp::Var(x_v.into())),
+                                    )),
+                                )),
+                            )),
+                        );
                         for f_name in ["fin", "bse", "inf", "ger", "pss", "pass"] {
                             let f =
                                 Exp::InductiveCtor(fin_decl.clone(), f_name.into(), Vec::new());
@@ -1630,11 +1726,26 @@ impl Parser {
                             let as_vp_cat = Exp::InductiveCtor(
                                 cat_decl.clone(),
                                 "fwd".into(),
-                                vec![m_all.clone(), bwd_vp, adj_cat.clone()],
+                                vec![m_all.clone(), bwd_vp.clone(), adj_cat.clone()],
                             );
                             out.push(Item::new(as_vp_cat, sem_vp_adj.clone()));
+                            let as_vp_np_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "fwd".into(),
+                                vec![m_all.clone(), bwd_vp, np_any.clone()],
+                            );
+                            out.push(Item::new(as_vp_np_cat, sem_vp_np.clone()));
                         }
                     }
+                }
+            }
+        }
+        if s_lc == "without" {
+            for e in self.lex.entries_for("with") {
+                let is_ppmod = slash_parts(e.item.cat(), "fwd")
+                    .is_some_and(|(_, res, _)| is_ctor(res, "cat_pp").is_some());
+                if is_ppmod {
+                    out.push(e.item);
                 }
             }
         }
@@ -2023,15 +2134,16 @@ impl Parser {
                 Some(prep_decl),
                 Some(m_all),
                 Some(adj_cat),
-                Some(true_iri),
+                Some(false_iri),
             ) = (
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Prep"),
                 super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
                 predicative_adjective_cat(&self.grammar.layer),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
             ) {
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                let false_prop = Exp::Const(false_iri, Vec::new());
+                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                 let x_var = "__wb_x";
                 let y_var = "__wb_y";
                 let adj_sem = Exp::Lam(Patt::Var(x_var.into()), Box::new(true_term.clone()));
@@ -2163,15 +2275,16 @@ impl Parser {
             for e in self.lex.entries_for("more than") {
                 out.push(e.item);
             }
-            if let (Some(cat_decl), Some(m_all), Some(val_decl), Some(true_iri)) = (
+            if let (Some(cat_decl), Some(m_all), Some(val_decl), Some(false_iri)) = (
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
                 super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:MeasureReading"),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
             ) {
                 let pp_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_pp".into(), Vec::new());
                 let num_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_num".into(), Vec::new());
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                let false_prop = Exp::Const(false_iri, Vec::new());
+                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                 let sem_num = Exp::Lam(
                     Patt::Var("__lt_q".into()),
                     Box::new(Exp::Lam(
@@ -2221,11 +2334,12 @@ impl Parser {
             ) {
                 let dcl = Exp::InductiveCtor(mood_decl, "dcl".into(), Vec::new());
                 let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
-                let pss = Exp::InductiveCtor(fin_decl, "pss".into(), Vec::new());
+                let pss = Exp::InductiveCtor(fin_decl.clone(), "pss".into(), Vec::new());
                 let num_any = Exp::InductiveCtor(num_decl, "num_any".into(), Vec::new());
                 let s_fin =
                     Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl.clone(), fin]);
-                let s_pss = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, pss]);
+                let s_pss =
+                    Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl.clone(), pss]);
                 let np_any = Exp::InductiveCtor(
                     cat_decl.clone(),
                     "cat_np".into(),
@@ -2234,15 +2348,18 @@ impl Parser {
                 let vp_pss = Exp::InductiveCtor(
                     cat_decl.clone(),
                     "bwd".into(),
-                    vec![m_all.clone(), s_pss, np_any],
+                    vec![m_all.clone(), s_pss, np_any.clone()],
                 );
                 let bwd_s = Exp::InductiveCtor(
                     cat_decl.clone(),
                     "bwd".into(),
                     vec![m_all.clone(), s_fin.clone(), s_fin],
                 );
-                let as_was_cat =
-                    Exp::InductiveCtor(cat_decl, "fwd".into(), vec![m_all, bwd_s, vp_pss]);
+                let as_was_cat = Exp::InductiveCtor(
+                    cat_decl.clone(),
+                    "fwd".into(),
+                    vec![m_all.clone(), bwd_s, vp_pss.clone()],
+                );
                 let v_var = "__aswas_V";
                 let p_var = "__aswas_p";
                 let sem = Exp::Lam(
@@ -2253,6 +2370,43 @@ impl Parser {
                     )),
                 );
                 out.push(Item::new(as_was_cat, sem));
+                let sem_vp = Exp::Lam(
+                    Patt::Var(v_var.into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var("__aswas_vp".into()),
+                        Box::new(Exp::Lam(
+                            Patt::Var("__aswas_x".into()),
+                            Box::new(Exp::App(
+                                Box::new(Exp::Var("__aswas_vp".into())),
+                                Box::new(Exp::Var("__aswas_x".into())),
+                            )),
+                        )),
+                    )),
+                );
+                for f_name in ["fin", "bse"] {
+                    let f = Exp::InductiveCtor(fin_decl.clone(), f_name.into(), Vec::new());
+                    let s_f = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "cat_s".into(),
+                        vec![dcl.clone(), f],
+                    );
+                    let vp_f = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "bwd".into(),
+                        vec![m_all.clone(), s_f, np_any.clone()],
+                    );
+                    let bwd_vp = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "bwd".into(),
+                        vec![m_all.clone(), vp_f.clone(), vp_f],
+                    );
+                    let as_was_vp = Exp::InductiveCtor(
+                        cat_decl.clone(),
+                        "fwd".into(),
+                        vec![m_all.clone(), bwd_vp, vp_pss.clone()],
+                    );
+                    out.push(Item::new(as_was_vp, sem_vp.clone()));
+                }
             }
         }
         // Inchoative / linking copulas (`become`, `stay`, `remain`): clone the copular frames of
@@ -2443,7 +2597,7 @@ impl Parser {
                                         let cat_pss = Exp::InductiveCtor(
                                             cat_decl.clone(),
                                             "fwd".into(),
-                                            vec![m.clone(), vp_cat.clone(), adj_cat.clone()],
+                                            vec![m.clone(), it.cat().clone(), adj_cat.clone()],
                                         );
                                         obj_preds.push(Item::from_parts(
                                             cat_pss,
@@ -2472,7 +2626,7 @@ impl Parser {
                                 && is_ctor(e.item.cat(), "cat_np").is_none()
                                 && !is_adjective_cat(e.item.cat())
                             {
-                                out.push(e.item);
+                                out.push(with_past_verb_num(&e.item));
                             }
                         }
                     }
@@ -2638,18 +2792,50 @@ impl Parser {
                 | "deleterious"
                 | "conserved"
                 | "unconserved"
-        ) && !out.iter().any(|it| is_adjective_cat(it.cat()))
-        {
-            if let (Some(adj_cat), Some(true_iri)) = (
-                predicative_adjective_cat(&self.grammar.layer),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
-            ) {
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
-                let sem = Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term));
-                out.push(Item::new(adj_cat, sem));
+                | "3-prime"
+                | "5-prime"
+        ) {
+            if !out.iter().any(|it| is_adjective_cat(it.cat())) {
+                if let (Some(adj_cat), Some(false_iri)) = (
+                    predicative_adjective_cat(&self.grammar.layer),
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
+                ) {
+                    let false_prop = Exp::Const(false_iri, Vec::new());
+                    let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                    let sem = Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term));
+                    out.push(Item::new(adj_cat, sem));
+                }
+            }
+            if !out
+                .iter()
+                .any(|it| is_ctor(it.cat(), "cat_measure").is_some())
+            {
+                for e in self.lex.entries_for("essential") {
+                    if is_ctor(e.item.cat(), "cat_measure").is_some() {
+                        out.push(e.item);
+                        break;
+                    }
+                }
             }
         }
-        if (s_lc.ends_with("isation") || s_lc.ends_with("ization"))
+        if s_lc.len() >= 5 && (s_lc.ends_with("-mer") || s_lc.ends_with("-mers")) {
+            if let (Some(cat_decl), Some(num_decl), Ok(ent_iri)) = (
+                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
+                Iri::parse("urn:eigenius:lexicon:Entity"),
+            ) {
+                let ent_cls = Exp::EigonClass(ent_iri);
+                let num_name = if s_lc.ends_with('s') { "pl" } else { "sg" };
+                let num = Exp::InductiveCtor(num_decl, num_name.into(), Vec::new());
+                let n_cat =
+                    Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), num]);
+                out.push(Item::new(n_cat, ent_cls));
+            }
+        }
+        if (s_lc.ends_with("isation")
+            || s_lc.ends_with("ization")
+            || s_lc == "wild type"
+            || s_lc == "wild-type")
             && !out.iter().any(|it| {
                 matches!(
                     is_ctor(it.cat(), "cat_n"),
@@ -2710,12 +2896,13 @@ impl Parser {
                 | "alone"
                 | "at risk"
         ) {
-            if let (Some(cat_decl), Some(true_iri)) = (
+            if let (Some(cat_decl), Some(false_iri)) = (
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
             ) {
                 let pp_cat = Exp::InductiveCtor(cat_decl, "cat_pp".into(), Vec::new());
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                let false_prop = Exp::Const(false_iri, Vec::new());
+                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                 let sem = Exp::Lam(Patt::Var("__post_pp_x".into()), Box::new(true_term.clone()));
                 out.push(Item::new(pp_cat, sem.clone()));
                 if s_lc == "at risk" {
@@ -2731,15 +2918,16 @@ impl Parser {
                 Some(prep_decl),
                 Some(m_all),
                 Some(adj_cat),
-                Some(true_iri),
+                Some(false_iri),
             ) = (
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
                 inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Prep"),
                 super::super::category::mode_value(&self.grammar.layer, MODE_ALL),
                 predicative_adjective_cat(&self.grammar.layer),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
             ) {
-                let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                let false_prop = Exp::Const(false_iri, Vec::new());
+                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                 let sem_adj =
                     Exp::Lam(Patt::Var("__unr_x".into()), Box::new(true_term.clone()));
                 out.push(Item::new(adj_cat.clone(), sem_adj));
@@ -3986,18 +4174,19 @@ impl Parser {
                     )
                 })
             {
-                if let (Some(cat_decl), Some(num_decl), Ok(ent_iri), Some(true_iri)) = (
+                if let (Some(cat_decl), Some(num_decl), Ok(ent_iri), Some(false_iri)) = (
                     inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
                     inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
                     Iri::parse("urn:eigenius:lexicon:Entity"),
-                    inductive_iri(&self.grammar.layer, "urn:eigenius:logic:True"),
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
                 ) {
                     let ent_cls = Exp::EigonClass(ent_iri);
                     let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
                     let n_cat =
                         Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), sg]);
                     chart[i][i].push(Item::new(n_cat, ent_cls));
-                    let true_term = Exp::InductiveCtor(true_iri, "intro".into(), Vec::new());
+                    let false_prop = Exp::Const(false_iri, Vec::new());
+                    let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
                     let mod_sem =
                         Exp::Lam(Patt::Var("__one_x".into()), Box::new(true_term));
                     chart[i][i].push(Item::new(

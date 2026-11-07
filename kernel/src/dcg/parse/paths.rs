@@ -250,7 +250,8 @@ impl Parser {
                     .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo),
             );
         }
-        if candidates.is_empty() && has_initial_imperative_verb(&tokens, &leaves) {
+        let tried_imp_fallback = candidates.is_empty();
+        if tried_imp_fallback && has_initial_imperative_verb(&tokens, &leaves) {
             for &id in forest.cells[0][n - 1].values() {
                 if is_imperative_root_vp(forest.nodes[id].rep.cat()) {
                     for it in self
@@ -322,6 +323,40 @@ impl Parser {
                 }
             } else if let Some(c) = self.reduced_felicitous(it) {
                 forest_out.push(c);
+            }
+        }
+        if forest_out.is_empty()
+            && open.is_empty()
+            && !tried_imp_fallback
+            && has_initial_imperative_verb(&tokens, &leaves)
+        {
+            let mut imp_candidates: Vec<Item> = Vec::new();
+            for &id in forest.cells[0][n - 1].values() {
+                if is_imperative_root_vp(forest.nodes[id].rep.cat()) {
+                    for it in self
+                        .grammar
+                        .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo)
+                    {
+                        if let Some(sat) = saturate_imperative_vp(&it) {
+                            imp_candidates.push(sat);
+                        }
+                    }
+                }
+            }
+            imp_candidates.sort_by_key(|it| it.cost());
+            retain_distinct_sems(&mut imp_candidates, |it| it.sem());
+            let mut imp_candidates = spread_over_skeletons(imp_candidates, |it| it.sem());
+            imp_candidates.truncate(CLASSIFY_BUDGET);
+            for it in &imp_candidates {
+                if types_ok {
+                    match self.classify_felicitous(it, &hole_specs) {
+                        Some(FelicitousOutcome::Closed(c)) => forest_out.push(c),
+                        Some(FelicitousOutcome::Open(o)) => open.push(o),
+                        None => {}
+                    }
+                } else if let Some(c) = self.reduced_felicitous(it) {
+                    forest_out.push(c);
+                }
             }
         }
         Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
@@ -460,8 +495,9 @@ impl Parser {
                 is_finite_clause(it.cat()) || is_ctor(it.cat(), "cat_q").is_some()
             })
             .collect();
+        let tried_imp_fallback = candidates.is_empty();
         let imp_fallback: Vec<Item> =
-            if !candidates.is_empty() || !has_initial_imperative_verb(&tokens, &chart) {
+            if !tried_imp_fallback || !has_initial_imperative_verb(&tokens, &chart) {
                 Vec::new()
             } else {
                 chart[0][n - 1]
@@ -511,6 +547,31 @@ impl Parser {
             } else if let Some(c) = self.reduced_felicitous(it) {
                 // Hole types unavailable (should not happen): closed path only.
                 forest.push(c);
+            }
+        }
+        if forest.is_empty()
+            && open.is_empty()
+            && !tried_imp_fallback
+            && has_initial_imperative_verb(&tokens, &chart)
+        {
+            let mut imp_candidates: Vec<Item> = chart[0][n - 1]
+                .iter()
+                .filter_map(saturate_imperative_vp)
+                .collect();
+            imp_candidates.sort_by_key(|it| it.cost());
+            retain_distinct_sems(&mut imp_candidates, |it| it.sem());
+            let mut imp_candidates = spread_over_skeletons(imp_candidates, |it| it.sem());
+            imp_candidates.truncate(CLASSIFY_BUDGET);
+            for it in &imp_candidates {
+                if types_ok {
+                    match self.classify_felicitous(it, &hole_specs) {
+                        Some(FelicitousOutcome::Closed(c)) => forest.push(c),
+                        Some(FelicitousOutcome::Open(o)) => open.push(o),
+                        None => {}
+                    }
+                } else if let Some(c) = self.reduced_felicitous(it) {
+                    forest.push(c);
+                }
             }
         }
         Self::subsume_duplicates(&mut forest); // D3: collapse definitionally-equal readings

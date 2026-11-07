@@ -87,13 +87,27 @@ any detour.
 > `cat_pp`/adverbials and degree modifiers, `so` pro-form NP, plural acronym (`SNVs`, `NOEs`, `rsIDs`)
 > and UMLS individual `cat_np`/`cat_n`/`ProperName` completion, participial head fallback in
 > `hyphen_compound_items`, and `haem-`/`-ally` adverb base stripping.
+> Batch 7 (kernel-only on the same store): fixed 8 dead-code seed blocks (`not` on `TV`, `as` on `NP`,
+> `worse`/`better`, `larger than`/`smaller than`/`greater than`, domain predicative adjectives,
+> post-nominal `cat_pp` adverbials, `unrelated`, and pro-form `one`) that looked up non-existent
+> `logic:True`/`logic:Not` instead of `logic:False` (`P -> False` and `False -> False`), normalized
+> `mass`/`name` classifier number to `sg` in `build_name` so `definite_designation` emits
+> `cat_np(C, sg)` when UMLS imports acronym/classifier nouns with `mass`, relaxed `common_cat`
+> `cat_np`/`cat_n` number meet so `num_any` meets concrete `sg`/`pl` in GQ coordination, moved
+> `saturate_imperative_vp` fallback in `paths.rs` to also fire when all `top` `cat_s` candidates fail
+> `classify_felicitous`, fixed passive object-predicative category (`((S[dcl,pss]\NP)/NP)/Adj`), added
+> `cat_pp/cat_pp` and `cat_measure/cat_measure` forward modifiers for adverbs, `as` NP-adjunct and
+> equative `as <adj> as` frames, `as was` VP-adjuncts, `without` `cat_pp/NP` post-nominal modifier,
+> `wild type` mass-noun sibling, `cat_n(Entity, mass)` sibling for alphanumeric/proper identifier
+> tokens so modified/PP-refined identifiers shift via `BareNp`, `with_past_verb_num` on hyphen-prefixed
+> verb stems, `cat_measure` on domain adjectives, and `-mer`/`-mers`/`3-prime`/`5-prime` seeding.
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **102** (−350 vs `452` before Batch 1, −37 vs `139` after Batch 5;
-> 954 / 1,056 units parsed = **90.3%**), encoded **8**, ambiguous **687**, open **259**,
-> claim units **205 / 274** (+19 vs Batch 5, +136 vs before Batch 1; **74.8%** of non-PROV claim units
-> fully parsed), one-away **48 / 274** (**253 / 274 = 92.3%** of claim units now either fully parsed or
-> 1 sentence away), readings 79,069, skeletons 21,386 (38 `GRAMMAR-GAP` → parsed gains, 1 regression,
-> net +37 units in Batch 6).
+> families!)**, page grammar-gap **58** (−394 vs `452` before Batch 1, −44 vs `102` after Batch 6;
+> **998 / 1,056 units parsed = 94.5%**), encoded **6**, ambiguous **728**, open **264**,
+> claim units **230 / 274** (+25 vs Batch 6, +161 vs before Batch 1; **83.9%** of non-PROV claim units
+> fully parsed), one-away **35 / 274** (**265 / 274 = 96.7%** of claim units now either fully parsed or
+> 1 sentence away), readings 89,316, skeletons 27,894 (44 `GRAMMAR-GAP` → parsed gains, 0 regressions,
+> net +44 units in Batch 7).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

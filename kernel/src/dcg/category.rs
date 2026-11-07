@@ -989,14 +989,18 @@ pub(crate) fn common_cat(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     // `cat_np(T, num)` / `cat_n(T, num)`: widen the type index to the common supertype; the number
     // feature must match (both raised object slots carry `num_any`, so this holds for the GQ case).
     if (nx == "cat_np" || nx == "cat_n") && ax.len() == 2 {
-        if ax[1] != ay[1] {
+        let num = if ax[1] == ay[1] || is_any_feat(&ay[1]) {
+            ax[1].clone()
+        } else if is_any_feat(&ax[1]) {
+            ay[1].clone()
+        } else {
             return None;
-        }
+        };
         let t = common_super(&ax[0], &ay[0], layer)?;
         return Some(Exp::InductiveCtor(
             dx.clone(),
             nx.clone(),
-            vec![t, ax[1].clone()],
+            vec![t, num],
         ));
     }
     // Structural (`fwd`/`bwd`/`cat_s`/…): ctor + arity already match; recurse on corresponding args.

@@ -508,6 +508,13 @@ impl Parser {
                     | "upstream of"
                     | "downstream of"
                     | "fewer than"
+                    | "larger than"
+                    | "smaller than"
+                    | "greater than"
+                    | "than no"
+                    | "at all"
+                    | "by itself"
+                    | "at risk"
                     | "as was"
                     | "plus"
                     | "such"
@@ -517,7 +524,10 @@ impl Parser {
                     | "long"
                     | "expected"
                     | "observed"
+                    | "3-prime"
+                    | "5-prime"
             )
+            || (s_lc.len() >= 5 && (s_lc.ends_with("-mer") || s_lc.ends_with("-mers")))
         {
             return true;
         }

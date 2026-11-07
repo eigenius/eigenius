@@ -2935,7 +2935,15 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
     // sem are the same Σ, exactly as [`super::constructions::relativize`] and the named-compound rule
     // build theirs, and the `Compound` provenance already means "builds a refined noun `cat_n(Σ…)`".
     let (decl, num) = match left.cat() {
-        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => (d.clone(), largs[1].clone()),
+        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => {
+            let num = match &largs[1] {
+                Exp::InductiveCtor(nd, n, _) if n == "mass" || n == "name" => {
+                    Exp::InductiveCtor(nd.clone(), "sg".into(), Vec::new())
+                }
+                other => other.clone(),
+            };
+            (d.clone(), num)
+        }
         _ => unreachable!("the name rule requires a cat_n left + cat_np right"),
     };
     let cat = Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), num]);
