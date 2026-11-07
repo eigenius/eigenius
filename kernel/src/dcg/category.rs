@@ -867,6 +867,8 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
         let vp = clause(Exp::InductiveCtor(fin.clone(), f_name.to_string(), vec![]));
         out.push(ctor("bwd", vec![m_all.clone(), vp.clone(), vp]));
     }
+    let meas = ctor("cat_measure", vec![]);
+    out.push(ctor("fwd", vec![m_all, meas.clone(), meas]));
 
     Some(out)
 }

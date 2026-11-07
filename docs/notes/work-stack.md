@@ -117,14 +117,24 @@ any detour.
 > object-extracted `obj_rel_cat` on `want`/`need`/`let`/`help`, `be`/`being` progressive/predicative-NP and
 > `has`/`have`/`had` bare-participle completions, intransitive `bear` and `-ity` mass-noun fallback, and
 > `back` + gerund, `most` VP-adverb, `matters` + comparative, and `report` bare-numeral/coordinate frames.
+> Batch 9 (kernel-only on the same store + CNL guideline updates): early return in `candidate_lemmas`
+> (`parse/mod.rs`) for plural all-caps acronyms (`<ACR>s`) so Morphy never strips `-es` to a closed-class
+> base form, mixed-case/alphanumeric symbol casing preservation in `lookup_span` and `contextual_sense_ranks`,
+> `cat_measure/cat_measure` forward modifier in `adverb_modifier_cats` (`category.rs`), saturated
+> intransitive `ger` VP lift (`is_saturated_ger_vp`) in `participial_restrictor` (`combinators.rs`),
+> contact object relative clauses (`contact_rel_obj`), post-verbal VP-adjunct PPs on object-extracted
+> finite clauses (`obj_gap_clause_vpadjunct`), distributive `cat_group` subjects in object extraction
+> (`apply_group`), `who`/`whom` `cat_pp` relative-clause functors, `to` object-gapped infinitival
+> VP-adjuncts (`((S[dcl,fin]\NP)\(S[dcl,fin]\NP)) / ((S[dcl,bse]\NP)/NP)`), `to`/`from` `adj` VP-adjunct
+> siblings, `but` predicative `adj`/`pass` coordination, clause-final/VP-final adverbial `since`,
+> polymorphic subject-GQ focus `only`, `already` `cat_pp/cat_pp` modifier, and targeted nominal/adjectival
+> closed-class supplements (`parse`, `else`, `message`, `enumeration`, plus CNL guideline additions in
+> `docs/method/controlled-english-style-guide.md`).
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **24** (−428 vs `452` before Batch 1, −34 vs `58` after Batch 7;
-> **1,032 / 1,056 units parsed = 97.7%**), encoded **5**, ambiguous **744**, open **283**,
-> claim units **254 / 274** (+24 vs Batch 7, +185 vs before Batch 1; **92.7%** of non-PROV claim units
-> fully parsed), one-away **17 / 274** (**271 / 274 = 98.9%** of claim units now either fully parsed or
-> 1 sentence away, with only 3 claim units having ≥2 sentence gaps), readings 93,377, skeletons 30,306
-> (35 `GRAMMAR-GAP` → parsed gains, 1 `CLASSIFY_BUDGET` saturation addressed with `bare_n_preps` cost
-> rank, net −34 grammar-gaps in Batch 8).
+> families!)**, page grammar-gap **0** (−452 vs `452` before Batch 1, −24 vs `24` after Batch 8;
+> **1,056 / 1,056 units parsed = 100.0%, `COVERAGE: PASS`!**), encoded **6**, ambiguous **757**,
+> open **293**, claim units **274 / 274** (**100.0%** of non-PROV claim units fully parsed; 0 one-away,
+> 0 multi-gap), readings 100,125, skeletons 33,691.
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

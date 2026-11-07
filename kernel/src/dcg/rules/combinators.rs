@@ -1495,6 +1495,21 @@ fn refine_rules() -> &'static [CatRule] {
                 ],
                 build: refine_inf_rel_tv,
             },
+            // Contact object relative clause (`the allele they tested`):
+            // `[cat_n(C, num)] [S[dcl,fin]/NP]` → `cat_n(Σx:C. right(x), num)`.
+            CatRule {
+                name: "contact_rel_obj",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: fwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                    any_np_pat(),
+                ),
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Left),
+                    Guard::NotSuperlativeRefined(Operand::Left),
+                ],
+                build: refine_pp_mod,
+            },
         ]
     });
     &RULES
@@ -2133,6 +2148,9 @@ const PARTICIPIAL_MOD_PENALTY: u32 = 12;
 /// modifier reading and the finite short passive denote identically.
 pub(crate) fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
     use super::super::category::{is_ctor, slash_parts};
+    if is_saturated_ger_vp(cat) {
+        return Some(tv.clone());
+    }
     let (_m, vp, obj) = slash_parts(cat, "fwd")?;
     is_ctor(obj, "cat_np")?;
     let (_vm, s, subj) = slash_parts(vp, "bwd")?;
@@ -2758,6 +2776,28 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 guards: &[],
                 build: build_vp_functor_bwd_adv,
             },
+            // Post-verbal VP-adjunct PP on an object-extracted finite clause
+            // (`that Tse and colleagues actually map to the dimer interface`):
+            // `[S[dcl,fin]/NP] [(S[dcl,fin]\NP)\(S[dcl,fin]\NP)]` → `S[dcl,fin]/NP`.
+            CatRule {
+                name: "obj_gap_clause_vpadjunct",
+                left_pat: fwd_pat(
+                    Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                    any_np_pat(),
+                ),
+                right_pat: bwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                        any_np_pat(),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("fin", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                guards: &[],
+                build: build_obj_gap_clause_vpadjunct,
+            },
             // Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
             // `[(S[dcl,ger]\NP)/NP] [S[dcl,adj]\NP]` → `(S[dcl,ger]\NP)/NP`.
             CatRule {
@@ -3344,6 +3384,19 @@ fn build_vp_functor_bwd_adv(
     Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
 }
 
+/// Post-verbal VP-adjunct PP on an object-extracted finite clause
+/// (`[S[dcl,fin]/NP] [(S[dcl,fin]\NP)\(S[dcl,fin]\NP)]` → `S[dcl,fin]/NP`):
+/// `right(left)`.
+fn build_obj_gap_clause_vpadjunct(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let sem = Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone()));
+    Item::from_parts(left.cat().clone(), sem, Combinator::ForwardComp, Cost::ZERO)
+}
+
 /// Transitive / ditransitive verb + bare numeral object (`scores 0.72`, `exceeds 0.7`):
 /// nominalizes the bare numeral as `ontology:the_count(tv_obj_ty, right)` and applies `left`.
 fn build_tv_num_obj(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
@@ -3443,6 +3496,44 @@ fn apply_group(
                     Combinator::Other,
                     Cost::ZERO,
                 ));
+            }
+        }
+    }
+    // Distributive SUBJECT in object extraction: a `cat_group` subject meeting an unsaturated
+    // transitive verb `(S\NP)/NP` distributes over the verb for each extracted object `o`.
+    if let (Some([c, _conn, gnum]), Some((m_tv, vp, obj_slot))) = (
+        is_ctor(left.cat(), "cat_group"),
+        slash_parts(right.cat(), "fwd"),
+    ) {
+        if is_ctor(obj_slot, "cat_np").is_some() {
+            if let Some((_m_vp, result, slot)) = slash_parts(vp, "bwd") {
+                let num_agrees =
+                    matches!(is_ctor(slot, "cat_np"), Some([_, snum]) if feat_meets(gnum, snum));
+                if num_agrees && group_member_fits(slot, c, layer) {
+                    let o_var = "__grp_ext_o";
+                    let vp_sem = Exp::App(
+                        Box::new(right.sem().clone()),
+                        Box::new(Exp::Var(o_var.into())),
+                    );
+                    if let Some(dist_body) =
+                        distribute(left.cat(), left.sem(), &vp_sem, layer, rctx)
+                    {
+                        if let Exp::InductiveCtor(cat_decl, _, _) = right.cat() {
+                            let res_cat = Exp::InductiveCtor(
+                                cat_decl.clone(),
+                                "fwd".into(),
+                                vec![m_tv.clone(), result.clone(), obj_slot.clone()],
+                            );
+                            let sem = Exp::Lam(Patt::Var(o_var.into()), Box::new(dist_body));
+                            return Some(Item::from_parts(
+                                res_cat,
+                                sem,
+                                Combinator::ForwardComp,
+                                Cost::ZERO,
+                            ));
+                        }
+                    }
+                }
             }
         }
     }

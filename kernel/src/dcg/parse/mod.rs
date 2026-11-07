@@ -674,7 +674,15 @@ impl Parser {
     /// pre-pass), so the two see exactly the same candidate set.
     fn candidate_lemmas(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> BTreeSet<String> {
         let mut candidates: BTreeSet<String> = BTreeSet::new();
-        candidates.insert(surface.trim().to_lowercase());
+        let trimmed = surface.trim();
+        candidates.insert(trimmed.to_lowercase());
+        if let Some(stem) = trimmed
+            .strip_suffix('s')
+            .filter(|st| st.len() >= 2 && all_caps_symbol(st))
+        {
+            candidates.insert(stem.to_lowercase());
+            return candidates;
+        }
         for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
             for lemma in lemmatizer.lemmas(surface, pos) {
                 candidates.insert(lemma.trim().to_lowercase());
@@ -1229,7 +1237,13 @@ impl Parser {
                 // Deliberately NOT measurable with the cap-only instrument: this whole function is
                 // gated on `sense_ranker`, so cap-only never executes it. Its reach was measured
                 // instead as rank-key misses against the tracked recording — see the commit.
-                let surface_all_caps = all_caps_symbol(surface.trim());
+                let surface_all_caps = all_caps_symbol(surface.trim())
+                    || surface
+                        .trim()
+                        .chars()
+                        .skip(1)
+                        .any(|c| c.is_ascii_uppercase())
+                    || surface.trim().chars().any(|c| c.is_ascii_digit());
                 for c in self.candidate_lemmas(&surface, lemmatizer) {
                     for e in self.scoped(self.lex.entries_for(&c), scope) {
                         if !surface_all_caps && all_caps_symbol(&e.form) {
