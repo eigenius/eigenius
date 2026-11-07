@@ -46,6 +46,82 @@ fn spread_over_skeletons<T>(candidates: Vec<T>, sem: impl Fn(&T) -> &Exp) -> Vec
     })
 }
 
+fn is_bse_verb_cat(cat: &Exp) -> bool {
+    use super::super::category::slash_parts;
+    if let Some((_m, s_cat, np_subj)) = slash_parts(cat, "bwd") {
+        return is_ctor(np_subj, "cat_np").is_some()
+            && matches!(
+                is_ctor(s_cat, "cat_s"),
+                Some([_, Exp::InductiveCtor(_, fnm, _)]) if fnm == "bse"
+            );
+    }
+    if let Some((_m, res, _arg)) = slash_parts(cat, "fwd") {
+        return is_bse_verb_cat(res);
+    }
+    false
+}
+
+fn has_initial_imperative_verb(tokens: &[Token], leaves: &super::super::chart::Chart) -> bool {
+    let n = tokens.len();
+    if n == 0 || tokens[0].surface() == "Do" {
+        return false;
+    }
+    for imp_idx in 0..n.min(2) {
+        if imp_idx == 1
+            && !super::seed::is_lexicalized_adverb(&tokens[0].surface().to_lowercase())
+        {
+            break;
+        }
+        if leaves[imp_idx][imp_idx]
+            .iter()
+            .any(|it| is_bse_verb_cat(it.cat()))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_imperative_root_vp(cat: &Exp) -> bool {
+    use super::super::category::slash_parts;
+    let Some((_m, s_cat, np_subj)) = slash_parts(cat, "bwd") else {
+        return false;
+    };
+    is_ctor(np_subj, "cat_np").is_some()
+        && matches!(
+            is_ctor(s_cat, "cat_s"),
+            Some([Exp::InductiveCtor(_, m, _), Exp::InductiveCtor(_, f, _)])
+                if m == "dcl" && (f == "fin" || f == "bse")
+        )
+}
+
+fn saturate_imperative_vp(it: &Item) -> Option<Item> {
+    use super::super::category::slash_parts;
+    let (_m, s_cat, np_subj) = slash_parts(it.cat(), "bwd")?;
+    is_ctor(np_subj, "cat_np")?;
+    let [mood, Exp::InductiveCtor(fin_decl, fnm, _)] = is_ctor(s_cat, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, m, _) if m == "dcl")
+        || !matches!(fnm.as_str(), "fin" | "bse")
+    {
+        return None;
+    }
+    let Exp::InductiveCtor(cat_decl, _, _) = s_cat else {
+        return None;
+    };
+    let spk = Iri::parse("urn:eigenius:lexicon:speaker").ok()?;
+    let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![mood.clone(), fin]);
+    let sem = Exp::App(
+        Box::new(it.sem().clone()),
+        Box::new(Exp::EigonAxiom(spk)),
+    );
+    let mut sat = Item::from_parts(s_fin, sem, it.prov(), it.cost());
+    sat.derivation = it.derivation.clone();
+    Some(sat)
+}
+
 impl Parser {
     /// Packed-forest parse (D63 Option A, blueprint §11 3d): the shared attempt policy
     /// ([`Self::parse_widening`]) over the packed forest + cube-pruning extractor
@@ -173,6 +249,20 @@ impl Parser {
                 self.grammar
                     .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo),
             );
+        }
+        if candidates.is_empty() && has_initial_imperative_verb(&tokens, &leaves) {
+            for &id in forest.cells[0][n - 1].values() {
+                if is_imperative_root_vp(forest.nodes[id].rep.cat()) {
+                    for it in self
+                        .grammar
+                        .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo)
+                    {
+                        if let Some(sat) = saturate_imperative_vp(&it) {
+                            candidates.push(sat);
+                        }
+                    }
+                }
+            }
         }
         candidates.sort_by_key(|it| it.cost());
         let raw_candidates = candidates.len();
@@ -370,6 +460,16 @@ impl Parser {
                 is_finite_clause(it.cat()) || is_ctor(it.cat(), "cat_q").is_some()
             })
             .collect();
+        let imp_fallback: Vec<Item> =
+            if !candidates.is_empty() || !has_initial_imperative_verb(&tokens, &chart) {
+                Vec::new()
+            } else {
+                chart[0][n - 1]
+                    .iter()
+                    .filter_map(saturate_imperative_vp)
+                    .collect()
+            };
+        candidates.extend(imp_fallback.iter());
         let n_candidates = candidates.len();
         candidates.sort_by_key(|it| it.cost());
         retain_distinct_sems(&mut candidates, |it| it.sem());

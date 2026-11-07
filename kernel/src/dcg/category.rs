@@ -871,13 +871,19 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     Some(out)
 }
 
-/// If `cat` is a finite backward VP-modifier category `bwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
+/// If `cat` is a finite backward or forward VP-modifier category
+/// `bwd|fwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
 /// (the shape imported WordNet adverbs carry in `data.adv`), return its five non-finite verbal
-/// siblings (`pss`, `pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so post-verbal adverbs also
-/// attach to passive, gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly", "stating
-/// precisely", "can affect cells directly", "to report directly"). Excludes `adj` and `pred`.
+/// siblings (`pss`, `pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so adverbs also
+/// attach to passive, gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly",
+/// "already cited", "stating precisely", "can affect cells directly", "to report directly").
+/// Excludes `adj` and `pred`.
 pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
-    let Some((m_outer, res_vp, arg_vp)) = slash_parts(cat, "bwd") else {
+    let (outer_dir, (m_outer, res_vp, arg_vp)) = if let Some(p) = slash_parts(cat, "bwd") {
+        ("bwd", p)
+    } else if let Some(p) = slash_parts(cat, "fwd") {
+        ("fwd", p)
+    } else {
         return Vec::new();
     };
     if res_vp != arg_vp {
@@ -919,7 +925,7 @@ pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
             );
             Exp::InductiveCtor(
                 cat_decl.clone(),
-                "bwd".into(),
+                outer_dir.into(),
                 vec![m_outer.clone(), vp_f.clone(), vp_f],
             )
         })

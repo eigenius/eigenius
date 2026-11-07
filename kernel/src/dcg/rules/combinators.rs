@@ -839,19 +839,25 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
     match recipe {
         SemRecipe::DetRefine { cat, t } => {
             let (v, z) = ("__refine_v", "__refine_z");
-            let sem = Exp::Lam(
-                Patt::Var(v.into()),
-                Box::new(Exp::App(
-                    Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(t))),
-                    Box::new(Exp::Lam(
-                        Patt::Var(z.into()),
-                        Box::new(Exp::App(
-                            Box::new(Exp::Var(v.into())),
-                            Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
-                        )),
+            let inner = Exp::App(
+                Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(t))),
+                Box::new(Exp::Lam(
+                    Patt::Var(z.into()),
+                    Box::new(Exp::App(
+                        Box::new(Exp::Var(v.into())),
+                        Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
                     )),
                 )),
             );
+            let body = if matches!(
+                slash_parts(&cat, "fwd"),
+                Some((_, res, _)) if is_ctor(res, "cat_np").is_some()
+            ) {
+                Exp::Fst(Box::new(inner))
+            } else {
+                inner
+            };
+            let sem = Exp::Lam(Patt::Var(v.into()), Box::new(body));
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }
         SemRecipe::DetModify {
@@ -1601,6 +1607,25 @@ pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
             it.cost(),
         )];
     }
+    if is_ctor(it.cat(), "cat_factor").is_some() {
+        if let Ok(rel) = Iri::parse("urn:eigenius:ontology:has_quantity") {
+            let x = "FAC#x";
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let body = app(
+                app(
+                    app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                    Exp::LitUnit(crate::units::Unit::dimensionless()),
+                ),
+                it.sem().clone(),
+            );
+            return vec![Item::from_parts(
+                cat_mod_cat(),
+                Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+                Combinator::Other,
+                it.cost(),
+            )];
+        }
+    }
     Vec::new()
 }
 
@@ -2026,6 +2051,13 @@ fn adv_initial_cat(cat: &Exp) -> Option<Exp> {
     let sargs = is_ctor(sent, "cat_s")?;
     let mood = sargs.first()?;
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(
+        sargs.get(1),
+        Some(Exp::InductiveCtor(_, n, _)) if n == "fin"
+    ) && !matches!(sargs.get(1), Some(Exp::Var(_)))
+    {
         return None;
     }
     is_ctor(subj, "cat_np")?;

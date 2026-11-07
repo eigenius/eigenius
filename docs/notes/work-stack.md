@@ -71,13 +71,29 @@ any detour.
 > nominals, `nucleotides`/`stars`/`orders` bare-numeral measure/NP post-heads, `long` predicative
 > measure adjective, `inf_rel_vp`/`inf_rel_tv` post-nominal `to`-infinitive relatives + `for NP to VP`
 > PPs, sentence-initial affirmative imperatives, and `least`/`worse`/`better`/`one`/`such`/`as was`.
+> Batch 6 (kernel-only on the same store): fixed `derivation_augmentation` and `compound_augmentation`
+> in `glossary.rs` to ground derived/compound nominals to `common_noun_concept(base, ...)` (or
+> `lexicon:Entity`) instead of `e.id()` (`lexicon:LexicalEntry`), Σ-witness projection (`Exp::Fst`) in
+> `SemRecipe::DetRefine` when a determiner result is a free-relative functor (`which_fr_s`/`which_fr_o`
+> over refined nouns), root-level imperative VP saturation (`saturate_imperative_vp` in `paths.rs` when
+> no finite clause or wh-question spans `[0..n-1]`), `cat_factor` → `cat_mod_cat` lift in `mod_lifts`,
+> non-finite forward VP-adverb siblings (`pss`, `pass`, `ger`, `bse`, `inf` in `category.rs` +
+> finite-only `adv_initial_cat` guard), bioinformatics post-numeral unit heads (`bp`, `kb`, `mb`, `nt`,
+> `kda`, `aa`), `worse`/`better` comparative `than` + `than no` + `larger than`/`smaller than`/
+> `greater than`, `worth` `ger` VP result categories, `as` predicative-adjective / PP / NP frames,
+> extraction-ready `not` (on `TV`) and `does`/`do`/`did` (on `TV` and `CV`), object-control /
+> passive-complement `lets`/`let`/`help`/`want`/`need`, `;` VP coordination, British/domain stem
+> aliases and predicative adjective fallbacks, `-isation`/`-ization` mass-noun siblings, post-nominal
+> `cat_pp`/adverbials and degree modifiers, `so` pro-form NP, plural acronym (`SNVs`, `NOEs`, `rsIDs`)
+> and UMLS individual `cat_np`/`cat_n`/`ProperName` completion, participial head fallback in
+> `hyphen_compound_items`, and `haem-`/`-ally` adverb base stripping.
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **139** (−313 vs `452` before Batch 1, −85 vs `224` after Batch 4;
-> 917 / 1,056 units parsed = **86.8%**), encoded **11**, ambiguous **683** (+101), open **223**,
-> claim units **186 / 274** (+41 vs Batch 4, +117 vs before Batch 1; **67.9%** of non-PROV claim units
-> fully parsed), one-away **58 / 274** (**244 / 274 = 89.1%** of claim units now either fully parsed or
-> 1 sentence away), readings 74,295, skeletons 16,630 (85 strictly forward `GRAMMAR-GAP` → parsed
-> transitions in Batch 5, 0 regressions).
+> families!)**, page grammar-gap **102** (−350 vs `452` before Batch 1, −37 vs `139` after Batch 5;
+> 954 / 1,056 units parsed = **90.3%**), encoded **8**, ambiguous **687**, open **259**,
+> claim units **205 / 274** (+19 vs Batch 5, +136 vs before Batch 1; **74.8%** of non-PROV claim units
+> fully parsed), one-away **48 / 274** (**253 / 274 = 92.3%** of claim units now either fully parsed or
+> 1 sentence away), readings 79,069, skeletons 21,386 (38 `GRAMMAR-GAP` → parsed gains, 1 regression,
+> net +37 units in Batch 6).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

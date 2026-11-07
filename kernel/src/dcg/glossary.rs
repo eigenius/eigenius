@@ -1714,14 +1714,15 @@ pub fn derivation_augmentation(
         else {
             continue;
         };
-        let hits = entries_for_form(base, &stem);
         // Ground to the base's concept — the surface parses; it does NOT inherit the base's sense.
-        let Some(concept) = hits.first().and_then(|e| e.id().cloned()) else {
+        let Some(concept) = common_noun_concept(base, &stem)
+            .or_else(|| Iri::parse("urn:eigenius:lexicon:Entity").ok())
+        else {
             continue;
         };
         let binding = AbbreviationBinding {
             abbr: tok,
-            long_form: &stem,
+            long_form: tok,
             concept_iri: concept.as_str(),
             doc_ns: "urn:eigenius:doc",
         };
@@ -1804,10 +1805,9 @@ pub fn compound_augmentation(
             continue;
         }
         // The HEAD is the last part, in English. `missense-bystander` is a kind of bystander.
-        let Some(head) = grounded
-            .last()
-            .and_then(|g| g.first())
-            .and_then(|e| e.id().cloned())
+        let head_part = parts.last().copied().unwrap_or(tok);
+        let Some(head) = common_noun_concept(base, head_part)
+            .or_else(|| Iri::parse("urn:eigenius:lexicon:Entity").ok())
         else {
             continue;
         };
