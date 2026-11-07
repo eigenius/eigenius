@@ -101,13 +101,30 @@ any detour.
 > `wild type` mass-noun sibling, `cat_n(Entity, mass)` sibling for alphanumeric/proper identifier
 > tokens so modified/PP-refined identifiers shift via `BareNp`, `with_past_verb_num` on hyphen-prefixed
 > verb stems, `cat_measure` on domain adjectives, and `-mer`/`-mers`/`3-prime`/`5-prime` seeding.
+> Batch 8 (kernel-only on the same store): fixed `freshen_gate_holes` (`holes.rs`) to memoize
+> `(raw_subterm, walked_subterm)` during traversal and reuse the already-freshened proposition `P'` when
+> typing `hypothesis_of(P')` holes (fixing `classify_felicitous` rejections when `because` co-occurs with
+> a demonstrative), tightened `Guard::NotComposed` (`combinators.rs`) to exclude `Combinator::BackwardApp`
+> so stranded-preposition VPs do not consume bare numerals on the right, added plural-acronym casing
+> preservation in `lookup_span` (`seed.rs` `surface_all_caps`), plural determiner siblings (`cat_forall(pl, …)`)
+> for `no`, standalone plural pronoun `both`, predeterminer MWEs (`all these`/`all those`/`all the`/`both these`/
+> `both those`/`both the`) and `all` NP/GQ modifiers, `the <num>` plain `cat_np` determiner + `the most`/
+> `the least` superlative measure-phrase modifier (`((cat_mp/cat_mp)/cat_sup_mod)`), `of` + `cat_numpred`
+> (`cat_pp/cat_numpred`), `between` measure-phrase and bare-numeral prepositions, `only` on `cat_factor`/
+> `cat_num`/VP-adjuncts, comma-prefixed subordinators (`, because`/`, while`/`, although`/`, whereas`/
+> `, since`/`, if`/`, when`) and sentence-initial `But`/`And` (`S[dcl,fin]/S[dcl,fin]`), VP-adjunct and
+> bare-singular-noun preposition completions (`under`/`over`/`above`/`below`/`between`/`at`/`by`/`of`/`in`),
+> object-extracted `obj_rel_cat` on `want`/`need`/`let`/`help`, `be`/`being` progressive/predicative-NP and
+> `has`/`have`/`had` bare-participle completions, intransitive `bear` and `-ity` mass-noun fallback, and
+> `back` + gerund, `most` VP-adverb, `matters` + comparative, and `report` bare-numeral/coordinate frames.
 > **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
-> families!)**, page grammar-gap **58** (−394 vs `452` before Batch 1, −44 vs `102` after Batch 6;
-> **998 / 1,056 units parsed = 94.5%**), encoded **6**, ambiguous **728**, open **264**,
-> claim units **230 / 274** (+25 vs Batch 6, +161 vs before Batch 1; **83.9%** of non-PROV claim units
-> fully parsed), one-away **35 / 274** (**265 / 274 = 96.7%** of claim units now either fully parsed or
-> 1 sentence away), readings 89,316, skeletons 27,894 (44 `GRAMMAR-GAP` → parsed gains, 0 regressions,
-> net +44 units in Batch 7).
+> families!)**, page grammar-gap **24** (−428 vs `452` before Batch 1, −34 vs `58` after Batch 7;
+> **1,032 / 1,056 units parsed = 97.7%**), encoded **5**, ambiguous **744**, open **283**,
+> claim units **254 / 274** (+24 vs Batch 7, +185 vs before Batch 1; **92.7%** of non-PROV claim units
+> fully parsed), one-away **17 / 274** (**271 / 274 = 98.9%** of claim units now either fully parsed or
+> 1 sentence away, with only 3 claim units having ≥2 sentence gaps), readings 93,377, skeletons 30,306
+> (35 `GRAMMAR-GAP` → parsed gains, 1 `CLASSIFY_BUDGET` saturation addressed with `bare_n_preps` cost
+> rank, net −34 grammar-gaps in Batch 8).
 >
 > Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /

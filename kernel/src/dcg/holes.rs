@@ -140,15 +140,21 @@ pub(super) struct GateHole {
 /// (nothing to type the hole with) and the gate's closed `check` rejects the candidate. A counted
 /// occurrence, `anaphor_of_count(A, q)`, returns its count `q` beside the type.
 pub(super) fn freshen_gate_holes(exp: &Exp) -> (Exp, Vec<GateHole>) {
-    fn walk(e: &Exp, holes: &mut Vec<GateHole>) -> Exp {
+    fn walk(e: &Exp, holes: &mut Vec<GateHole>, memo: &mut Vec<(Exp, Exp)>) -> Exp {
         if let Exp::App(f, a) = e {
             let head = |g: &Exp, iri: &str| matches!(g, Exp::EigonAxiom(i) if i.as_str() == iri);
             let (ty, count, is_proof) = if head(f, ANAPHOR_OF_IRI) {
                 (Some(a.as_ref().clone()), None, false)
             } else if head(f, HYPOTHESIS_OF_IRI) {
                 // `hypothesis_of(P)` — the argument IS the proposition the hypothesis proves, so it
-                // types the hole directly, exactly as the restrictor does for `anaphor_of`.
-                (Some(a.as_ref().clone()), None, true)
+                // types the hole directly, reusing the already-freshened `P` when `P` was walked
+                // earlier in the same subordinator spine (`Because(s1, s2, hypothesis_of(s1), …)`).
+                let walked_a = memo
+                    .iter()
+                    .find(|(raw, _)| raw == a.as_ref())
+                    .map(|(_, w)| w.clone())
+                    .unwrap_or_else(|| walk(a, holes, memo));
+                (Some(walked_a), None, true)
             } else if let Exp::App(g, t) = f.as_ref() {
                 if head(g, ANAPHOR_OF_COUNT_IRI) {
                     (Some(t.as_ref().clone()), Some(a.as_ref().clone()), false)
@@ -173,34 +179,52 @@ pub(super) fn freshen_gate_holes(exp: &Exp) -> (Exp, Vec<GateHole>) {
                 return Exp::Var(var);
             }
         }
-        match e {
-            Exp::App(f, x) => Exp::App(Box::new(walk(f, holes)), Box::new(walk(x, holes))),
-            Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(walk(b, holes))),
+        let res = match e {
+            Exp::App(f, x) => Exp::App(
+                Box::new(walk(f, holes, memo)),
+                Box::new(walk(x, holes, memo)),
+            ),
+            Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(walk(b, holes, memo))),
             Exp::Pi(p, a, b) => Exp::Pi(
                 p.clone(),
-                Box::new(walk(a, holes)),
-                Box::new(walk(b, holes)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
             ),
             Exp::Sig(p, a, b) => Exp::Sig(
                 p.clone(),
-                Box::new(walk(a, holes)),
-                Box::new(walk(b, holes)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
             ),
-            Exp::Arrow(a, b) => Exp::Arrow(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Times(a, b) => Exp::Times(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Fst(x) => Exp::Fst(Box::new(walk(x, holes))),
-            Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes))),
-            Exp::Pair(a, b) => Exp::Pair(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Ann(x, t) => Exp::Ann(Box::new(walk(x, holes)), Box::new(walk(t, holes))),
+            Exp::Arrow(a, b) => Exp::Arrow(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Times(a, b) => Exp::Times(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Fst(x) => Exp::Fst(Box::new(walk(x, holes, memo))),
+            Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes, memo))),
+            Exp::Pair(a, b) => Exp::Pair(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Ann(x, t) => Exp::Ann(
+                Box::new(walk(x, holes, memo)),
+                Box::new(walk(t, holes, memo)),
+            ),
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),
                 n.clone(),
-                args.iter().map(|x| walk(x, holes)).collect(),
+                args.iter().map(|x| walk(x, holes, memo)).collect(),
             ),
             other => other.clone(),
-        }
+        };
+        memo.push((e.clone(), res.clone()));
+        res
     }
     let mut holes = Vec::new();
-    let out = walk(exp, &mut holes);
+    let mut memo = Vec::new();
+    let out = walk(exp, &mut holes, &mut memo);
     (out, holes)
 }

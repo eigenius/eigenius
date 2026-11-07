@@ -1297,7 +1297,10 @@ impl Guard {
             ),
             Guard::NotComposed(op) => !matches!(
                 op.pick(left, right).prov,
-                Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
+                Combinator::ForwardComp
+                    | Combinator::CrossedComp
+                    | Combinator::BackwardComp
+                    | Combinator::BackwardApp
             ),
             // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
             // postmodifier cannot sit between a modifier and its head), so it does not care whether the
