@@ -6560,3 +6560,2631 @@ resource lexicon:to_ecm : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "to";
 }
+
+
+// ---------------------------------------------------------------------------
+// Systematic closed-class declarations migrated from seed.rs
+// ---------------------------------------------------------------------------
+
+// 1. Plural negative determiner NO ("no mutations are benign", "observed no variants")
+resource lexicon:no_pl_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural negative quantifier NO in subject position.";
+    lexicon:form     = "no";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:no_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "no";
+    lexicon:scope_bearing = true;
+}
+resource lexicon:no_pl_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural negative quantifier NO in object position.";
+    lexicon:form     = "no";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_no_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "no";
+    lexicon:scope_bearing = true;
+}
+
+// 2. Determiner ANY and partitive ANY OF / BOTH OF
+resource lexicon:any_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular determiner ANY in subject position.";
+    lexicon:form     = "any";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "any";
+}
+resource lexicon:any_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular determiner ANY in object position.";
+    lexicon:form     = "any";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "any";
+}
+resource lexicon:any_pl_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural determiner ANY in subject position.";
+    lexicon:form     = "any";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "any";
+}
+resource lexicon:any_pl_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural determiner ANY in object position.";
+    lexicon:form     = "any";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "any";
+}
+resource lexicon:any_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ANY OF in subject position.";
+    lexicon:form     = "any of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:some_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "any of";
+}
+resource lexicon:any_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ANY OF in object position.";
+    lexicon:form     = "any of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:some_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "any of";
+}
+resource lexicon:both_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier BOTH OF in subject position.";
+    lexicon:form     = "both of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:all_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "both of";
+}
+resource lexicon:both_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier BOTH OF in object position.";
+    lexicon:form     = "both of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:all_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both of";
+}
+
+resource lexicon:the_most_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "the most";
+}
+resource lexicon:the_most_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "the most";
+}
+resource lexicon:the_most_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "the most";
+}
+resource lexicon:the_most_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "the most";
+}
+resource lexicon:the_most_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plain NP (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the most";
+}
+resource lexicon:the_most_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural plain NP (the most).";
+    lexicon:form     = "the most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the most";
+}
+
+resource lexicon:the_least_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "the least";
+}
+resource lexicon:the_least_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "the least";
+}
+resource lexicon:the_least_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "the least";
+}
+resource lexicon:the_least_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "the least";
+}
+resource lexicon:the_least_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plain NP (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the least";
+}
+resource lexicon:the_least_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural plain NP (the least).";
+    lexicon:form     = "the least";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "the least";
+}
+
+resource lexicon:all_the_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all the";
+}
+resource lexicon:all_the_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all the";
+}
+resource lexicon:all_the_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all the";
+}
+resource lexicon:all_the_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all the";
+}
+resource lexicon:all_the_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plain NP (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "all the";
+}
+resource lexicon:all_the_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural plain NP (all the).";
+    lexicon:form     = "all the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "all the";
+}
+
+resource lexicon:both_the_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both the";
+}
+resource lexicon:both_the_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both the";
+}
+resource lexicon:both_the_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both the";
+}
+resource lexicon:both_the_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both the";
+}
+resource lexicon:both_the_plain_np : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plain NP (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:cat_np(T, lexicon:sg)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "both the";
+}
+resource lexicon:both_the_plain_np_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: compound definite determiner, plural plain NP (both the).";
+    lexicon:form     = "both the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)) );
+    lexicon:sem      = lexicon:the_plain_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => A );
+    lexicon:sense    = "both the";
+}
+
+resource lexicon:all_these_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (all these).";
+    lexicon:form     = "all these";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all these";
+}
+resource lexicon:all_these_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (all these).";
+    lexicon:form     = "all these";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all these";
+}
+
+resource lexicon:both_these_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (both these).";
+    lexicon:form     = "both these";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both these";
+}
+resource lexicon:both_these_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (both these).";
+    lexicon:form     = "both these";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both these";
+}
+
+resource lexicon:all_those_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (all those).";
+    lexicon:form     = "all those";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all those";
+}
+resource lexicon:all_those_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (all those).";
+    lexicon:form     = "all those";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all those";
+}
+
+resource lexicon:both_those_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (both those).";
+    lexicon:form     = "both those";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both those";
+}
+resource lexicon:both_those_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-determiner + plural demonstrative (both those).";
+    lexicon:form     = "both those";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both those";
+}
+
+// 3. Count determiners (the_count_plain, all_count_plain, all_count_subj, all_count_obj, of_numpred)
+resource lexicon:the_count_plain_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"1")) => fun (A : Set) => ontology:the_count(A, q)
+          : units:Quantity(u"1") -> (forall (A : Set) => A) )
+    );
+}
+resource lexicon:the_count_plain : lexicon:LexicalEntry {
+    core:description = "grammatical: definite determiner before a cardinal numeral, plain NP.";
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:the_count_plain_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> (forall (A : Set) => A) );
+    lexicon:sense    = "the";
+}
+resource lexicon:all_count_plain : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner before a cardinal numeral, plain NP.";
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:cat_np(T, lexicon:pl)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:the_count_plain_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> (forall (A : Set) => A) );
+    lexicon:sense    = "all";
+}
+resource lexicon:all_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner before a cardinal numeral, subject.";
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:the_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all";
+}
+resource lexicon:all_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner before a cardinal numeral, object.";
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:the_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all";
+}
+resource lexicon:of_numpred : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition OF over a numerical predicate.";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_numpred) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "of";
+}
+resource lexicon:both_np_mod : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-NP modifier BOTH.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "both";
+}
+resource lexicon:all_np_mod : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-NP modifier ALL.";
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "all";
+}
+resource lexicon:only_np_mod : lexicon:LexicalEntry {
+    core:description = "grammatical: focusing pre-NP modifier ONLY.";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "supp:open";
+}
+
+// 4. Personal, reflexive, demonstrative, and predicative possessive pronouns
+resource lexicon:i_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular pronoun I.";
+    lexicon:form     = "I";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem      = lexicon:speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:me_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular object pronoun ME.";
+    lexicon:form     = "me";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem      = lexicon:speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "me";
+}
+resource lexicon:us_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural object pronoun US.";
+    lexicon:form     = "us";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem      = lexicon:speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "us";
+}
+resource lexicon:you_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person pronoun YOU.";
+    lexicon:form     = "you";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem      = lexicon:speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "you";
+}
+resource lexicon:them_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural object pronoun THEM.";
+    lexicon:form     = "them";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "them";
+}
+resource lexicon:themselves_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural reflexive pronoun THEMSELVES.";
+    lexicon:form     = "themselves";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "themselves";
+}
+resource lexicon:both_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: plural dual pronoun BOTH.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "both";
+}
+resource lexicon:itself_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular reflexive pronoun ITSELF.";
+    lexicon:form     = "itself";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "itself";
+}
+resource lexicon:that_pron_fallback : lexicon:LexicalEntry {
+    core:description = "grammatical: standalone demonstrative pronoun THAT.";
+    lexicon:form       = "that";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem        = lexicon:anaphor_sem;
+    lexicon:sem_type   = type_expr( lexicon:Entity );
+    lexicon:sense      = "that";
+    lexicon:sense_rank = 4;
+}
+resource lexicon:such_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: demonstrative pronoun SUCH.";
+    lexicon:form       = "such";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem        = lexicon:anaphor_sem;
+    lexicon:sem_type   = type_expr( lexicon:Entity );
+    lexicon:sense      = "such";
+    lexicon:sense_rank = 4;
+}
+resource lexicon:so_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: pro-form SO.";
+    lexicon:form       = "so";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem        = lexicon:anaphor_sem;
+    lexicon:sem_type   = type_expr( lexicon:Entity );
+    lexicon:sense      = "supp:open";
+    lexicon:sense_rank = 4;
+}
+resource lexicon:here_np : lexicon:LexicalEntry {
+    core:description = "grammatical: deictic pro-NP HERE.";
+    lexicon:form     = "here";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:poss_pred_speaker_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => lexicon:poss_of(lexicon:Entity, x, lexicon:speaker)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:poss_pred_anaphor_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => lexicon:poss_of(lexicon:Entity, x, lexicon:anaphor)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:mine_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular predicative possessive MINE.";
+    lexicon:form     = "mine";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_pred_speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "mine";
+}
+resource lexicon:ours_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural predicative possessive OURS.";
+    lexicon:form     = "ours";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_pred_speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "ours";
+}
+resource lexicon:yours_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person predicative possessive YOURS.";
+    lexicon:form     = "yours";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_pred_anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "yours";
+}
+resource lexicon:theirs_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural predicative possessive THEIRS.";
+    lexicon:form     = "theirs";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:poss_pred_anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "theirs";
+}
+
+resource lexicon:where_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (where).";
+    lexicon:form     = "where";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "where";
+}
+resource lexicon:where_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (where).";
+    lexicon:form     = "where";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "where";
+}
+
+resource lexicon:so_that_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (so that).";
+    lexicon:form     = "so that";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "so that";
+}
+resource lexicon:so_that_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (so that).";
+    lexicon:form     = "so that";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "so that";
+}
+
+resource lexicon:before_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (before).";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (before).";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "before";
+}
+
+resource lexicon:after_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (after).";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (after).";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "after";
+}
+
+resource lexicon:once_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (once).";
+    lexicon:form     = "once";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "once";
+}
+resource lexicon:once_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (once).";
+    lexicon:form     = "once";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "once";
+}
+
+resource lexicon:since_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (since).";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "since";
+}
+resource lexicon:since_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (since).";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "since";
+}
+
+resource lexicon:until_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal subordinator (until).";
+    lexicon:form     = "until";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "until";
+}
+resource lexicon:until_subord_fronted : lexicon:LexicalEntry {
+    core:description = "grammatical: fronted clausal subordinator (until).";
+    lexicon:form     = "until";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "until";
+}
+
+// 5. Complementizers, relative pronouns, and free relatives
+resource lexicon:where_rel_pp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : Prop) => fun (x : lexicon:Entity) => p
+          : Prop -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:where_rel_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: locative relative subordinator WHERE.";
+    lexicon:form     = "where";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:where_rel_pp_sem;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
+    lexicon:sense    = "where";
+}
+resource lexicon:clausal_free_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (p : Prop) => eigentt:fst(ontology:the(exists x : lexicon:Entity => p))
+          : Prop -> lexicon:Entity )
+    );
+}
+
+resource lexicon:why_comp : lexicon:LexicalEntry {
+    core:description = "grammatical: embedded clausal complementiser (why).";
+    lexicon:form     = "why";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "why";
+}
+resource lexicon:why_free_rel : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal free relative (why).";
+    lexicon:form     = "why";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:clausal_free_rel_sem;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity );
+    lexicon:sense    = "why";
+}
+
+resource lexicon:how_comp : lexicon:LexicalEntry {
+    core:description = "grammatical: embedded clausal complementiser (how).";
+    lexicon:form     = "how";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "how";
+}
+resource lexicon:how_free_rel : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal free relative (how).";
+    lexicon:form     = "how";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:clausal_free_rel_sem;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity );
+    lexicon:sense    = "how";
+}
+
+resource lexicon:whether_comp : lexicon:LexicalEntry {
+    core:description = "grammatical: embedded clausal complementiser (whether).";
+    lexicon:form     = "whether";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "whether";
+}
+resource lexicon:whether_free_rel : lexicon:LexicalEntry {
+    core:description = "grammatical: clausal free relative (whether).";
+    lexicon:form     = "whether";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:clausal_free_rel_sem;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity );
+    lexicon:sense    = "whether";
+}
+
+resource lexicon:whatever_free_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative subject gap (whatever).";
+    lexicon:form     = "whatever";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "whatever";
+}
+resource lexicon:whatever_free_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative object gap (whatever).";
+    lexicon:form     = "whatever";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "whatever";
+}
+resource lexicon:whatever_det_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative subject gap (whatever).";
+    lexicon:form     = "whatever";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "whatever";
+}
+resource lexicon:whatever_det_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative object gap (whatever).";
+    lexicon:form     = "whatever";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "whatever";
+}
+
+resource lexicon:how_much_free_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative subject gap (how much).";
+    lexicon:form     = "how much";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "how much";
+}
+resource lexicon:how_much_free_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative object gap (how much).";
+    lexicon:form     = "how much";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "how much";
+}
+resource lexicon:how_much_det_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative subject gap (how much).";
+    lexicon:form     = "how much";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "how much";
+}
+resource lexicon:how_much_det_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative object gap (how much).";
+    lexicon:form     = "how much";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "how much";
+}
+
+resource lexicon:how_many_free_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative subject gap (how many).";
+    lexicon:form     = "how many";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "how many";
+}
+resource lexicon:how_many_free_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: free relative object gap (how many).";
+    lexicon:form     = "how many";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:free_rel_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "how many";
+}
+resource lexicon:how_many_det_fr_s : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative subject gap (how many).";
+    lexicon:form     = "how many";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "how many";
+}
+resource lexicon:how_many_det_fr_o : lexicon:LexicalEntry {
+    core:description = "grammatical: determiner free relative object gap (how many).";
+    lexicon:form     = "how many";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_np(T, lexicon:num_any), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:which_free_rel_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> A );
+    lexicon:sense    = "how many";
+}
+
+resource lexicon:who_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: animate relative pronoun subject gap (who).";
+    lexicon:form     = "who";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "who";
+}
+resource lexicon:who_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: animate relative pronoun object gap (who).";
+    lexicon:form     = "who";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "who";
+}
+
+resource lexicon:whom_rel_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: animate relative pronoun subject gap (whom).";
+    lexicon:form     = "whom";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "whom";
+}
+resource lexicon:whom_rel_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: animate relative pronoun object gap (whom).";
+    lexicon:form     = "whom";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "whom";
+}
+
+resource lexicon:to_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (to).";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (to).";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "to";
+}
+
+resource lexicon:from_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (from).";
+    lexicon:form     = "from";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "from";
+}
+resource lexicon:from_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (from).";
+    lexicon:form     = "from";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "from";
+}
+
+resource lexicon:above_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (above).";
+    lexicon:form     = "above";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "above";
+}
+resource lexicon:above_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (above).";
+    lexicon:form     = "above";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "above";
+}
+
+resource lexicon:below_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (below).";
+    lexicon:form     = "below";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "below";
+}
+resource lexicon:below_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (below).";
+    lexicon:form     = "below";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "below";
+}
+
+resource lexicon:under_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (under).";
+    lexicon:form     = "under";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "under";
+}
+resource lexicon:under_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (under).";
+    lexicon:form     = "under";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "under";
+}
+
+resource lexicon:over_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (over).";
+    lexicon:form     = "over";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "over";
+}
+resource lexicon:over_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (over).";
+    lexicon:form     = "over";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "over";
+}
+
+resource lexicon:out_of_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (out of).";
+    lexicon:form     = "out of";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "out of";
+}
+resource lexicon:out_of_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (out of).";
+    lexicon:form     = "out of";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "out of";
+}
+
+resource lexicon:between_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value (between).";
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "between";
+}
+resource lexicon:between_value_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over a measured value, noun post-modifier (between).";
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_at_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "between";
+}
+
+resource lexicon:range_num_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (hi : units:Quantity(u"1")) => fun (lo : units:Quantity(u"1")) => lo
+          : units:Quantity(u"1") -> units:Quantity(u"1") -> units:Quantity(u"1") )
+    );
+}
+
+resource lexicon:to_range_num : lexicon:LexicalEntry {
+    core:description = "grammatical: numeral range connector (to).";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_num, lexicon:cat_num), lexicon:cat_num) );
+    lexicon:sem      = lexicon:range_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_range_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: numeral-to-measure range connector (to).";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num), lexicon:cat_num) );
+    lexicon:sem      = lexicon:range_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "to";
+}
+
+resource lexicon:through_range_num : lexicon:LexicalEntry {
+    core:description = "grammatical: numeral range connector (through).";
+    lexicon:form     = "through";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_num, lexicon:cat_num), lexicon:cat_num) );
+    lexicon:sem      = lexicon:range_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "through";
+}
+resource lexicon:through_range_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: numeral-to-measure range connector (through).";
+    lexicon:form     = "through";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num), lexicon:cat_num) );
+    lexicon:sem      = lexicon:range_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "through";
+}
+
+resource lexicon:for_to_vp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => V(y)
+          : (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:for_to_tv_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => TV(x, y)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:to_obj_gap_vp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (V : lexicon:Entity -> Prop) => fun (x : lexicon:Entity) =>
+            logic:And(V(x), forall (P : Prop) => (forall (subj : lexicon:Entity) => (TV(x, subj) -> P)) -> P)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:to_for_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: infinitival TO after a for-NP subject.";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_pp_arg(lexicon:prep_for)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:for_to_vp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_for_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: object-gapped infinitival TO after a for-NP subject.";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_pp_arg(lexicon:prep_for)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:for_to_tv_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "to";
+}
+resource lexicon:to_obj_gap_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: object-gapped purpose infinitival TO.";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:to_obj_gap_vp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
+}
+
+// 8. Bound modifiers for fewer than and only
+resource lexicon:fewer_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: upper bound FEWER THAN on a measured value.";
+    lexicon:form     = "fewer than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "fewer than";
+}
+resource lexicon:only_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound modifier ONLY on a measured value.";
+    lexicon:form     = "only";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "supp:open";
+}
+
+// 9. Predicative adjective WORTH and equative/prepositional AS
+resource lexicon:worth_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: predicative WORTH taking a gerund VP.";
+    lexicon:form     = "worth";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "worth";
+}
+resource lexicon:worth_ger_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: gerund-headed WORTH taking a gerund VP.";
+    lexicon:form     = "worth";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "worth";
+}
+resource lexicon:worth_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: predicative WORTH taking an object-gapped gerund TV.";
+    lexicon:form     = "worth";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "worth";
+}
+resource lexicon:worth_ger_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: gerund-headed WORTH taking an object-gapped gerund TV.";
+    lexicon:form     = "worth";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:passive_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "worth";
+}
+
+resource lexicon:as_eq_adj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (P : lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => P(x)
+          : (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:as_np_adj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:as_vp_adj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (P : lexicon:Entity -> Prop) => fun (V : lexicon:Entity -> Prop) => fun (x : lexicon:Entity) =>
+            logic:And(V(x), P(x))
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:as_prep_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: role preposition AS over an NP.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as";
+}
+resource lexicon:as_adj_deg : lexicon:LexicalEntry {
+    core:description = "grammatical: equative degree marker AS over an adjective.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as";
+}
+resource lexicon:as_pp_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: role marker AS over a predicative/participial adjective.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as";
+}
+resource lexicon:as_eq_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: equative AS ... AS over an adjective.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_eq_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "as";
+}
+resource lexicon:as_np_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: predicative role AS over an NP.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:as_np_adj_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "as";
+}
+resource lexicon:as_vp_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: VP-adjunct AS over a predicative/participial adjective.";
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_vp_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as";
+}
+
+resource lexicon:through_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition through as noun post-modifier.";
+    lexicon:form     = "through";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "through";
+}
+
+resource lexicon:through_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition through as VP adjunct.";
+    lexicon:form     = "through";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "through";
+}
+
+resource lexicon:across_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition across as noun post-modifier.";
+    lexicon:form     = "across";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "across";
+}
+
+resource lexicon:across_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition across as VP adjunct.";
+    lexicon:form     = "across";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "across";
+}
+
+resource lexicon:against_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition against as VP adjunct.";
+    lexicon:form     = "against";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "against";
+}
+
+resource lexicon:inside_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition inside as noun post-modifier.";
+    lexicon:form     = "inside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "inside";
+}
+
+resource lexicon:inside_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition inside as VP adjunct.";
+    lexicon:form     = "inside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "inside";
+}
+
+resource lexicon:outside_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition outside as noun post-modifier.";
+    lexicon:form     = "outside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "outside";
+}
+
+resource lexicon:outside_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition outside as VP adjunct.";
+    lexicon:form     = "outside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "outside";
+}
+
+resource lexicon:onto_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition onto as noun post-modifier.";
+    lexicon:form     = "onto";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "onto";
+}
+
+resource lexicon:onto_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition onto as VP adjunct.";
+    lexicon:form     = "onto";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "onto";
+}
+
+resource lexicon:behind_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition behind as noun post-modifier.";
+    lexicon:form     = "behind";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "behind";
+}
+
+resource lexicon:behind_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition behind as VP adjunct.";
+    lexicon:form     = "behind";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "behind";
+}
+
+resource lexicon:along_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition along as noun post-modifier.";
+    lexicon:form     = "along";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "along";
+}
+
+resource lexicon:along_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition along as VP adjunct.";
+    lexicon:form     = "along";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "along";
+}
+
+resource lexicon:alongside_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition alongside as noun post-modifier.";
+    lexicon:form     = "alongside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "alongside";
+}
+
+resource lexicon:alongside_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition alongside as VP adjunct.";
+    lexicon:form     = "alongside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "alongside";
+}
+
+resource lexicon:besides_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition besides as noun post-modifier.";
+    lexicon:form     = "besides";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "besides";
+}
+
+resource lexicon:besides_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition besides as VP adjunct.";
+    lexicon:form     = "besides";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "besides";
+}
+
+resource lexicon:around_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition around as noun post-modifier.";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "around";
+}
+
+resource lexicon:around_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition around as VP adjunct.";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "around";
+}
+
+resource lexicon:past_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition past as noun post-modifier.";
+    lexicon:form     = "past";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "past";
+}
+
+resource lexicon:past_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition past as VP adjunct.";
+    lexicon:form     = "past";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "past";
+}
+
+resource lexicon:out_of_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition out of as noun post-modifier.";
+    lexicon:form     = "out of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "out of";
+}
+
+resource lexicon:out_of_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition out of as VP adjunct.";
+    lexicon:form     = "out of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "out of";
+}
+
+resource lexicon:ahead_of_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition ahead of as noun post-modifier.";
+    lexicon:form     = "ahead of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "ahead of";
+}
+
+resource lexicon:ahead_of_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition ahead of as VP adjunct.";
+    lexicon:form     = "ahead of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "ahead of";
+}
+
+resource lexicon:apart_from_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition apart from as noun post-modifier.";
+    lexicon:form     = "apart from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "apart from";
+}
+
+resource lexicon:apart_from_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition apart from as VP adjunct.";
+    lexicon:form     = "apart from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "apart from";
+}
+
+resource lexicon:away_from_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition away from as noun post-modifier.";
+    lexicon:form     = "away from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "away from";
+}
+
+resource lexicon:away_from_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition away from as VP adjunct.";
+    lexicon:form     = "away from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "away from";
+}
+
+resource lexicon:plus_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition plus as noun post-modifier.";
+    lexicon:form     = "plus";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "plus";
+}
+
+resource lexicon:plus_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition plus as VP adjunct.";
+    lexicon:form     = "plus";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "plus";
+}
+
+resource lexicon:under_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition under as noun post-modifier.";
+    lexicon:form     = "under";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "under";
+}
+
+resource lexicon:under_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition under as VP adjunct.";
+    lexicon:form     = "under";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "under";
+}
+
+resource lexicon:over_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over as noun post-modifier.";
+    lexicon:form     = "over";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "over";
+}
+
+resource lexicon:over_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition over as VP adjunct.";
+    lexicon:form     = "over";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "over";
+}
+
+resource lexicon:above_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition above as noun post-modifier.";
+    lexicon:form     = "above";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "above";
+}
+
+resource lexicon:above_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition above as VP adjunct.";
+    lexicon:form     = "above";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "above";
+}
+
+resource lexicon:below_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition below as noun post-modifier.";
+    lexicon:form     = "below";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "below";
+}
+
+resource lexicon:below_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition below as VP adjunct.";
+    lexicon:form     = "below";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "below";
+}
+
+resource lexicon:at_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition at as VP adjunct.";
+    lexicon:form     = "at";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "at";
+}
+
+resource lexicon:upstream_of_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition upstream of as noun post-modifier.";
+    lexicon:form     = "upstream of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "upstream of";
+}
+
+resource lexicon:upstream_of_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition upstream of as VP adjunct.";
+    lexicon:form     = "upstream of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "upstream of";
+}
+
+resource lexicon:downstream_of_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition downstream of as noun post-modifier.";
+    lexicon:form     = "downstream of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "downstream of";
+}
+
+resource lexicon:downstream_of_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition downstream of as VP adjunct.";
+    lexicon:form     = "downstream of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "downstream of";
+}
+
+resource lexicon:by_nmod_fallback : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition BY as a noun post-modifier.";
+    lexicon:form       = "by";
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem        = lexicon:nmod_with_sem;
+    lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense      = "by";
+    lexicon:sense_rank = 4;
+}
+
+// 11. Dimensional post-modifier LONG and unit/count post-modifiers
+resource lexicon:long_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: dimensional post-modifier LONG after a measure phrase.";
+    lexicon:form     = "long";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:eq_clause_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:unit_post_mp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"1")) => q
+          : units:Quantity(u"1") -> units:Quantity(u"1") )
+    );
+}
+resource lexicon:unit_post_adj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"1")) => fun (x : lexicon:Entity) =>
+            ontology:has_quantity(x, u"1", q)
+          : units:Quantity(u"1") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:unit_post_np_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"1")) => ontology:kind_of(lexicon:Entity)
+          : units:Quantity(u"1") -> lexicon:Entity )
+    );
+}
+
+resource lexicon:nucleotides_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nucleotides) forming a measure phrase.";
+    lexicon:form     = "nucleotides";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:nucleotides_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nucleotides) forming a predicative adjective.";
+    lexicon:form     = "nucleotides";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:nucleotides_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nucleotides) forming an NP.";
+    lexicon:form     = "nucleotides";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:stars_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (stars) forming a measure phrase.";
+    lexicon:form     = "stars";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:stars_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (stars) forming a predicative adjective.";
+    lexicon:form     = "stars";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:stars_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (stars) forming an NP.";
+    lexicon:form     = "stars";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:orders_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (orders) forming a measure phrase.";
+    lexicon:form     = "orders";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:orders_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (orders) forming a predicative adjective.";
+    lexicon:form     = "orders";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:orders_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (orders) forming an NP.";
+    lexicon:form     = "orders";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:bp_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (bp) forming a measure phrase.";
+    lexicon:form     = "bp";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:bp_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (bp) forming a predicative adjective.";
+    lexicon:form     = "bp";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:bp_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (bp) forming an NP.";
+    lexicon:form     = "bp";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:kb_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kb) forming a measure phrase.";
+    lexicon:form     = "kb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:kb_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kb) forming a predicative adjective.";
+    lexicon:form     = "kb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:kb_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kb) forming an NP.";
+    lexicon:form     = "kb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:mb_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (mb) forming a measure phrase.";
+    lexicon:form     = "mb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:mb_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (mb) forming a predicative adjective.";
+    lexicon:form     = "mb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:mb_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (mb) forming an NP.";
+    lexicon:form     = "mb";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:nt_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nt) forming a measure phrase.";
+    lexicon:form     = "nt";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:nt_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nt) forming a predicative adjective.";
+    lexicon:form     = "nt";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:nt_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (nt) forming an NP.";
+    lexicon:form     = "nt";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:kda_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kda) forming a measure phrase.";
+    lexicon:form     = "kda";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:kda_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kda) forming a predicative adjective.";
+    lexicon:form     = "kda";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:kda_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (kda) forming an NP.";
+    lexicon:form     = "kda";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:aa_post_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (aa) forming a measure phrase.";
+    lexicon:form     = "aa";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_mp(u"1", lexicon:value), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_mp_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> units:Quantity(u"1") );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:aa_post_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (aa) forming a predicative adjective.";
+    lexicon:form     = "aa";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_adj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "unit:postmod";
+}
+resource lexicon:aa_post_np : lexicon:LexicalEntry {
+    core:description = "grammatical: unit post-modifier (aa) forming an NP.";
+    lexicon:form     = "aa";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_np(lexicon:Entity, lexicon:sg), lexicon:cat_num) );
+    lexicon:sem      = lexicon:unit_post_np_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity );
+    lexicon:sense    = "unit:postmod";
+}
+
+resource lexicon:true_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:true_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:comp_inf_than_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:comp_inf_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop )
+    );
+}
+
+resource lexicon:worse_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative adjective (worse).";
+    lexicon:form     = "worse";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "worse";
+}
+resource lexicon:worse_than : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (worse) taking cat_pp_than.";
+    lexicon:form     = "worse";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
+    lexicon:sem      = lexicon:true_rel_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "worse";
+}
+resource lexicon:worse_inf_than : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (worse) taking to-infinitive and than.";
+    lexicon:form     = "worse";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:comp_inf_than_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "worse";
+}
+resource lexicon:worse_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (worse) taking to-infinitive.";
+    lexicon:form     = "worse";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:comp_inf_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "worse";
+}
+
+resource lexicon:better_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative adjective (better).";
+    lexicon:form     = "better";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "better";
+}
+resource lexicon:better_than : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (better) taking cat_pp_than.";
+    lexicon:form     = "better";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
+    lexicon:sem      = lexicon:true_rel_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "better";
+}
+resource lexicon:better_inf_than : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (better) taking to-infinitive and than.";
+    lexicon:form     = "better";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:comp_inf_than_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "better";
+}
+resource lexicon:better_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: irregular comparative (better) taking to-infinitive.";
+    lexicon:form     = "better";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:comp_inf_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "better";
+}
+
+resource lexicon:than_inf_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => ontology:kind_of(lexicon:Entity)
+          : (lexicon:Entity -> Prop) -> lexicon:Entity )
+    );
+}
+resource lexicon:than_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative complementiser THAN taking a to-infinitive VP.";
+    lexicon:form     = "than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_than, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:than_inf_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity );
+    lexicon:sense    = "than";
+}
+resource lexicon:than_no_marker : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative complementiser THAN NO.";
+    lexicon:form     = "than no";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_than, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "than no";
+}
+resource lexicon:comp_than_num_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"1")) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : units:Quantity(u"1") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:comp_than_mp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (x : lexicon:Entity) => (logic:False -> logic:False)
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+
+resource lexicon:larger_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value (larger than).";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "larger than";
+}
+resource lexicon:larger_than_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: predicated bound on a measured value (larger than).";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "larger than";
+}
+resource lexicon:larger_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in subject position (larger than).";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:gt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "larger than";
+}
+resource lexicon:larger_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in object position (larger than).";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:gt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "larger than";
+}
+resource lexicon:larger_than_pp_num : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (larger than) over a numeral.";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_num) );
+    lexicon:sem      = lexicon:comp_than_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "larger than";
+}
+resource lexicon:larger_than_pp_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (larger than) over a measure phrase.";
+    lexicon:form     = "larger than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:comp_than_mp_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "larger than";
+}
+
+resource lexicon:smaller_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value (smaller than).";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "smaller than";
+}
+resource lexicon:smaller_than_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: predicated bound on a measured value (smaller than).";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "smaller than";
+}
+resource lexicon:smaller_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in subject position (smaller than).";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:gt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "smaller than";
+}
+resource lexicon:smaller_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in object position (smaller than).";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:gt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "smaller than";
+}
+resource lexicon:smaller_than_pp_num : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (smaller than) over a numeral.";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_num) );
+    lexicon:sem      = lexicon:comp_than_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "smaller than";
+}
+resource lexicon:smaller_than_pp_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (smaller than) over a measure phrase.";
+    lexicon:form     = "smaller than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:comp_than_mp_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "smaller than";
+}
+
+resource lexicon:greater_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value (greater than).";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "greater than";
+}
+resource lexicon:greater_than_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: predicated bound on a measured value (greater than).";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "greater than";
+}
+resource lexicon:greater_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in subject position (greater than).";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:gt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "greater than";
+}
+resource lexicon:greater_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count in object position (greater than).";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:gt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "greater than";
+}
+resource lexicon:greater_than_pp_num : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (greater than) over a numeral.";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_num) );
+    lexicon:sem      = lexicon:comp_than_num_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "greater than";
+}
+resource lexicon:greater_than_pp_mp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal comparative bound (greater than) over a measure phrase.";
+    lexicon:form     = "greater than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:comp_than_mp_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "greater than";
+}
+
+resource lexicon:as_was_s_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (p : Prop) => p
+          : (lexicon:Entity -> Prop) -> Prop -> Prop )
+    );
+}
+resource lexicon:as_was_vp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (VP : lexicon:Entity -> Prop) => fun (x : lexicon:Entity) => VP(x)
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:as_was_s : lexicon:LexicalEntry {
+    core:description = "grammatical: parenthetical comparative clause AS WAS + passive participle.";
+    lexicon:form     = "as was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_was_s_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop -> Prop );
+    lexicon:sense    = "as was";
+}
+resource lexicon:as_was_vp_fin : lexicon:LexicalEntry {
+    core:description = "grammatical: VP-adjunct AS WAS + passive participle (finite).";
+    lexicon:form     = "as was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_was_vp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as was";
+}
+resource lexicon:as_was_vp_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: VP-adjunct AS WAS + passive participle (base).";
+    lexicon:form     = "as was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_was_vp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "as was";
+}
+
+// 13. Auxiliary, aspectual, and discourse closed-class entries
+resource lexicon:else_n_mass : lexicon:LexicalEntry {
+    core:description = "grammatical: post-quantifier nominal head ELSE.";
+    lexicon:form     = "else";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Entity, lexicon:mass) );
+    lexicon:sem      = lexicon:Entity;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "else";
+}
+
+resource lexicon:each_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (each).";
+    lexicon:form     = "each";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "each";
+}
+resource lexicon:each_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (each).";
+    lexicon:form     = "each";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "each";
+}
+
+resource lexicon:least_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (least).";
+    lexicon:form     = "least";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "least";
+}
+resource lexicon:least_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (least).";
+    lexicon:form     = "least";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "least";
+}
+
+resource lexicon:at_all_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (at all).";
+    lexicon:form     = "at all";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "at all";
+}
+resource lexicon:at_all_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (at all).";
+    lexicon:form     = "at all";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "at all";
+}
+
+resource lexicon:by_itself_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (by itself).";
+    lexicon:form     = "by itself";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by itself";
+}
+resource lexicon:by_itself_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (by itself).";
+    lexicon:form     = "by itself";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by itself";
+}
+
+resource lexicon:here_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (here).";
+    lexicon:form     = "here";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:here_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (here).";
+    lexicon:form     = "here";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:away_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (away).";
+    lexicon:form     = "away";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:away_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (away).";
+    lexicon:form     = "away";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:apart_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (apart).";
+    lexicon:form     = "apart";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:apart_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (apart).";
+    lexicon:form     = "apart";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:together_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (together).";
+    lexicon:form     = "together";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:together_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (together).";
+    lexicon:form     = "together";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:far_adv_fwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class pre-verbal/adjectival modifier (far).";
+    lexicon:form     = "far";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n))))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:far_adv_bwd : lexicon:LexicalEntry {
+    core:description = "grammatical: closed-class post-verbal modifier (far).";
+    lexicon:form     = "far";
+    lexicon:cat      = type_expr( lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, n)))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:at_all_post_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal modifier (at all).";
+    lexicon:form     = "at all";
+    lexicon:cat      = type_expr( lexicon:cat_pp );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "at all";
+}
+
+resource lexicon:by_itself_post_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal modifier (by itself).";
+    lexicon:form     = "by itself";
+    lexicon:cat      = type_expr( lexicon:cat_pp );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "by itself";
+}
+
+resource lexicon:here_post_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal modifier (here).";
+    lexicon:form     = "here";
+    lexicon:cat      = type_expr( lexicon:cat_pp );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "supp:open";
+}
+
+resource lexicon:at_risk_post_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: post-nominal modifier (at risk).";
+    lexicon:form     = "at risk";
+    lexicon:cat      = type_expr( lexicon:cat_pp );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "at risk";
+}
+
+resource lexicon:at_risk_pred_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: predicative prepositional idiom AT RISK.";
+    lexicon:form     = "at risk";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:true_pred_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "at risk";
+}
+resource lexicon:be_prog : lexicon:LexicalEntry {
+    core:description = "grammatical: base progressive auxiliary BE.";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:scope_bearing = true;
+}
+resource lexicon:being_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: participial copula BEING over an adjective.";
+    lexicon:form     = "being";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:being_pp : lexicon:LexicalEntry {
+    core:description = "grammatical: reduced-relative participial copula BEING over an adjective.";
+    lexicon:form     = "being";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:has_inf_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: semi-modal HAS (+ to-infinitive).";
+    lexicon:form     = "has";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:have_inf_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: semi-modal HAVE (+ to-infinitive, finite).";
+    lexicon:form     = "have";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:have_bse_inf_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: semi-modal HAVE (+ to-infinitive, base).";
+    lexicon:form     = "have";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:had_inf_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: semi-modal HAD (+ to-infinitive).";
+    lexicon:form     = "had";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:back_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: particle BACK taking a gerund VP.";
+    lexicon:form     = "back";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_vp_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "supp:open";
+}
+resource lexicon:most_vp_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-verbal degree adverb MOST over a base VP.";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "most";
+}
+resource lexicon:most_tv_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => TV
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:most_tv_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: pre-verbal degree adverb MOST over a base TV.";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "most";
+}
+resource lexicon:but_adj_coord : lexicon:LexicalEntry {
+    core:description = "grammatical: adversative coordinator BUT between adjectival predicates.";
+    lexicon:form     = "but";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_vp_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "but";
+}
+resource lexicon:but_pass_adj_coord : lexicon:LexicalEntry {
+    core:description = "grammatical: adversative coordinator BUT between passive and adjectival predicates.";
+    lexicon:form     = "but";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_vp_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "but";
+}
+resource lexicon:since_post_s_fin : lexicon:LexicalEntry {
+    core:description = "grammatical: post-clausal adverbial SINCE.";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "since";
+}
+resource lexicon:since_post_s_fin_any : lexicon:LexicalEntry {
+    core:description = "grammatical: post-clausal adverbial SINCE (fin_any).";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_s(lexicon:dcl, lexicon:fin_any)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "since";
+}
+resource lexicon:since_post_vp_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: post-participial adverbial SINCE (pss).";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "since";
+}
+resource lexicon:since_post_vp_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: post-participial adverbial SINCE (pass).";
+    lexicon:form     = "since";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "since";
+}
+resource lexicon:semicolon_vp_coord : lexicon:LexicalEntry {
+    core:description = "grammatical: semicolon coordinating finite VPs.";
+    lexicon:form     = ";";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:as_vp_adj_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = ";";
+}
+
+resource lexicon:does_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a transitive verb (does).";
+    lexicon:form     = "does";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}
+resource lexicon:does_cv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a clausal-complement verb (does).";
+    lexicon:form     = "does";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp)) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (Prop -> lexicon:Entity -> Prop) -> (Prop -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}
+
+resource lexicon:do_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a transitive verb (do).";
+    lexicon:form     = "do";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}
+resource lexicon:do_cv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a clausal-complement verb (do).";
+    lexicon:form     = "do";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp)) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (Prop -> lexicon:Entity -> Prop) -> (Prop -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}
+
+resource lexicon:did_tv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a transitive verb (did).";
+    lexicon:form     = "did";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}
+resource lexicon:did_cv : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary over a clausal-complement verb (did).";
+    lexicon:form     = "did";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_cp)) );
+    lexicon:sem      = lexicon:most_tv_sem;
+    lexicon:sem_type = type_expr( (Prop -> lexicon:Entity -> Prop) -> (Prop -> lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+}

@@ -1863,16 +1863,18 @@ fn but_not_contrastive_object_ellipsis() {
 
 #[test]
 fn but_not_cross_type_objects_is_a_known_gap() {
-    // D62 §2 #8 limitation: two determined objects of DIFFERENT base types
-    // (`a gene but not a cell line`) don't coordinate — the object-raise (`a_obj`) bakes the noun
-    // type into the GQ category, so the two GQs aren't the same category. Widening the shared verb
-    // slot to the common supertype is a follow-on. (The WRN case has the SAME base type — `… activity`
-    // — so it is covered; see `but_not_contrastive_object_ellipsis`.)
+    // D62 §2 #8: two determined objects of DIFFERENT base types (`a gene but not a cell line`)
+    // coordinate via `coordinate_but_not_prop`, widening the shared verb slot to `common_cat`.
     let (_layer, index) = index_over_bootstrap();
     let (closed, open) = index.parse_open("HeLa affects a gene but not a cell line", &Identity);
     assert!(
-        closed.is_empty() && open.is_empty(),
-        "cross-type `but not` objects not yet coordinated (update when slot-widening lands)"
+        !closed.is_empty() && open.is_empty(),
+        "cross-type `but not` objects coordinate via `common_cat`"
+    );
+    let csem = pretty_term(closed[0].sem());
+    assert!(
+        csem.contains("And(") && csem.contains("False"),
+        "expected contrastive conjunction over cross-type objects: {csem}"
     );
 }
 

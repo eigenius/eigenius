@@ -58,7 +58,11 @@ pub(super) fn hole_base(i: usize, j: usize) -> String {
 /// bare demonstratives — denotes the hole itself. Checked before [`freshen_anaphor`] runs, since
 /// after it the placeholder is an ordinary `Exp::Var` indistinguishable from any other.
 pub(super) fn is_bare_pronoun_sem(exp: &Exp) -> bool {
-    matches!(exp, Exp::EigonAxiom(a) if a.as_str() == ANAPHOR_IRI)
+    matches!(
+        exp,
+        Exp::EigonAxiom(a)
+            if a.as_str() == ANAPHOR_IRI || a.as_str() == "urn:eigenius:lexicon:speaker"
+    )
 }
 
 pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {

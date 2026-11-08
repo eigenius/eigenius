@@ -447,7 +447,7 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 126, "{readings:?}");
+    assert_eq!(readings.len(), 165, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }
 
@@ -687,7 +687,7 @@ fn every_measure_consumer_takes_a_constraint() {
             backward += 1;
         }
     }
-    assert_eq!((forward, backward), (82, 35));
+    assert_eq!((forward, backward), (109, 36));
 }
 
 /// Slice 6a: a bound verbalizes as its words where the quantity would have rendered — after a

@@ -87,7 +87,7 @@ fn closed_class_surfaces_stay_known() {
     // category. It came out of a measured paradigm hole, not a copied entry: all four committed
     // short-passive entries were finite, so «The gene has been reported.» and «The gene may be
     // affected.» had no parse for any verb.
-    const KNOWN_GAPS: &[&str] = &["any", "nor"];
+    const KNOWN_GAPS: &[&str] = &["nor"];
     assert_eq!(
         unknown, KNOWN_GAPS,
         "the set of closed-class surfaces with no reading changed; withheld from every importer and \

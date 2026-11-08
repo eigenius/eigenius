@@ -17,7 +17,45 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-11-05-core-en-89`** (reseeded `2026-11-05` via
+> **Store: `wordnet-umls-hpo-aligned-2026-11-07-systematic`** (reseeded `2026-11-08` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Replaced all word-specific `if matches!(s_lc, ...)` and `if s_lc == ...` blocks in
+> `kernel/src/dcg/parse/seed.rs` and `kernel/src/dcg/parse/mod.rs` with systematic mechanisms across
+> four layers:
+> (1) **Category-driven parser rules (`combinators.rs`, `constructions.rs`, `seed.rs`, `category.rs`)**:
+> `copula_cp` (`is`/`are`/`was`/`were`/`be [not]` + `cat_cp`), `gq_obj_vp_comp` (GQ object of a
+> 3-place object-predicative / object-control verb), `distribute_vpadjunct_object` (distributive
+> `cat_group` object of a 3-place VP-adjunct preposition in `apply_group`), `is_vp_adjunct_prep`
+> tightened to require `bwd(VP, VP)` rather than any `bwd`, `coordinate_np` allowing `conn_and`
+> groups to extend with `conn_or` (`X and Y or Z`) and allowing bare common-noun kinds (`kind_of`)
+> to coordinate across simple and Σ-refined members, `gerund_subject` blocking coordinated VPs,
+> and category-keyed lifts in `seed.rs` for prepositions (`cat_pp`/`cat_pp_arg`/VP-adjunct),
+> clausal subordinators, auxiliaries (`do`/`be`/`have`), modals, `not`, `only`, and `worth`-family
+> gerund-complement adjectives (`(S[dcl,adj]\NP)/(S[dcl,ger]\NP)` → `/NP`).
+> (2) **Productive morphology, compounding, spelling normalization, and per-POS sense-cap preservation
+> (`parse/mod.rs`, `seed.rs`)**: British-to-American `-ise`/`-ize`, `-isation`/`-ization`, `-our`/
+> `-or`, `-re`/`-er`, `-ogue`/`-og`, `haem-`/`hem-`, and doubled-`l` (`-lled`/`-lling`) normalization
+> in `candidate_lemmas`; productive prefix (`re-`, `under-`, `over-`, `self-`, `co-`, `out-`, `cross-`,
+> `pre-`, `de-`, `sub-`, `non-`, `un-`, `mis-`, `in-`, `bi-`, `tri-`, `homo-`, `multi-`, `inter-`,
+> `intra-`, `trans-`, `post-`, `anti-`, `para-`, `per-`) and suffix (`-mer`/`-mers`, `-logue`/`-logues`,
+> `-able`/`-ible`, `-ous`, `-ed`/`-ing`, `-ation`/`-isation`/`-ization`/`-ity`/`-age`) morphology;
+> per-POS sense-cap preservation so top-ranked noun/verb senses do not crowd out lexical adjective
+> (`a`/`s`), comparative adjective (`-er`), adverb (`r`), or inflected verb (`v`) senses.
+> (3) **Declarative closed-class & unit lexicon (`ontologies/lexicon/closed-class.esl`)**: migrated all
+> closed-class determiners, pronouns, reflexives, possessives, prepositions, subordinators,
+> complementizers, discourse adverbs, comparatives/superlatives, bioinformatics post-numeral unit
+> heads (`bp`, `kb`, `mb`, `nt`, `kda`, `aa`, `nucleotides`, `stars`, `orders`), and closed-class
+> polysemy supplements into declarative `lexicon:LexicalEntry` resources.
+> (4) **Open-class WordNet verb frame importer (`crates/eigenius-wordnet/src/convert.rs`)**: added
+> systematic emission of object-predicative (`((S\NP)/(S\NP))/NP` and passive `((S[pss]\NP)/NP)/Adj`),
+> linking/inchoative copular (`(S\NP)/(S[adj]\NP)` and `(S\NP)/NP` for frames 6/7), bare-infinitive
+> (`((S\NP)/(S[bse]\NP))/NP` for frame 25), and intransitive/unaccusative verb frames from WordNet
+> `frames.vrb`.
+> **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
+> families!)**, page grammar-gap **0** (**1,056 / 1,056 units parsed = 100.0%, `COVERAGE: PASS`!**),
+> encoded **19**, ambiguous **783**, open **254**, readings **101,509**, skeletons **46,763**.
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-11-05-core-en-89` (reseeded `2026-11-05` via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
 > 864). Batch 1 (reseeded): gerund VP subjects (`gerund_subject` unary shift in `constructions.rs` +
 > `UNARY_SHIFTS`), `there`-existentials (`there_sem`, `there_expl`), `to`-infinitive subject control

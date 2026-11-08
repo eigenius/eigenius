@@ -590,10 +590,13 @@ pub fn coordinate_np(
     let (rt, r_member, cat_decl, num_decl) = np_conjunct(r_cat, r_sem)?;
     let (lt, members): (Exp, Vec<Exp>) = match l_cat {
         // A neutral `conn_list` left group takes ANY op (the trailing `and`/`or` rebinds it); a
-        // finalized left group must share the op's connective (no `X and Y or Z` mixing).
+        // finalized `conn_and` group may also be extended by `conn_or` (`X and Y or Z`).
         c if is_ctor(c, "cat_group").is_some() => {
             let left_conn = group_conn_name(c)?;
-            if left_conn != "conn_list" && left_conn != conn_name {
+            if left_conn != "conn_list"
+                && left_conn != conn_name
+                && !(left_conn == "conn_and" && conn_name == "conn_or")
+            {
                 return None;
             }
             (is_ctor(c, "cat_group")?[0].clone(), group_members(l_sem)?)
@@ -646,6 +649,13 @@ pub fn coordinate_np(
     // type-level test cannot see it (measured — a `matches!(lt, Exp::Sig(..))` version never fired).
     // Consulting the sem is sanctioned for this rule: `Coordinate` is one of the two that declare
     // `reads_sem`, so its firing decision is already sem-dependent and packing carries the bit.
+    fn is_kind_member(m: &Exp) -> bool {
+        matches!(
+            m,
+            Exp::App(f, _)
+                if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
+        )
+    }
     fn refined_member(m: &Exp) -> bool {
         // `kind_of(Σ…)` — a kind realised from a REFINED common noun.
         match m {
@@ -656,7 +666,9 @@ pub fn coordinate_np(
             _ => false,
         }
     }
-    if members.iter().any(refined_member) != refined_member(&r_member) {
+    if !(members.iter().all(is_kind_member) && is_kind_member(&r_member))
+        && members.iter().any(refined_member) != refined_member(&r_member)
+    {
         return None;
     }
     let c = common_super(&lt, &rt, layer)?;
@@ -1122,6 +1134,41 @@ pub fn distribute_object(
         fold_conn(&op, members.into_iter().map(mk).collect())?
     };
     Some(Exp::Lam(Patt::Var("DIST#subj".into()), Box::new(body)))
+}
+
+/// The **distributive VP-adjunct object** reading: a VP-adjunct preposition
+/// `P : obj → (subj → Prop) → subj → Prop` applied to a group object yields a
+/// VP-adjunct `λV. λs. P(m₀)(V)(s) ⊕ P(m₁)(V)(s) ⊕ …`.
+pub fn distribute_vpadjunct_object(
+    group_cat: &Exp,
+    group_sem: &Exp,
+    prep_sem: &Exp,
+    layer: &Arc<Layer>,
+    rctx: super::RightContext,
+) -> Option<Exp> {
+    let members = group_members(group_sem)?;
+    let v = Exp::Var("DIST#V".into());
+    let s = Exp::Var("DIST#subj".into());
+    let mk = |m: Exp| {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::App(Box::new(prep_sem.clone()), Box::new(m))),
+                Box::new(v.clone()),
+            )),
+            Box::new(s.clone()),
+        )
+    };
+    let body = if group_conn_name(group_cat) == Some("conn_but_not") {
+        let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
+        fold_conn(&and, but_not_preds(members, mk, layer)?)?
+    } else {
+        let op = inductive_iri(layer, group_conn_op(group_cat, rctx)?)?;
+        fold_conn(&op, members.into_iter().map(mk).collect())?
+    };
+    Some(Exp::Lam(
+        Patt::Var("DIST#V".into()),
+        Box::new(Exp::Lam(Patt::Var("DIST#subj".into()), Box::new(body))),
+    ))
 }
 
 /// The **reciprocal** reading "[group] V each other" (D63 §8.4 Phase 6): the
@@ -1592,6 +1639,9 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// or enter the `gq_prep_*` rules, and the inner subject slot is fixed at `sg` so singular agreement
 /// holds (`Reporting genes is essential` parses; `*Reporting genes are essential` is refused).
 pub fn gerund_subject(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    if sem_is_coordination(sem) {
+        return None;
+    }
     let Exp::InductiveCtor(cat_decl, _, _) = cat else {
         return None;
     };

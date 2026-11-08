@@ -36,7 +36,9 @@ use super::super::category::{
 };
 use super::super::item::{CategoryPayload, Combinator, Cost, Item, COMPOUND_STEP_PENALTY};
 use super::super::pretty::pretty_term;
-use super::super::rules::constructions::{distribute, distribute_object};
+use super::super::rules::constructions::{
+    distribute, distribute_object, distribute_vpadjunct_object,
+};
 
 /// Combine two adjacent constituents (the CKY step). Combinability is decided **sem-blind** by
 /// [`combinable`] (it receives only [`CategoryPayload`]s — the compile-time form of the packed-forest
@@ -2606,6 +2608,16 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 guards: &[],
                 build: gq_prep_passive_agent,
             },
+            // GQ-as-object of a 3-place object-predicative / object-control verb
+            // (`make [a missense] [worse than a null]`, `leave [a variant] [unresolved]`):
+            // `[((S\NP)/(S\NP))/NP] [raised-GQ]` → `(S\NP)/(S\NP)`.
+            CatRule {
+                name: "gq_obj_vp_comp",
+                left_pat: fwd_pat(fwd_pat(vp_pat(), vp_pat()), any_np_pat()),
+                right_pat: raised_gq_pat(),
+                guards: &[],
+                build: gq_prep_passive_agent,
+            },
             // Gerund-VP-as-prep-object, PpMod: `[cat_pp/NP] [S[dcl,ger]\NP]` → `cat_pp` ("method for
             // querying the database").
             CatRule {
@@ -2709,6 +2721,24 @@ fn other_grammar_rules() -> &'static [CatRule] {
                     Guard::NotParticipialPp(Operand::Right),
                 ],
                 build: build_copula_pp,
+            },
+            // Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + complement clause `cat_cp`
+            // (`The reason is that ...`, `The question is whether ...`).
+            CatRule {
+                name: "copula_cp",
+                left_pat: fwd_pat(
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Var("cop_fin")]),
+                        Ctor("cat_np", vec![Var("cop_ty"), Var("cop_num")]),
+                    ),
+                    bwd_pat(
+                        Ctor("cat_s", vec![Ctor("dcl", vec![]), Ctor("adj", vec![])]),
+                        any_np_pat(),
+                    ),
+                ),
+                right_pat: Ctor("cat_cp", vec![]),
+                guards: &[Guard::FinIsFinOrBse("cop_fin")],
+                build: build_copula_cp,
             },
             // Predicative adjective + prepositional phrase (`reachable by a single nucleotide`,
             // `absent in X`): `[S[dcl,adj]\NP] [cat_pp]` → `S[dcl,adj]\NP`.
@@ -3305,6 +3335,17 @@ fn build_copula_pp(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<La
     Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
 }
 
+/// Copula (`is`/`are`/`was`/`were`/`be`, or `is not`) + complement clause `cat_cp`:
+/// lift the `Prop` complement clause into a constant predicate `λ_x. P` and apply the copula functor.
+fn build_copula_cp(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let pred = Exp::Lam(
+        Patt::Var("__cp_pred_x".into()),
+        Box::new(right.sem().clone()),
+    );
+    let sem = Exp::App(Box::new(left.sem().clone()), Box::new(pred));
+    Item::from_parts(gq_pp_res(left), sem, Combinator::ForwardApp, Cost::ZERO)
+}
+
 /// Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
 /// `λx. And(right(x), compound_kind(x, left))` with output category `S[dcl,pred]\NP`.
 fn build_noun_adj_pred(
@@ -3537,14 +3578,18 @@ fn apply_group(
             }
         }
     }
-    // Distributive OBJECT (D63 §8.4 Phase 6): a transitive verb seeking a `cat_group` object.
+    // Distributive OBJECT (D63 §8.4 Phase 6): a transitive verb or preposition seeking a `cat_group` object.
     if let (Some((_m, result, slot)), Some([c, ..])) = (
         slash_parts(left.cat(), "fwd"),
         is_ctor(right.cat(), "cat_group"),
     ) {
         if group_member_fits(slot, c, layer) {
-            if let Some(sem) = distribute_object(right.cat(), right.sem(), left.sem(), layer, rctx)
-            {
+            let sem_opt = if super::super::category::is_vp_adjunct_prep(left.cat()) {
+                distribute_vpadjunct_object(right.cat(), right.sem(), left.sem(), layer, rctx)
+            } else {
+                distribute_object(right.cat(), right.sem(), left.sem(), layer, rctx)
+            };
+            if let Some(sem) = sem_opt {
                 return Some(Item::from_parts(
                     result.clone(),
                     sem,

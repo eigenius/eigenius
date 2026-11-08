@@ -688,6 +688,21 @@ const ESSIVE_VERBS: &[&str] = &[
     "evaluate",
     "assess",
     "deem",
+    "consider",
+    "rate",
+    "rank",
+    "score",
+    "predict",
+    "call",
+    "make",
+    "leave",
+    "keep",
+    "get",
+    "render",
+    "show",
+    "deposit",
+    "sweep",
+    "read",
     // --- Group 7: High-Frequency / High-Risk (Apply low verb-prior weights) ---
     //   "see",   // Danger: Hyper-frequent. Must not override standard transitive "see [NP]".
     //   "use",   // Danger: Hyper-frequent noun/verb.
@@ -699,6 +714,45 @@ const ESSIVE_VERBS: &[&str] = &[
 fn is_essive_verb(lemma: &str) -> bool {
     let l = lemma.to_ascii_lowercase();
     ESSIVE_VERBS.contains(&l.as_str())
+}
+
+/// Verbs whose unaccusative / middle / intransitive alternation (`resolves`, `matches`,
+/// `compensates`, `clusters`, `tallies`, `applies`, `matters`, `differs`, `holds`, `counts`,
+/// `fails`, `works`, `reads`, `associates`, `bears`, `expresses`, `cancels`) is not consistently
+/// recorded across all relevant WordNet synsets.
+const UNACCUSATIVE_VERBS: &[&str] = &[
+    "express",
+    "resolve",
+    "match",
+    "compensate",
+    "cancel",
+    "cluster",
+    "tally",
+    "apply",
+    "matter",
+    "differ",
+    "hold",
+    "count",
+    "fail",
+    "work",
+    "read",
+    "associate",
+    "bear",
+];
+
+fn is_unaccusative_verb(lemma: &str) -> bool {
+    let l = lemma.to_ascii_lowercase();
+    UNACCUSATIVE_VERBS.contains(&l.as_str())
+}
+
+/// Causative / control verbs (`let`) whose bare-infinitive control frame (`let X V`) is deferred
+/// in WordNet frame 24/25; emitting `FrameKind::SubjectControl` gives the parser a category-keyed
+/// control trigger on the verb entry.
+const CONTROL_VERBS: &[&str] = &["let"];
+
+fn is_control_verb(lemma: &str) -> bool {
+    let l = lemma.to_ascii_lowercase();
+    CONTROL_VERBS.contains(&l.as_str())
 }
 
 /// A WordNet sentence frame that NAMES a governed preposition → that preposition, for the STATIVE
@@ -845,6 +899,12 @@ fn push_verb(
             let mut own: BTreeSet<FrameKind> =
                 syn.frames_of(i).into_iter().filter_map(classify).collect();
             own.extend(curated.iter().copied());
+            if is_unaccusative_verb(lemma) {
+                own.insert(FrameKind::Intransitive);
+            }
+            if is_control_verb(lemma) {
+                own.insert(FrameKind::SubjectControl);
+            }
             if placed.iter().any(|c| matches!(c, VerbComplement::Pp(_))) {
                 rep.any_pp_replaced += usize::from(own.remove(&FrameKind::PpOblique(None)));
             }

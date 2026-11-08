@@ -1244,7 +1244,10 @@ fn is_subject_gq(cat: &Exp) -> bool {
 /// whose sem (`λx.λV.λs. And(V(s), prep(s,x))`) threads the fronted antecedent into the VP.
 pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
     matches!(slash_parts(cat, "fwd"),
-        Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
+        Some((_m, res, np))
+            if slash_parts(res, "bwd")
+                .is_some_and(|(_, r, a)| is_ctor(r, "bwd").is_some() && is_ctor(a, "bwd").is_some())
+                && is_ctor(np, "cat_np").is_some())
 }
 
 /// The prepositions a `lexicon:Prep` value names, as (surface, constructor). An importer that finds a
