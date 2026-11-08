@@ -66,16 +66,12 @@ fn has_initial_imperative_verb(tokens: &[Token], leaves: &super::super::chart::C
     if n == 0 || tokens[0].surface() == "Do" {
         return false;
     }
-    for imp_idx in 0..n.min(2) {
-        if imp_idx == 1
-            && !super::seed::is_lexicalized_adverb(&tokens[0].surface().to_lowercase())
+    for (imp_idx, row) in leaves.iter().enumerate().take(n.min(2)) {
+        if imp_idx == 1 && !super::seed::is_lexicalized_adverb(&tokens[0].surface().to_lowercase())
         {
             break;
         }
-        if leaves[imp_idx][imp_idx]
-            .iter()
-            .any(|it| is_bse_verb_cat(it.cat()))
-        {
+        if row[imp_idx].iter().any(|it| is_bse_verb_cat(it.cat())) {
             return true;
         }
     }
@@ -113,10 +109,7 @@ fn saturate_imperative_vp(it: &Item) -> Option<Item> {
     let spk = Iri::parse("urn:eigenius:lexicon:speaker").ok()?;
     let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
     let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![mood.clone(), fin]);
-    let sem = Exp::App(
-        Box::new(it.sem().clone()),
-        Box::new(Exp::EigonAxiom(spk)),
-    );
+    let sem = Exp::App(Box::new(it.sem().clone()), Box::new(Exp::EigonAxiom(spk)));
     let mut sat = Item::from_parts(s_fin, sem, it.prov(), it.cost());
     sat.derivation = it.derivation.clone();
     Some(sat)

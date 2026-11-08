@@ -999,11 +999,7 @@ pub(crate) fn common_cat(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
             return None;
         };
         let t = common_super(&ax[0], &ay[0], layer)?;
-        return Some(Exp::InductiveCtor(
-            dx.clone(),
-            nx.clone(),
-            vec![t, num],
-        ));
+        return Some(Exp::InductiveCtor(dx.clone(), nx.clone(), vec![t, num]));
     }
     // Structural (`fwd`/`bwd`/`cat_s`/…): ctor + arity already match; recurse on corresponding args.
     let mut args = Vec::with_capacity(ax.len());

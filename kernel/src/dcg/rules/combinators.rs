@@ -2536,10 +2536,7 @@ fn ger_vp_pat() -> CatPat {
     bwd_pat(
         CatPat::Ctor(
             "cat_s",
-            vec![
-                CatPat::Ctor("dcl", vec![]),
-                CatPat::Ctor("ger", vec![]),
-            ],
+            vec![CatPat::Ctor("dcl", vec![]), CatPat::Ctor("ger", vec![])],
         ),
         CatPat::Ctor("cat_np", vec![CatPat::Var("ger_subj_ty"), wild()]),
     )
@@ -3144,12 +3141,7 @@ fn ger_prep_apply(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Laye
 
 /// Means/manner `by` + gerund VP (`by querying X`, `by tallying Y`) → finite VP adjunct
 /// `(S[dcl,fin]\NP)\(S[dcl,fin]\NP)` with sem `λV. λs. And(V(s), prep_by(s, kind_of(Σx. right(x))))`.
-fn ger_prep_by_vpadjunct(
-    binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn ger_prep_by_vpadjunct(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let subj_ty = binds
         .get("ger_subj_ty")
         .expect("ger_vp_pat binds ger_subj_ty")
@@ -3241,25 +3233,14 @@ fn as_pred_vp_cat(cat: &Exp) -> Exp {
 /// `λx. logic:And(left(x), right(x))`. Tagged [`Combinator::BackwardApp`] so a passive participle
 /// modified by a `to`-infinitive is no longer blocked by
 /// [`ProvGuard::RightNotShortPassiveParticipial`] when `is_passive_by`/`was_passive_by` applies.
-fn build_pred_infinitive(
-    _binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn build_pred_infinitive(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
         .unwrap_or_else(|| {
             crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
         });
     let x = "__pred_inf_x";
-    let l_app = Exp::App(
-        Box::new(left.sem().clone()),
-        Box::new(Exp::Var(x.into())),
-    );
-    let r_app = Exp::App(
-        Box::new(right.sem().clone()),
-        Box::new(Exp::Var(x.into())),
-    );
+    let l_app = Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(x.into())));
+    let r_app = Exp::App(Box::new(right.sem().clone()), Box::new(Exp::Var(x.into())));
     let body = Exp::const_applied(and, Vec::new(), vec![l_app, r_app]);
     let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
     Item::from_parts(
@@ -3272,12 +3253,7 @@ fn build_pred_infinitive(
 
 /// Classifier + cardinal numeral designator (`Codon 380`, `chromosome X position 123,900,532`,
 /// `table 1`): `cat_np(base_class(sortal), sg)` with `ontology:the_count(sortal, q)`.
-fn build_name_numeral(
-    binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    _layer: &Arc<Layer>,
-) -> Item {
+fn build_name_numeral(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sortal = binds
         .get("sortal")
         .expect("name_numeral trigger binds sortal")
@@ -3348,21 +3324,13 @@ fn build_copula_cp(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<La
 
 /// Noun-modified predicative adjective (`is nonsense-mediated-decay competent`):
 /// `λx. And(right(x), compound_kind(x, left))` with output category `S[dcl,pred]\NP`.
-fn build_noun_adj_pred(
-    _binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn build_noun_adj_pred(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
         .unwrap_or_else(|| {
             crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
         });
     let x = "__n_adj_x";
-    let r_app = Exp::App(
-        Box::new(right.sem().clone()),
-        Box::new(Exp::Var(x.into())),
-    );
+    let r_app = Exp::App(Box::new(right.sem().clone()), Box::new(Exp::Var(x.into())));
     let l_app = app2("urn:eigenius:ontology:compound_kind", x, left.sem().clone());
     let body = Exp::const_applied(and, Vec::new(), vec![r_app, l_app]);
     let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
@@ -3376,12 +3344,7 @@ fn build_noun_adj_pred(
 
 /// Secondary predicative adjective on an unsaturated transitive gerund (`worth having ready`):
 /// `λobj. λsubj. And(left(obj, subj), right(obj))`.
-fn build_ger_tv_adj(
-    _binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn build_ger_tv_adj(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
         .unwrap_or_else(|| {
             crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
@@ -3416,10 +3379,7 @@ fn build_vp_functor_bwd_adv(
     _layer: &Arc<Layer>,
 ) -> Item {
     let z = "__vf_adv_z";
-    let l_z = Exp::App(
-        Box::new(left.sem().clone()),
-        Box::new(Exp::Var(z.into())),
-    );
+    let l_z = Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(z.into())));
     let body = Exp::App(Box::new(right.sem().clone()), Box::new(l_z));
     let sem = Exp::Lam(Patt::Var(z.into()), Box::new(body));
     Item::from_parts(left.cat().clone(), sem, Combinator::BackwardApp, Cost::ZERO)
@@ -3461,21 +3421,13 @@ fn build_tv_num_obj(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<La
 
 /// Predicative adjective + complement clause `cat_cp` (`is explicit that S`):
 /// `λx. And(left(x), right)` with output category `S[dcl,pred]\NP`.
-fn build_adj_cp_comp(
-    _binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn build_adj_cp_comp(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
         .unwrap_or_else(|| {
             crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
         });
     let x = "__adj_cp_x";
-    let l_app = Exp::App(
-        Box::new(left.sem().clone()),
-        Box::new(Exp::Var(x.into())),
-    );
+    let l_app = Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(x.into())));
     let body = Exp::const_applied(and, Vec::new(), vec![l_app, right.sem().clone()]);
     let sem = Exp::Lam(Patt::Var(x.into()), Box::new(body));
     Item::from_parts(
@@ -3488,12 +3440,7 @@ fn build_adj_cp_comp(
 
 /// Transitive verb + complement clause `cat_cp` (`caution that S`, `warn that S`):
 /// `λs. And(left(s, s), right)`.
-fn build_tv_cp_comp(
-    _binds: &CatSubst,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
+fn build_tv_cp_comp(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
         .unwrap_or_else(|| {
             crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")

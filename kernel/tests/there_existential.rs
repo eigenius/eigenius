@@ -129,4 +129,3 @@ fn there_existential_enforces_number_and_copula_constraints() {
         "expletive 'there' must refuse non-copular transitive verb in 'There affects a gene.'"
     );
 }
-

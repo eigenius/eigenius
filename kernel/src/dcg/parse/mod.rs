@@ -638,12 +638,14 @@ impl Parser {
         }
         if let Some(amer) = british_to_american(&trimmed.to_lowercase()) {
             let amer_resolves = !self.lex.entries_for(&amer).is_empty()
-                || [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv].iter().any(|&pos| {
-                    lemmatizer
-                        .lemmas(&amer, pos)
-                        .into_iter()
-                        .any(|l| !self.lex.entries_for(&l.trim().to_lowercase()).is_empty())
-                });
+                || [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv]
+                    .iter()
+                    .any(|&pos| {
+                        lemmatizer
+                            .lemmas(&amer, pos)
+                            .into_iter()
+                            .any(|l| !self.lex.entries_for(&l.trim().to_lowercase()).is_empty())
+                    });
             if amer_resolves {
                 candidates.insert(amer.clone());
                 for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {

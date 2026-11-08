@@ -170,9 +170,7 @@ fn subject_control_wants_to_report_genes_parses() {
     );
     assert!(
         got.iter().any(|s| {
-            s.contains("wants(")
-                && s.contains("report(kind_of(Gene)")
-                && s.contains("the(Study)")
+            s.contains("wants(") && s.contains("report(kind_of(Gene)") && s.contains("the(Study)")
         }),
         "expected wants(λx. report(kind_of(Gene), x), the(Study)); got: {got:#?}"
     );
@@ -186,9 +184,8 @@ fn ecm_showed_the_gene_to_be_essential_parses() {
         "expected a closed parse for 'The study showed the gene to be essential.'; got none"
     );
     assert!(
-        got.iter().any(|s| {
-            s.contains("showed(essential(the(Gene)), the(Study))")
-        }),
+        got.iter()
+            .any(|s| { s.contains("showed(essential(the(Gene)), the(Study))") }),
         "expected showed(essential(the(Gene)), the(Study)); got: {got:#?}"
     );
 }
@@ -239,5 +236,3 @@ fn short_passive_modified_by_adverb_and_rather_than_parses() {
         "expected 'was queried directly rather than assumed' to parse as contrastive passive VP coordination; got: {got:#?}"
     );
 }
-
-

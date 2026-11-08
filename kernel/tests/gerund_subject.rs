@@ -102,7 +102,9 @@ fn gerund_subject_with_singular_copula_parses() {
     assert!(
         !closed.is_empty(),
         "expected a closed parse for 'Reporting genes is essential.'; open={:?}",
-        open.iter().map(|o| pretty_term(o.item.sem())).collect::<Vec<_>>()
+        open.iter()
+            .map(|o| pretty_term(o.item.sem()))
+            .collect::<Vec<_>>()
     );
     assert!(
         closed
@@ -123,7 +125,10 @@ fn gerund_subject_with_modal_vp_parses() {
     );
     assert!(
         closed.iter().any(|s| {
-            s.contains("Should") && s.contains("restore") && s.contains("kind_of") && s.contains("report")
+            s.contains("Should")
+                && s.contains("restore")
+                && s.contains("kind_of")
+                && s.contains("report")
         }),
         "expected modal over nominalized gerund subject; got: {closed:#?}"
     );
@@ -136,7 +141,10 @@ fn gerund_subject_refuses_plural_verb_agreement() {
     assert!(
         closed.is_empty() && open.is_empty(),
         "gerund VP subject is singular and must refuse plural 'are'; got closed={:?}",
-        closed.iter().map(|i| pretty_term(i.sem())).collect::<Vec<_>>()
+        closed
+            .iter()
+            .map(|i| pretty_term(i.sem()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -148,7 +156,9 @@ fn preposition_with_gerund_vp_and_fronted_pp_parse() {
     assert!(
         !closed.is_empty(),
         "expected a closed parse for 'Without reporting genes, the cell is essential.'; open={:?}",
-        open.iter().map(|o| pretty_term(o.item.sem())).collect::<Vec<_>>()
+        open.iter()
+            .map(|o| pretty_term(o.item.sem()))
+            .collect::<Vec<_>>()
     );
     assert!(
         closed.iter().any(|s| {
@@ -160,7 +170,8 @@ fn preposition_with_gerund_vp_and_fronted_pp_parse() {
         "expected fronted 'Without reporting genes,' to attach to the matrix clause; got: {closed:#?}"
     );
 
-    let (closed_by, _open_by) = p.parse_open("By reporting genes, the cell is essential.", &Identity);
+    let (closed_by, _open_by) =
+        p.parse_open("By reporting genes, the cell is essential.", &Identity);
     let closed_by: Vec<String> = closed_by.iter().map(|i| pretty_term(i.sem())).collect();
     assert!(
         closed_by.iter().any(|s| {
@@ -181,5 +192,3 @@ fn preposition_with_gerund_vp_and_fronted_pp_parse() {
         "expected fronted PP with quantified object 'In a cell,' to parse; got: {closed_det:#?}"
     );
 }
-
-
