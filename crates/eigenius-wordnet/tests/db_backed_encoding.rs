@@ -502,7 +502,63 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
             lem,
         )
     };
-    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
+    // THE PARSER'S OWN missing-lexeme signal is the gate every source below uses, obtained from a
+    // CHAIN-ONLY parser before any augmentation exists (D102 decision 7, D62 §7.6a lazy recovery).
+    //
+    // Two earlier gates were wrong in opposite directions. A raw `entries_for_form` surface lookup
+    // is too LOOSE — it cannot see what the parser resolves by lemmatisation, so the total fallback
+    // minted opaque individuals for 243 ordinary words (nucleotides, cells, patients, males, bare
+    // numerals, ranges). `aug.missing_oov` is too NARROW — it is a pre-pass over the page, not the
+    // parse's signal, and it never flagged `Asn373`, `Cas9`, `Glu378`, `I380T`, `CHRPOS` or
+    // `Gaudelli` although all are in the page, leaving 103 distinct OOV and missing-lexeme 67.
+    //
+    // A whole-page `has_token` sweep was wrong too, in the LOOSE direction: it reported 375
+    // surfaces yet left missing-lexeme 66, and the parse's own OOV list named `Asn373`, `Thr369`,
+    // `Val376Ala` and `Cas9` — surfaces the sweep had NOT flagged. Two re-derivations, not one:
+    // `has_token` is a per-surface predicate, while the signal is `Parser::unknown_words`, which
+    // also excludes a token covered by a MULTIWORD entry and tokenizes the UNIT rather than the
+    // page. Tokenizing the whole page merges across unit boundaries, so the surfaces it asks about
+    // are not the surfaces the parse asks about.
+    //
+    // So call the one function the encoder calls. `encode_unit` produces
+    // `Outcome::MissingLexeme { unknown }` from `index.unknown_words(text, lem)`, and
+    // `unknown_words` documents itself as "the missing-lexeme signal, and the one definition of
+    // it, which the encoding harnesses read". Over `page_units(page)` — the same segmentation the
+    // encode loop iterates — this gate and the gate it feeds ask about identical strings.
+    //
+    // The cost is one extra index build over the served lexicon, which is what makes the answer
+    // authoritative rather than a guess ahead of the parse.
+    // The units the parser will parse, paired with the text they came from — one construction, so
+    // the gate below and the sources it feeds cannot tokenize at different granularities. Measured
+    // on this page: tokenizing the join forms 1548 distinct surfaces and the 325 units form 2148 —
+    // the join DELETES 613 and MANUFACTURES 13. `SpCas9` is one of the 13, and the fallback used to
+    // mint an entry for it, under a surface the parser never asks about.
+    let doc = eigenius_kernel::dcg::SegmentedDocument::new(page, page_units(page));
+    let oov: std::collections::BTreeSet<String> = {
+        let probe = build_index_over(head, None);
+        let mut set = std::collections::BTreeSet::new();
+        // `unknown_words` already restricts to WORD tokens: TokenKind::Word is "a token the
+        // lexicon is asked about. With no entry it is a missing lexeme", and Numeral / Quantity /
+        // Range / QuantityList / Comma are not asked about at all — they go down the quantity path.
+        // An earlier gate probed every token and reported 2026, 167, 400,000, 95%, 7.6 × 10⁻⁶,
+        // −0.005, 1–7 and 50–55 as gaps; the fallback then minted opaque individuals for numbers.
+        for unit in doc.units() {
+            for w in probe.unknown_words(unit, lem) {
+                set.insert(w.to_lowercase());
+                set.insert(w);
+            }
+        }
+        set
+    };
+    eprintln!(
+        "parser missing-lexeme surfaces: {} (chain-only unknown_words over {} units; \
+         aug.missing_oov reported {})",
+        oov.len(),
+        doc.units().len(),
+        aug.missing_oov.len()
+    );
+
+    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, &doc);
     let n_names = ne_aug.added.len();
     eprintln!(
         "named entities: {:?}",
@@ -514,6 +570,100 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(ne_aug.added);
     aug.supporting.extend(ne_aug.supporting);
+
+    // The fifth extraction source (D101 §step 2). Merged AFTER the lexicon-backed pass so its
+    // OOV-only guard sees the committed lexicon, and alongside apposition rather than instead of
+    // it: the two recognise disjoint things, and `Ile380Thr` is the case apposition structurally
+    // cannot reach — interior capital, lowercase-initial prefixed form, and never a noun head in
+    // front of it.
+    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, &doc, &oov);
+    let n_notations = not_aug.added.len();
+    eprintln!(
+        "notations: {n_notations} recognised — {:?}",
+        not_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(not_aug.added);
+    aug.supporting.extend(not_aug.supporting);
+
+    // The sixth source. What notation leaves blocked is product names — gnomAD alone blocked 22
+    // units — and the signal there is orthography plus repetition, admissible only because the
+    // surface is OOV. Merged last of the deterministic sources so both the lexicon and notation
+    // have had their claim first.
+    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, &doc, &oov);
+    let n_oov_names = name_aug.added.len();
+    eprintln!(
+        "recurrent OOV names: {n_oov_names} — {:?}",
+        name_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(name_aug.added);
+    aug.supporting.extend(name_aug.supporting);
+
+    // The seventh source: what the DOCUMENT marks as code. 48 of the 113 tokens left unresolvable
+    // after notation and names sit inside an inline code span — the author already distinguished
+    // "string mentioned" from "word used", which is one markup rule where the shapes looked like
+    // six unrelated pattern-matching jobs.
+    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, &doc, &oov);
+    let n_code = code_aug.added.len();
+    eprintln!("code-span literals: {n_code}");
+    aug.added.extend(code_aug.added);
+    aug.supporting.extend(code_aug.supporting);
+
+    // The eighth: a productive affix over a base the lexicon DOES have. Deterministic, and the
+    // arm that would otherwise handle these — ResolutionMethod::LlmSynthesized — has no producer.
+    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, &doc, &oov);
+    let n_derived = deriv_aug.added.len();
+    eprintln!(
+        "derived from a base: {n_derived} — {:?}",
+        deriv_aug
+            .added
+            .iter()
+            .map(|b| format!(
+                "{} ({})",
+                b.provenance.surface,
+                b.provenance.long_form.clone().unwrap_or_default()
+            ))
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(deriv_aug.added);
+    aug.supporting.extend(deriv_aug.supporting);
+
+    // The ninth: a hyphenated compound whose PARTS are attested. The parser's lexer deliberately
+    // keeps an ASCII hyphen inside a token (`wild-type`, `PolyPhen-2` are single items), so
+    // `missense-bystander` arrives whole and unknown while both halves are known.
+    let comp_aug = eigenius_kernel::dcg::compound_augmentation(head, &doc, &oov);
+    let n_compounds = comp_aug.added.len();
+    eprintln!("compounds of known parts: {n_compounds}");
+    aug.added.extend(comp_aug.added);
+    aug.supporting.extend(comp_aug.supporting);
+
+    // The TENTH and last: whatever every source with a claim to make has declined. Counted on its
+    // own line, always, because a coverage figure that hides how much of itself rests on no
+    // evidence is worse than a lower figure that does not.
+    let supplied_now: std::collections::BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    let fb_aug = eigenius_kernel::dcg::fallback_augmentation(head, &doc, &oov, &supplied_now);
+    let n_fallback = fb_aug.added.len();
+    eprintln!(
+        "UNEVIDENCED FALLBACK: {n_fallback} — {:?}",
+        fb_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(fb_aug.added);
+    aug.supporting.extend(fb_aug.supporting);
     let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
     let abbr_aug = {
@@ -554,9 +704,71 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(abbr_aug.added);
     aug.supporting.extend(abbr_aug.supporting);
+    // RETRACT what the later sources supplied. NOTE `missing_oov` is the lexicon-backed pass's
+    // own pre-pass residual and is INCOMPLETE as an OOV enumeration (see the probe above); it is
+    // retracted here so the reported figure is not stale, not because it is authoritative.
+    // `missing_oov` is the residual of the
+    // lexicon-backed pass ALONE, computed before apposition and notation ran, so merging their
+    // entries never removed anything from it — the line below reported 242 residual OOV unchanged
+    // while 93 notations had just closed. A gap a later source filled is not a gap.
+    // Every source's entries must actually be IN `aug` by now. Cheap, and it would have caught a
+    // real one: relocating the retraction block below deleted the notation merge, and the run
+    // reported "59 OOV grounded + 117 notation(s)" — the arithmetic subtracting notations that
+    // were never added — while measuring the source doing nothing at all.
+    assert!(
+        aug.added.len()
+            >= n_names + n_notations + n_oov_names + n_code + n_derived + n_compounds + n_fallback,
+        "every source's entries must be merged: {} added < {n_names} names + {n_notations} \
+         notations + {n_oov_names} oov-names + {n_code} code + {n_derived} derived + \
+         {n_compounds} compounds + {n_fallback} fallback",
+        aug.added.len()
+    );
+    let supplied: std::collections::BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.to_lowercase())
+        .collect();
+    let before_retraction = aug.missing_oov.len();
+    aug.missing_oov
+        .retain(|g| !supplied.contains(&g.surface.to_lowercase()));
+    // THE GAP STREAM (D62 §9), emitted as the instrument that drives the remaining tail. Until
+    // now the tail was attributed by re-tokenising the page in Python and intersecting with the
+    // log's OOV list, which left 27 units "unmatched by this attribution" — a blind spot created
+    // by guessing at the kernel's tokenisation instead of reading what the kernel recorded.
+    for g in eigenius_kernel::dcg::lexical_gap_resources(&aug, "urn:eigenius:doc") {
+        let field = |p: &str| {
+            g.get(&eigenius_kernel::ontology::Iri::parse(p).expect("iri"))
+                .cloned()
+        };
+        let token = field("urn:eigenius:encoding:gap_token")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let disp = field("urn:eigenius:encoding:gap_disposition")
+            .and_then(|v| v.as_iri())
+            .map(|i| i.as_str().rsplit(':').next().unwrap_or("?").to_string())
+            .unwrap_or_default();
+        eprintln!("GAP\t{disp}\t{token}");
+    }
     eprintln!(
-        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
-        aug.added.len() - n_names,
+        "residual OOV: {} → {} after retracting what apposition and notation supplied",
+        before_retraction,
+        aug.missing_oov.len()
+    );
+    // Each source counted SEPARATELY. Folding notations into "OOV grounded + injected" would make
+    // the fifth source's contribution unreadable in the one line anyone compares across runs.
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), \
+         {n_notations} notation(s), {n_oov_names} recurrent-name(s), {n_code} code-literal(s), \
+         {n_derived} derived, {n_compounds} compound(s), {n_fallback} UNEVIDENCED, \
+         {} residual OOV",
+        aug.added.len()
+            - n_names
+            - n_notations
+            - n_oov_names
+            - n_code
+            - n_derived
+            - n_compounds
+            - n_fallback,
         aug.missing_oov.len()
     );
     aug
@@ -2638,6 +2850,776 @@ fn probe_grammar_gap_root_causes() {
     }
 }
 
+/// STEP 5 construction battery (`2026-10-11`, survey §4 step 3) — the families the XIAP report's
+/// short grammar gaps exhibit, isolated as synthetic probes over ordinary vocabulary so no lexical
+/// gap is in play. Each failing family is paired with the nearest probe that parses, which is what
+/// localizes it — and a probe whose vocabulary the chain lacks is tagged LEX-GAP rather than GAP,
+/// because two families that looked constructional on the page (a derived `-ly` adverb inside a
+/// passive agent phrase, and `cannot`) turned out to be lexical once isolated.
+///
+/// Measured results, `wordnet-umls-hpo-aligned-2026-10-10-d101`, cap-only — see
+/// `docs/notes/uab-xiap-grammar-gaps.md` for what each contrast establishes:
+///
+///   GAP   reduced relative + PP ..... "the resource queried in the study is reliable"
+///   ok    .. + adverb instead ....... "the release queried here is current"
+///   GAP   participial + object ...... "a patient carrying the variant was found"
+///   ok    passive agent by-phrase ... "the question is resolved by the assay"
+///   GAP   comma appositive .......... "the study, the first of its kind, reports three results"
+///   LEX   `cannot` ................... no entry in the served chain at all, 7 uses on the page
+///   ok    `could not` / `did not` .... "the method could not resolve the question"
+///   GAP   bare negative subject ..... "neither is evidence that the variant is tolerated"
+///   ok    negative quantifier ....... "nothing in the study contradicts the result"
+///   GAP   demonstrative partitive ... "both of those are worth having"
+///   ok    `none of the` .............. "none of the methods resolves the question"
+///   GAP   `rather than` + participles "the gene was tested rather than assumed"
+///   GAP   verbless NP as a unit ..... "the source of the results"
+///
+/// Run:
+///   cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step5_construction_families -- --ignored --nocapture
+#[test]
+#[ignore = "step 5 construction battery (survey §4 step 3); --ignored --nocapture"]
+fn probe_step5_construction_families() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    // Ordinary vocabulary only — the whole point is that `missing-lexeme` is 0 on every probe, so a
+    // GAP is the construction and nothing else. No augmentation overlay for the same reason.
+    let probes: &[(&str, &str)] = &[
+        ("baseline SVO", "The study reports three results."),
+        ("baseline copular", "The result is a conservative change."),
+        (
+            "baseline passive + PP",
+            "The gene is expressed in the liver.",
+        ),
+        ("worth + gerund", "Two further options are worth testing."),
+        ("demonstrative partitive", "Both of those are worth having."),
+        ("gerund object", "The method deserves naming."),
+        ("gerund object", "The result wants testing."),
+        (
+            "rather than + participles",
+            "The gene was tested rather than assumed.",
+        ),
+        (
+            "reduced relative + PP",
+            "The resource queried in the study is reliable.",
+        ),
+        (
+            "reduced relative + adverb",
+            "The release queried here is current.",
+        ),
+        (
+            "participial + object",
+            "A patient carrying the variant was found.",
+        ),
+        (
+            "reduced relative + PP",
+            "The method used in the study is simple.",
+        ),
+        (
+            "comma appositive",
+            "The study, the first of its kind, reports three results.",
+        ),
+        (
+            "comma appositive",
+            "The gene, a known target, is expressed.",
+        ),
+        (
+            "bare negative subject",
+            "Neither is evidence that the variant is tolerated.",
+        ),
+        ("negative quantifier", "No database resolves the question."),
+        (
+            "negative quantifier",
+            "None of the methods resolves the question.",
+        ),
+        (
+            "negative quantifier",
+            "Nothing in the study contradicts the result.",
+        ),
+        (
+            "VP ellipsis",
+            "The first method resolves the question and the second does.",
+        ),
+        ("modal", "One assay will resolve the question."),
+        (
+            "passive agent by-phrase",
+            "The question is resolved by the assay.",
+        ),
+        (
+            "passive + locative PP",
+            "The question is resolved in the study.",
+        ),
+        (
+            "passive + adverb + PP",
+            "The gene is expressed strongly in the liver.",
+        ),
+        ("cannot", "The method cannot resolve the question."),
+        ("could not", "The study could not find a patient."),
+        ("did not", "The method did not resolve the question."),
+        ("verbless NP", "The source of the results."),
+        ("verbless NP", "The canonical citation for the method."),
+        ("verbless NP", "Two caveats on reading the table."),
+    ];
+    // CHAIN-ONLY, deliberately: a probe whose vocabulary the served lexicon does not have is
+    // reported LEX-GAP, not GAP. The distinction is the whole point of the battery — `cannot` and a
+    // derived `-ly` adverb both looked like constructional failures on the page and are not. An
+    // augmentation would hide that by minting an opaque individual, which composes with nothing and
+    // fails the parse anyway, under a tag that says "construction".
+    let index = build_index_over(&head, None);
+    let (mut gaps, mut lex) = (0usize, 0usize);
+    for (family, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            lex += 1;
+            eprintln!("  [{:>9}] {family:<26} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            gaps += 1;
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {family:<26} {s}");
+    }
+    eprintln!(
+        "{} probes: {gaps} constructional gap(s), {lex} lexical gap(s), {} parsed",
+        probes.len(),
+        probes.len() - gaps - lex
+    );
+    // The baselines must parse, or the battery is measuring the lexicon rather than the grammar.
+    for s in [
+        "The study reports three results.",
+        "The result is a conservative change.",
+    ] {
+        assert!(
+            !index.parse_open(s, &lem).0.is_empty(),
+            "baseline must parse: {s:?}"
+        );
+    }
+}
+
+/// FULL closed-class paradigm inventory — every member of each series, with a minimal frame that
+/// needs its GRAMMATICAL reading. `has_token` is not the test: `his`, `nothing` and `yourself` all
+/// return true from a WordNet CONTENT entry while `closed-class.esl` has no entry for them, so a
+/// form can be "present" and still have no usable category. Three outcomes:
+///
+///   LEXICAL   no entry at all — shows up as `missing-lexeme`
+///   WRONGCAT  known, but the frame has no parse — shows up as a GRAMMAR gap
+///   OK        the frame parses
+///
+/// Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-hpo-aligned-2026-10-12-rt \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_closed_class_paradigms -- --ignored --nocapture
+#[test]
+#[ignore = "full closed-class paradigm inventory; --ignored --nocapture"]
+fn probe_closed_class_paradigms() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+
+    // One frame per series, so a failure is the FORM and not the frame.
+    let series: &[(&str, &[&str], &str)] = &[
+        (
+            "indef pronoun BARE",
+            &["something", "nothing", "everything", "someone", "anyone"],
+            "{} is clear.",
+        ),
+        (
+            "indef pronoun + VP",
+            &["something", "nothing", "everything", "someone", "anyone"],
+            "{} resolves the question.",
+        ),
+        (
+            "indefinite pronoun",
+            &[
+                "something",
+                "anything",
+                "nothing",
+                "everything",
+                "someone",
+                "anyone",
+                "everyone",
+                "somebody",
+                "anybody",
+                "nobody",
+                "everybody",
+            ],
+            "{} in the study is clear.",
+        ),
+        (
+            "possessive determiner",
+            &["my", "your", "his", "her", "its", "our", "their"],
+            "{} result is clear.",
+        ),
+        (
+            "possessive pronoun",
+            &["mine", "yours", "hers", "ours", "theirs"],
+            "The result is {}.",
+        ),
+        (
+            "reflexive",
+            &[
+                "myself",
+                "yourself",
+                "himself",
+                "herself",
+                "itself",
+                "oneself",
+                "ourselves",
+                "yourselves",
+                "themselves",
+            ],
+            "The gene affects {}.",
+        ),
+        (
+            "subordinating conjunction",
+            &[
+                "although", "though", "because", "since", "unless", "until", "whereas", "while",
+                "whilst", "when", "after", "before", "if", "once",
+            ],
+            "The result is clear {} the assay works.",
+        ),
+        (
+            "complementizer",
+            &["whether", "where", "how", "why", "that"],
+            "The study reports {} the gene is expressed.",
+        ),
+    ];
+
+    for (name, forms, frame) in series {
+        let (mut lex, mut wrong, mut ok) = (Vec::new(), Vec::new(), Vec::new());
+        for f in *forms {
+            let sent = frame.replace("{}", f);
+            // Capitalise a sentence-initial form so the frame is well-formed English.
+            let sent = if frame.starts_with("{}") {
+                let mut c = sent.chars();
+                c.next()
+                    .map(|a| a.to_uppercase().to_string() + c.as_str())
+                    .unwrap_or(sent)
+            } else {
+                sent
+            };
+            let unknown = index.unknown_words(&sent, &lem);
+            if unknown.iter().any(|u| u.eq_ignore_ascii_case(f)) {
+                lex.push(*f);
+                continue;
+            }
+            let (c, o) = index.parse_open(&sent, &lem);
+            if c.is_empty() && o.is_empty() {
+                wrong.push(*f);
+            } else {
+                ok.push(*f);
+            }
+        }
+        eprintln!("\n{name}  ({} forms)", forms.len());
+        eprintln!("  OK       {:>2}: {ok:?}", ok.len());
+        eprintln!("  WRONGCAT {:>2}: {wrong:?}", wrong.len());
+        eprintln!("  LEXICAL  {:>2}: {lex:?}", lex.len());
+    }
+}
+
+/// RESEED BATCH inventory — for each closed-class candidate, is it a LEXICAL gap (no entry in the
+/// served chain at all, so `unknown_words` flags it) or a WRONG-CATEGORY entry (known, but the
+/// minimal sentence using it still has no parse)? The two need different ontology edits, and only
+/// the first shows up as `missing-lexeme`. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_reseed_batch_inventory -- --ignored --nocapture
+#[test]
+#[ignore = "reseed-batch inventory: lexical gap vs wrong category; --ignored --nocapture"]
+fn probe_reseed_batch_inventory() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    // (word, a minimal sentence that needs its GRAMMATICAL reading)
+    let cases: &[(&str, &str)] = &[
+        ("cannot", "The method cannot resolve the question."),
+        ("where", "The study reports where the gene is expressed."),
+        ("while", "The gene is expressed while the cell divides."),
+        ("whereas", "The gene is expressed whereas the cell divides."),
+        ("although", "Although the assay fails, the result is clear."),
+        ("because", "The result is clear because the assay works."),
+        ("during", "The gene is expressed during the assay."),
+        (
+            "whether",
+            "The study reports whether the gene is expressed.",
+        ),
+        ("unless", "The result is void unless the assay works."),
+        ("so", "So this is the complete set."),
+        ("rather", "The result is rather clear."),
+        (
+            "neither",
+            "Neither is evidence that the variant is tolerated.",
+        ),
+        ("what", "Absence is what a neutral variant looks like."),
+        ("itself", "The codon itself carries two variants."),
+        ("themselves", "The codons themselves carry two variants."),
+        ("your", "Your result is clear."),
+        ("my", "My result is clear."),
+        ("everything", "Everything in the study is clear."),
+        ("likewise", "The control is likewise clear."),
+        ("anything", "Anything in the study is clear."),
+        ("yours", "The result is yours."),
+    ];
+    let mut lexical = Vec::new();
+    let mut wrong_cat = Vec::new();
+    for (w, sent) in cases {
+        let unknown = index.unknown_words(sent, &lem);
+        if unknown.iter().any(|u| u.eq_ignore_ascii_case(w)) {
+            lexical.push(*w);
+            eprintln!("  [ LEXICAL ] {w:<12} no entry at all      — {sent}");
+            continue;
+        }
+        if !unknown.is_empty() {
+            eprintln!("  [ SKIP    ] {w:<12} probe has other OOV: {unknown:?}");
+            continue;
+        }
+        let (closed, open) = index.parse_open(sent, &lem);
+        if closed.is_empty() && open.is_empty() {
+            wrong_cat.push(*w);
+            eprintln!("  [ WRONGCAT] {w:<12} known, no parse      — {sent}");
+        } else {
+            eprintln!(
+                "  [ OK      ] {w:<12} parses ×{}            — {sent}",
+                closed.len().max(open.len())
+            );
+        }
+    }
+    eprintln!("\nLEXICAL GAPS ({}): {lexical:?}", lexical.len());
+    eprintln!("WRONG CATEGORY ({}): {wrong_cat:?}", wrong_cat.len());
+
+    // The CLOSED SERIES. A closed-class addition should populate a whole paradigm, not the words
+    // one corpus happened to use — these sets are finite and enumerable, so enumerating them is
+    // right here where enumerating an open set (productive `-ly` adverbs) would not be.
+    for (series, words) in [
+        (
+            "indefinite pronouns",
+            &[
+                "something",
+                "anything",
+                "nothing",
+                "everything",
+                "someone",
+                "anyone",
+                "everyone",
+                "somebody",
+                "anybody",
+                "nobody",
+                "everybody",
+            ][..],
+        ),
+        (
+            "possessive det/pronouns",
+            &[
+                "my", "your", "his", "her", "its", "our", "their", "mine", "yours", "hers", "ours",
+                "theirs",
+            ][..],
+        ),
+        (
+            "reflexives",
+            &[
+                "myself",
+                "yourself",
+                "himself",
+                "herself",
+                "itself",
+                "oneself",
+                "ourselves",
+                "yourselves",
+                "themselves",
+            ][..],
+        ),
+        (
+            "subordinating conjunctions",
+            &[
+                "although", "though", "because", "since", "unless", "until", "whereas", "whether",
+                "while", "whilst", "where", "when", "after", "before", "if", "once",
+            ][..],
+        ),
+    ] {
+        let missing: Vec<&str> = words
+            .iter()
+            .copied()
+            .filter(|w| !index.has_token(w, &lem))
+            .collect();
+        eprintln!(
+            "  {series:<28} {:>2} of {:>2} MISSING: {missing:?}",
+            missing.len(),
+            words.len()
+        );
+    }
+}
+
+/// SECOND construction battery (survey §4 step 3) — the families visible in the 10-16 token plain
+/// prose gaps, which the first battery (built from the 5-9 band) never reached. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step5_families_medium -- --ignored --nocapture
+#[test]
+#[ignore = "second construction battery, 10-16 token band; --ignored --nocapture"]
+fn probe_step5_families_medium() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    let probes: &[(&str, &str)] = &[
+        ("imperative", "Report the result."),
+        ("negative imperative", "Do not report the result."),
+        (
+            "fronted conditional",
+            "If the assay fails, the result is void.",
+        ),
+        (
+            "fronted where-clause",
+            "Where the assay fails, the result is void.",
+        ),
+        (
+            "zero object relative",
+            "The resource I could query is reliable.",
+        ),
+        (
+            "that object relative",
+            "The resource that I could query is reliable.",
+        ),
+        (
+            "that subject relative",
+            "The resource that resolves the question is reliable.",
+        ),
+        (
+            "zero complementizer",
+            "The study mentioned the result was clear.",
+        ),
+        (
+            "that complementizer",
+            "The study mentioned that the result was clear.",
+        ),
+        (
+            "without + gerund",
+            "The study searched without finding the variant.",
+        ),
+        (
+            "absolute participial",
+            "The study reports the result, having built the assay.",
+        ),
+        (
+            "fronted rather-than",
+            "Rather than assume the result, the study measured it.",
+        ),
+        (
+            "both ... and over VPs",
+            "The result both bounds the argument and reinforces the conclusion.",
+        ),
+        (
+            "VP coordination under aux",
+            "The result has been settled and is recorded below.",
+        ),
+        (
+            "emphatic reflexive",
+            "The codon itself carries two variants.",
+        ),
+        (
+            "free relative + stranding",
+            "Absence is what a neutral variant looks like.",
+        ),
+        (
+            "rate X as more Y than Z",
+            "The predictors rate the variant as more damaging than the control.",
+        ),
+        (
+            "rate X worse than Y",
+            "The predictors rate the variant worse than the control.",
+        ),
+        (
+            "sentence-initial Yet",
+            "Yet the predictors rate the variant worse.",
+        ),
+        ("sentence-initial So", "So this is the complete set."),
+        (
+            "modal + adv + neg + inf",
+            "The interface would therefore not be expected to abolish oligomerisation.",
+        ),
+        (
+            "parenthetical adverb",
+            "It is therefore, empirically, compatible with the result.",
+        ),
+        (
+            "unlike-category coordination",
+            "It is the same residue, carried by four men, and benign.",
+        ),
+        (
+            "ger + object post-nominal",
+            "Every method placing the target at the position was enumerated.",
+        ),
+        // `rather than` is the largest battery-proven family by incidence (41 of 281 gaps). Which
+        // of its positions work?
+        (
+            "rather than, NP vs NP",
+            "The study measured the result rather than the control.",
+        ),
+        (
+            "rather than, ADJ vs ADJ",
+            "The result is clear rather than ambiguous.",
+        ),
+        (
+            "rather than, V vs V",
+            "The study measured rather than assumed the result.",
+        ),
+        (
+            "rather than, PP vs PP",
+            "The gene is expressed in the liver rather than in the kidney.",
+        ),
+        // And plain comparatives, to separate `than` the comparative from `rather than`.
+        (
+            "comparative, adjective",
+            "The result is clearer than the control.",
+        ),
+        (
+            "comparative, more + adj",
+            "The result is more conservative than the control.",
+        ),
+        (
+            "comparative, noun",
+            "The study showed greater dependence than the control.",
+        ),
+        (
+            "object predicative",
+            "The predictors rate the variant damaging.",
+        ),
+        // `but not` is the SAME truth-conditional operator (`but_not_coord`: η-expand to Prop, then
+        // And(a, ¬b)). If these parse, `rather than` needs a trigger, not a semantics.
+        (
+            "but not, NP vs NP",
+            "The study measured the result but not the control.",
+        ),
+        (
+            "but not, ADJ vs ADJ",
+            "The result is clear but not ambiguous.",
+        ),
+        (
+            "but not, PP vs PP",
+            "The gene is expressed in the liver but not in the kidney.",
+        ),
+        (
+            "but not, V vs V",
+            "The study measured but not assumed the result.",
+        ),
+        (
+            "but not, NP subject",
+            "The result but not the control is clear.",
+        ),
+        (
+            "and, NP object",
+            "The study measured the result and the control.",
+        ),
+        ("and, NP subject", "The result and the control are clear."),
+    ];
+    let (mut gaps, mut lex) = (0usize, 0usize);
+    for (family, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            lex += 1;
+            eprintln!("  [{:>9}] {family:<30} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            gaps += 1;
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {family:<30} {s}");
+    }
+    eprintln!(
+        "{} probes: {gaps} constructional gap(s), {lex} lexical gap(s), {} parsed",
+        probes.len(),
+        probes.len() - gaps - lex
+    );
+}
+
+/// LOCALIZE the ACTIVE participial post-modifier (`ger` + object). The passive half is built
+/// (short_passive_participial_lifts); this ladder separates the intransitive, the adverb, the
+/// adjunct PP and the OBJECT, and checks the relativizer control. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-hpo-aligned-2026-10-13-fa \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_ger_post_nominal -- --ignored --nocapture
+#[test]
+#[ignore = "localize the active participial post-modifier; --ignored --nocapture"]
+fn probe_ger_post_nominal() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for (label, s) in [
+        ("intransitive, bare", "A patient waiting was found."),
+        ("intransitive + adverb", "A patient waiting here was found."),
+        (
+            "intransitive + PP",
+            "A patient waiting in the study was found.",
+        ),
+        (
+            "TRANSITIVE + object",
+            "A patient carrying the variant was found.",
+        ),
+        (
+            "transitive + object (2)",
+            "The gene encoding a helicase is essential.",
+        ),
+        (
+            "transitive + object (3)",
+            "A method resolving the question is reliable.",
+        ),
+        (
+            "relativizer control",
+            "The gene that encodes a helicase is essential.",
+        ),
+        (
+            "relativizer control (2)",
+            "A method that resolves the question is reliable.",
+        ),
+        // Is the intransitive really a POST-NOMINAL participial, or something else? A verb with no
+        // adjective and no noun reading isolates that.
+        (
+            "intransitive, no adj reading",
+            "A patient arriving was found.",
+        ),
+        ("subject position", "The patient waiting is here."),
+    ] {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            eprintln!("  [{:>9}] {label:<26} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (c, o) = index.parse_open(s, &lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {label:<26} {s}");
+        // A parse is not a CORRECT parse. Print the first reading for the cases that compose, so a
+        // compound-noun or appositive analysis is not mistaken for a participial one.
+        if let Some(it) = c.first() {
+            eprintln!("              {}", pretty_term(it.sem()));
+        }
+    }
+}
+
+/// LOCALIZE the reduced-relative PP gap (survey §4 step 3, item 1). `queried here` lifts to a noun
+/// post-modifier and `queried in the study` does not; this ladder separates the participle, the
+/// modifier kind, and the attachment. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_reduced_relative_pp -- --ignored --nocapture
+#[test]
+#[ignore = "localize the reduced-relative PP gap; --ignored --nocapture"]
+fn probe_reduced_relative_pp() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    let probes: &[(&str, &str)] = &[
+        ("bare participle", "The resource queried is reliable."),
+        ("+ adverb", "The resource queried here is reliable."),
+        (
+            "+ adverb (other)",
+            "The resource queried recently is reliable.",
+        ),
+        (
+            "+ agent by-phrase",
+            "The resource queried by the study is reliable.",
+        ),
+        (
+            "+ adjunct PP",
+            "The resource queried in the study is reliable.",
+        ),
+        (
+            "+ adjunct PP (other prep)",
+            "The resource queried for the study is reliable.",
+        ),
+        (
+            "other verb + adjunct PP",
+            "The gene expressed in the liver is current.",
+        ),
+        (
+            "other verb + adverb",
+            "The gene expressed strongly is current.",
+        ),
+        (
+            "used + adjunct PP",
+            "The method used in the study is simple.",
+        ),
+        ("used + adverb", "The method used here is simple."),
+        // The PP alone as a post-modifier, with no participle: the `pp_mod` baseline.
+        (
+            "PP post-modifier alone",
+            "The resource in the study is reliable.",
+        ),
+        // Present participle (ger) post-nominal.
+        ("ger + object", "A patient carrying the variant was found."),
+        ("ger + adverb", "A patient waiting here was found."),
+        ("ger intransitive", "A patient waiting was found."),
+        (
+            "ger + adjunct PP",
+            "A patient waiting in the study was found.",
+        ),
+        // Predicative controls: the same VP used finitely, to show the verb frame itself is fine.
+        (
+            "finite passive + PP",
+            "The resource was queried in the study.",
+        ),
+        ("finite ger + object", "A patient was carrying the variant."),
+        // Is `expressed in …` the OBLIQUE route? WordNet's PP frames are preposition-agnostic
+        // (`prep_any`), so if the oblique lift is what licenses it, ANY preposition fills the slot.
+        (
+            "express + other prep",
+            "The gene expressed for the liver is current.",
+        ),
+        (
+            "express + another",
+            "The gene expressed with the liver is current.",
+        ),
+        (
+            "express + agent",
+            "The gene expressed by the liver is current.",
+        ),
+        // And the control: `query` in a frame it has no PP for, finite vs participial.
+        (
+            "query finite + adverb",
+            "The resource was queried recently.",
+        ),
+        (
+            "query participial + adverb",
+            "The resource queried recently is reliable.",
+        ),
+    ];
+    for (label, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            eprintln!("  [{:>9}] {label:<28} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {label:<28} {s}");
+    }
+}
+
 /// STEP 4 (RC-1) — witness the bare-UMLS-noun-subject mechanism (d63-parse-gap-closure §3/§4).
 /// Part 1: the actual `lexicon:cat` of the abbreviation forms in the snapshot (count `num_any` vs `mass`
 /// vs `cat_np`). Part 2: a determiner/number/mass battery isolating whether a determiner or a mass/plural
@@ -3991,7 +4973,7 @@ fn wrn_first_page_over_full_lexicon() {
         }
     }
 
-    summarize(&report);
+    summarize(&report, &page_path);
 
     // Persist the selection decisions and print the SELECTION summary line BEFORE the replay
     // asserts (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
@@ -4982,7 +5964,12 @@ fn tag(o: &Outcome) -> &'static str {
     }
 }
 
-fn summarize(report: &[UnitReport]) {
+/// `page` is the file actually measured. It is a PARAMETER because the banner used to hardcode
+/// "WRN first page", which stopped being true the moment `--page` existed: every run in
+/// `experiments/parsing/results/` since then has been labelled as a WRN measurement whatever corpus
+/// it read. A run log that misnames its own input is worse than one that says nothing, because the
+/// archived log is all a later reader has.
+fn summarize(report: &[UnitReport], page: &str) {
     let (mut enc, mut amb, mut miss, mut gap, mut scale, mut open) = (0, 0, 0, 0, 0, 0);
     let mut non_prose = 0;
     let mut oov: BTreeSet<String> = BTreeSet::new();
@@ -5103,11 +6090,15 @@ fn summarize(report: &[UnitReport]) {
         );
     }
     eprintln!(
-        "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
+        "\n=== {} over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}, \
          scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
          total-skeletons {total_skeletons} (sense× {:.2}), \
          expected-hits {exp_hits}, expected-curated {exp_total} ===",
+        std::path::Path::new(page)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| page.to_string()),
         report.len(),
         total_readings as f32 / total_skeletons.max(1) as f32
     );
@@ -6139,7 +7130,8 @@ fn named_entity_source_closes_unit4_via_overlay() {
                in MSI cell lines compared to MSS cell lines. Project Achilles screened cell lines. \
                Project DRIVE analysed cell lines.";
 
-    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, doc);
+    let seg = eigenius_kernel::dcg::SegmentedDocument::new(doc, page_units(doc));
+    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &seg);
     let mut got: Vec<String> = aug
         .added
         .iter()
@@ -6381,7 +7373,8 @@ fn probe_ne_alias_case_reachability() {
     } else {
         page
     };
-    let mut aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &doc);
+    let seg = eigenius_kernel::dcg::SegmentedDocument::new(&doc, page_units(&doc));
+    let mut aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &seg);
     // Match the SWEEP's augmentation set exactly, or the trace explains a different parse than the one
     // whose skeletons are being adjudicated. The sweep merges TWO overlays: the named-entity glossary
     // over the parsed CNL (above) AND the abbreviation glossary over the SOURCE page (MSI/MSS
@@ -7918,4 +8911,319 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         worst_entries < 1_000,
         "no layer should populate more than a few hundred entries; worst was {worst_entries}"
     );
+}
+
+/// LOCALIZE the dimensionless-measure regression: which readings does the bare numeral's
+/// predicative adjective actually add? Prints EVERY closed reading's sem for the control D95
+/// slice 7 recorded, so the new ones can be named rather than guessed at.
+///
+///     EIGENIUS_DB_SNAPSHOT=… cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_dimensionless_measure -- --ignored --nocapture
+#[test]
+#[ignore = "localize the dimensionless-measure readings; --ignored --nocapture"]
+fn probe_dimensionless_measure() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for s in [
+        "At least 1,000 cells were scored.",
+        "The study screened 517 cell lines.",
+        "The ratio is 0.94.",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={} open={}", closed.len(), open.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+    }
+}
+
+/// LOCALIZE the identity copula's cost: are the readings it ADDS to `X is a Y` wrong, or merely a
+/// redundant spelling of the membership reading? Prints every closed reading's sem.
+#[test]
+#[ignore = "identity-copula readings; --ignored --nocapture"]
+fn probe_identity_copula() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    // Build the SAME augmentation the page harness uses, from the whole page named by
+    // `EIGENIUS_PROBE_PAGE`. Without it the probe parses a different grammar than the measurement
+    // does — an unaugmented run returned `closed=0` for sentences the measurement parsed, and 224
+    // readings for one it reported far fewer of. A probe that cannot reproduce the measurement
+    // cannot adjudicate it.
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    eprintln!(
+        "probe page: {}  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+    // `.with_document(...)` as well as the augmentation: the page harness does both, and the
+    // document context is what the glossary's named-entity and abbreviation resolution reads.
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+    let extra: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    for s in [
+        "The gene is a vulnerability.",
+        "A short-window tool is the lever.",
+        "The database is the informative row.",
+    ] {
+        // Invented probes only: the corpus itself is gitignored, so a sentence lifted from it
+        // cannot live in a tracked test. For an ad-hoc check against real units, point
+        // `EIGENIUS_PROBE_FILE` at a file of sentences — read below, never committed.
+        let (closed, _open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={}", closed.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+    }
+    for s in &extra {
+        let (closed, _open) = index.parse_open(s, &lem);
+        eprintln!("\n=== {s}   closed={}", closed.len());
+        for (i, it) in closed.iter().enumerate() {
+            eprintln!("  [{i}] {}", pretty_term(it.sem()));
+        }
+        // `retain_distinct_sems` keys on `format!("{:?}", sem)`, so THAT is the comparison that
+        // decides whether two readings are the same term. `pretty_term` is lossy by design (it
+        // labels big variants rather than inlining them), so two readings printing alike proves
+        // nothing. Report the Debug comparison directly: equal means the dedup was bypassed
+        // somewhere after it ran; unequal means the terms genuinely differ and the duplication is
+        // inherent.
+        if closed.len() >= 2 {
+            let a = format!("{:?}", closed[0].sem());
+            let b = format!("{:?}", closed[1].sem());
+            // `subsume_duplicates` keys on (cat, sem) — so a sem-identical pair survives when the
+            // CATEGORIES differ. Print both to say which half of that key is doing the work.
+            eprintln!(
+                "  DEBUG-EQ sem [0]vs[1]: {}  (len {} vs {})",
+                a == b,
+                a.len(),
+                b.len()
+            );
+            eprintln!("    cat[0] = {}", pretty_term(closed[0].cat()));
+            eprintln!("    cat[1] = {}", pretty_term(closed[1].cat()));
+            eprintln!(
+                "    cat-eq: {}   prov: {:?} vs {:?}",
+                format!("{:?}", closed[0].cat()) == format!("{:?}", closed[1].cat()),
+                closed[0].prov(),
+                closed[1].prov()
+            );
+            if a != b {
+                let at: Vec<char> = a.chars().collect();
+                let bt: Vec<char> = b.chars().collect();
+                let k = at.iter().zip(&bt).take_while(|(x, y)| x == y).count();
+                let lo = k.saturating_sub(60);
+                eprintln!("  first divergence @{k}:");
+                eprintln!(
+                    "    a: …{}",
+                    at[lo..(k + 90).min(at.len())].iter().collect::<String>()
+                );
+                eprintln!(
+                    "    b: …{}",
+                    bt[lo..(k + 90).min(bt.len())].iter().collect::<String>()
+                );
+            }
+        }
+    }
+}
+
+/// LOCALIZE every grammar gap in a file of sentences: for each one that gets no parse, where did the
+/// derivation stop, and which two categories refused to combine there? Drives the kernel's
+/// `EIGENIUS_GAP_BOUNDARY` instrument (`dcg::chart::boundary`) over the SAME index the page
+/// measurement builds — document augmentation and document context included, since a probe that
+/// cannot reproduce the measurement cannot adjudicate it.
+///
+/// Reads the sentences from `EIGENIUS_PROBE_FILE` (one per line; the corpus is gitignored, so the
+/// tracked default is a set of invented controls that exercise each verdict) and the augmentation
+/// page from `EIGENIUS_PROBE_PAGE`. Both must be ABSOLUTE paths — cargo runs tests from the crate
+/// directory, and a relative one silently yields no augmentation.
+///
+///     EIGENIUS_DB_SNAPSHOT=… EIGENIUS_PROBE_PAGE=/abs/page.txt EIGENIUS_PROBE_FILE=/abs/gaps.txt \
+///         cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_gap_boundary -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_gap_boundary() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    eprintln!(
+        "probe page: {} lines  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+
+    let sentences: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            [
+                // Invented controls, one per expected verdict class. The corpus itself is gitignored,
+                // so no real unit can live in a tracked test.
+                "The claim is very strong.",
+                "The worst case is that it behaves like a null allele.",
+                "This is the gene.",
+                "The gene is a vulnerability.",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+        });
+
+    // The kernel prints the report itself, gated on a sentence having produced no top-span clause.
+    std::env::set_var("EIGENIUS_GAP_BOUNDARY", "1");
+    let mut gapped = 0usize;
+    for s in &sentences {
+        let unknown = index.unknown_words(s, &lem);
+        eprintln!("\n################ {s:?}");
+        if !unknown.is_empty() {
+            eprintln!("  OOV {unknown:?} — lexical, not a boundary");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        if !closed.is_empty() || !open.is_empty() {
+            eprintln!("  PARSES closed={} open={}", closed.len(), open.len());
+            continue;
+        }
+        gapped += 1;
+    }
+    std::env::remove_var("EIGENIUS_GAP_BOUNDARY");
+    eprintln!("\n==== {gapped} of {} gapped ====", sentences.len());
+}
+
+/// TOP-DOWN gap localization: which TOKEN obstructs the parse, and what categories does it already
+/// have? The complement of `probe_gap_boundary`, and the fix for that probe's bias.
+///
+/// A seam is a SYMPTOM. A chart's maximal derivable spans are inflated by misparses — each block
+/// grows as far as *some* derivation reaches, including a wrong one — so the seam lands where
+/// spurious coverage ran out, not where the missing rule is. Measured twice on 2026-10-25: «The
+/// claim is still the strongest evidence.» put its seam AFTER `still`, because `still` had been
+/// swallowed into a complete `cat_s(dcl, fin_any)` as the predicative adjective "motionless"; and
+/// «Finding 9 reports those scores.» grew a three-deep `compound_kind` pile over `reports`. Keying a
+/// census on the seam's categories therefore hashes each sentence's accidental lexical ambiguity,
+/// which is why it returned 61 singletons over 76 blockers.
+///
+/// This asks the question grammar engineering asks instead — which step of the intended derivation
+/// is unlicensed — in the cheapest form that needs no gold trees: **delete one token and re-parse**.
+/// If the sentence closes without token `i`, then `i` is what the grammar could not use. That names
+/// a WORD and its existing categories, which groups across sentences; a seam does not.
+///
+/// Reports `ABLATE <n-implicated> <surfaces>` per sentence. A sentence with exactly one implicated
+/// token has an unambiguous culprit; several means the obstruction is structural rather than
+/// lexical, and none means deletion never rescues it (the gap is not one token's fault).
+///
+///     EIGENIUS_DB_SNAPSHOT=… EIGENIUS_PROBE_PAGE=/abs/page.txt EIGENIUS_PROBE_FILE=/abs/gaps.txt \
+///         cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///         probe_token_ablation -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_token_ablation() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let page = std::env::var("EIGENIUS_PROBE_PAGE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let aug = page.as_ref().map(|t| page_augmentation(&head, t, &lem));
+    let index = match page.as_ref() {
+        Some(t) => build_index_over(&head, aug.as_ref()).with_document(page_units(t), 0),
+        None => build_index_over(&head, aug.as_ref()),
+    };
+    eprintln!(
+        "probe page: {} lines  augmentation: {}",
+        page.as_ref().map(|t| t.lines().count()).unwrap_or(0),
+        if aug.is_some() { "built" } else { "NONE" }
+    );
+
+    let sentences: Vec<String> = std::env::var("EIGENIUS_PROBE_FILE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            // The validation case: `still` has no adverb category, so deleting it must rescue the
+            // sentence — and the seam probe pointed past `still` instead. Invented, not corpus.
+            vec![
+                "The claim is still the strongest evidence.".to_string(),
+                "The claim is the strongest evidence.".to_string(),
+            ]
+        });
+
+    let parses = |s: &str| -> bool {
+        let (c, o) = index.parse_open(s, &lem);
+        !c.is_empty() || !o.is_empty()
+    };
+
+    for s in &sentences {
+        if !index.unknown_words(s, &lem).is_empty() {
+            eprintln!("ABLATE\tOOV\t-\t{s:?}");
+            continue;
+        }
+        if parses(s) {
+            eprintln!("ABLATE\tPARSES\t-\t{s:?}");
+            continue;
+        }
+        // Detach sentence-final punctuation so deleting the LAST word does not also delete the
+        // period. Measured: without this, «The claim is very strong.» reported `strong.` as
+        // implicated, because what actually parsed was the unpunctuated «The claim is very» — a
+        // different grammar question than the one being asked.
+        let trimmed = s.trim_end();
+        let (body, tail) = match trimmed.char_indices().last() {
+            Some((k, '.' | '?' | '!')) => (&trimmed[..k], &trimmed[k..]),
+            _ => (trimmed, ""),
+        };
+        let toks: Vec<&str> = body.split_whitespace().collect();
+        let mut implicated: Vec<String> = Vec::new();
+        for i in 0..toks.len() {
+            let mut rest: Vec<&str> = toks.clone();
+            rest.remove(i);
+            if rest.is_empty() {
+                continue;
+            }
+            if parses(&format!("{}{tail}", rest.join(" "))) {
+                implicated.push(format!("{i}:{}", toks[i]));
+            }
+        }
+        eprintln!(
+            "ABLATE\t{}\t{}\t{s:?}",
+            implicated.len(),
+            if implicated.is_empty() {
+                "-".to_string()
+            } else {
+                implicated.join(",")
+            },
+        );
+    }
 }

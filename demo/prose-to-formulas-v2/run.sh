@@ -90,7 +90,21 @@ hr "0. Kernel on the LEXICON snapshot"
 # ALIGNED, not raw: the anaphor's restrictor is checked against a claim's KIND class, and
 # `claim-kind-alignment.esl` arrives only in the aligned layer. A raw snapshot fails closed.
 SNAPSHOT_ROOT="${SNAPSHOT_ROOT:-$REPO/../db-snapshot}"
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$(ls -1dt "$SNAPSHOT_ROOT"/wordnet-umls-aligned-* 2>/dev/null | head -1 || true)}"
+# `wordnet-umls-hpo-aligned-*` FIRST, and it is not a preference: that is the store the project
+# measures against, and `wordnet-umls-aligned-*` does NOT glob it (the `hpo-` infix breaks the
+# match). On 2026-10-26 the retained store was the hpo-aligned one and every bare aligned snapshot
+# was removed, so the old single glob found nothing. The hpo-aligned store is a SUPERSET — it is
+# built on the aligned one, so `claim-kind-alignment.esl` is present either way.
+# `ls -1dt` sorts ALL its arguments by mtime, so passing both globs in one call would not prefer
+# either — hence two calls, hpo-aligned first.
+newest_snapshot() {
+    local d
+    for pat in wordnet-umls-hpo-aligned- wordnet-umls-aligned-; do
+        d=$(ls -1dt "$SNAPSHOT_ROOT/$pat"* 2>/dev/null | head -1 || true)
+        [[ -n "$d" ]] && { printf '%s' "$d"; return; }
+    done
+}
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$(newest_snapshot)}"
 [[ -n "$SNAPSHOT" ]] || {
     echo "ERROR: no aligned snapshot under $SNAPSHOT_ROOT" >&2
     echo "  run scripts/reseed-lexicon-db.sh --umls-all, then scripts/build-alignment-snapshot.sh" >&2

@@ -50,16 +50,34 @@ impl Parser {
     /// local segment and could false-merge two distinct senses. O(n²) over the pre-cap forest, which the
     /// felicity gate has already bounded to the classify-candidate count.
     pub(super) fn subsume_duplicates(forest: &mut Vec<Item>) {
-        let mut out: Vec<Item> = Vec::with_capacity(forest.len());
+        // Key on the category's DENOTATION, not its syntax. A reading is a (type, term) pair, and
+        // `⟦cat_s(dcl, fin)⟧` and `⟦cat_s(dcl, fin_any)⟧` are BOTH `Prop` — so two full-span
+        // readings carrying the identical proposition are the same reading even though their top
+        // categories differ in a feature.
+        //
+        // Measured 2026-10-25 on «The cutoff was 5.5 Å.» with a plain definite NP available:
+        //
+        //   [0] has_quantity(the(n13759014), u"m", mk_quantity(11/20000000000, 0))  cat_s(dcl, fin)      BackwardApp
+        //   [1] has_quantity(the(n13759014), u"m", mk_quantity(11/20000000000, 0))  cat_s(dcl, fin_any)  ForwardApp
+        //
+        // — byte-identical sems (321 bytes each) from two routes: the plain NP applying backward to
+        // the VP, and the type-raised subject applying forward. Keying on `cat()` kept both, so the
+        // unit reported AMBIGUOUS with one proposition. `retain_distinct_sems` upstream cannot catch
+        // it either: it runs on PRE-felicity sems, and these two converge only once felicity
+        // normalises them.
+        let key = |it: &Item| {
+            denote_cat(it.cat())
+                .map(|d| format!("{d:?}"))
+                .unwrap_or_else(|_| format!("{:?}", it.cat()))
+        };
+        let mut out: Vec<(String, Item)> = Vec::with_capacity(forest.len());
         for it in forest.drain(..) {
-            if !out
-                .iter()
-                .any(|k| k.cat() == it.cat() && k.sem() == it.sem())
-            {
-                out.push(it);
+            let k = key(&it);
+            if !out.iter().any(|(ok, oi)| *ok == k && oi.sem() == it.sem()) {
+                out.push((k, it));
             }
         }
-        *forest = out;
+        *forest = out.into_iter().map(|(_, it)| it).collect();
     }
 
     /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one (D64), or reject it.
@@ -106,13 +124,14 @@ impl Parser {
             eprintln!("    [felicity] readback start");
         }
         let nf = felicity_readback(&evaled)?;
-        // Demonstrative holes (D64, `d64-demonstratives-as-holes.md` §2): freshen every
+        // Gate-time holes, in one traversal (D64 §2 for the demonstrative, D62 2d Fork A for the
+        // factive subordinator's proof arguments): freshen every
         // `lexicon:anaphor_of(A)` application in the NORMAL FORM — β-reduction has made the
         // restrictor `A` concrete here, which is why these holes cannot be seeded like the
         // Entity-typed pronoun holes (the determiner hasn't met its noun at seed time). Each
         // occurrence becomes a fresh variable carried at the RESTRICTOR type, so the resolution
         // re-gate vetoes a type-wrong antecedent.
-        let (nf, dem_holes) = super::super::holes::freshen_anaphor_of(&nf);
+        let (nf, gate_holes) = super::super::holes::freshen_gate_holes(&nf);
         // The holes carried by this parse — each a typed parameter (seed holes readback-named
         // `{base}0`; demonstrative holes named by the gate's traversal).
         let mut infos: Vec<HoleInfo> = present
@@ -124,10 +143,14 @@ impl Parser {
                 count: None,
             })
             .collect();
-        infos.extend(dem_holes.into_iter().map(|h| HoleInfo {
+        infos.extend(gate_holes.into_iter().map(|h| HoleInfo {
             var: h.var,
             ty: h.ty,
-            kind: HoleKind::EntityRef,
+            kind: if h.is_proof {
+                HoleKind::ProofObligation
+            } else {
+                HoleKind::EntityRef
+            },
             count: h.count,
         }));
         if dbg {
@@ -187,6 +210,15 @@ pub enum HoleKind {
     /// pronoun / possessor (seed-time freshening), the RESTRICTOR class for a demonstrative
     /// (`anaphor_of(A)`, felicity-time freshening — "these findings" resolves only to findings).
     EntityRef,
+    /// An undischarged FACTIVE PRESUPPOSITION (D62 2d Fork A): the hypothetical proof a factive
+    /// subordinator takes for each of its clauses, carried at that clause's own proposition.
+    ///
+    /// Not an anaphora hole, and the D64 resolver must not try to fill it — there is no antecedent
+    /// to apply. It is an OBLIGATION, exported for the justification-logic layer to discharge with
+    /// a witness or to fail closed on. Its scoping IS the projection account: a hypothesis still
+    /// free here projected through whatever negation and modals it passed, because those are formed
+    /// within the context and do not discharge it.
+    ProofObligation,
 }
 
 /// One typed parameter of an [`OpenParse`]'s abstraction: the binder name (`var`) standing for an

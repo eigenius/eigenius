@@ -1,0 +1,656 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! **Published notations** — identifiers whose form is specified, not guessed.
+//!
+//! The document glossary's other extraction sources read ORTHOGRAPHY: Schwartz-Hearst matches
+//! `Long Form (SHORT)`, apposition matches `<common-noun> <Name>`. Both are heuristics over how
+//! English happens to be written, and both need a precision guard — recurrence, a stop-list — to
+//! stay honest.
+//!
+//! A notation needs none of that. `p.Ile380Thr` is an HGVS protein change because HGVS says what
+//! one looks like, and `P98170` is a UniProt accession because UniProt publishes the pattern. The
+//! grammar IS the evidence, so there is no threshold to tune and no recurrence to wait for.
+//!
+//! That distinction is why this is a source of its own rather than a loosening of
+//! `eigenius_kernel::dcg::named_entity`: `Ile380Thr` fails that recognizer three times over — an interior
+//! capital is not Title-case, `p.Ile380Thr` does not begin uppercase, and the document never puts
+//! a noun head in front of either (`an`, `for`, `of`, `than`, a table pipe, or a verb). Loosening
+//! the shape to admit it would also admit `mRNA` and `HeLa`, which that rule exists to reject.
+
+pub mod hgvs;
+
+/// What a token was recognised as, carrying the parse rather than a name.
+///
+/// A recognised token must NOT become an opaque individual. `p.Ile380Thr` parses into a reference
+/// residue, a position and an alternate residue; minting `ni_ile380thr` would put that structure
+/// back into a string, which is the ad-hoc-predicate failure the parser exists to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Notation {
+    /// A protein change — `p.Ile380Thr`, `Ile380Thr`, `N108Q`, `p.Ser369Leufs*12`.
+    ProteinChange(hgvs::Change),
+    /// A coding change — `c.131T>C`, `c.1105_1107del`.
+    CodingChange(hgvs::Change),
+    /// A residue and its position with no change stated — `Arg381`, `Ile380`.
+    ResiduePosition { residue: String, position: u32 },
+    /// A CODING position or interval with no change stated — `c.1139`, `c.1135-1145`. A location
+    /// on a coding reference: variant:Location again, carrying start and end.
+    CodingPosition { start: u32, end: u32 },
+    /// An INTERVAL between two residue positions — `Met375–Arg381`, a helix boundary. Distinct from
+    /// a position because `variant:Location` carries start AND end, and the document states helix
+    /// and domain extents this way: 9 distinct ranges over 8 units of the XIAP report.
+    ResidueRange {
+        start_residue: String,
+        start: u32,
+        end_residue: String,
+        end: u32,
+    },
+    /// A UniProt accession — `P98170`, `A5D8Q0`.
+    UniProt(String),
+    /// A Protein Data Bank entry — `2KNA`.
+    PdbEntry(String),
+    /// A dbSNP reference SNP — `rs370533935`.
+    DbSnp(String),
+    /// A ClinVar variation record — `VCV004699404`.
+    ClinVar(String),
+    /// An Ensembl gene or transcript, or a RefSeq transcript — `ENSG00000101966`, `NM_001167.4`.
+    SequenceRecord(String),
+    /// A genomic coordinate — `chrX:123900530`.
+    GenomicCoordinate(String),
+    /// An ISO 8601 calendar date — `2026-09-14`. A published grammar, and the report dates every
+    /// database query with one.
+    IsoDate(String),
+    /// A journal citation's year and volume — `2019;20`, as a reference list writes it.
+    CitationLocus(String),
+    /// A web address or one of its components — `rest.ensembl.org`,
+    /// `esearch.fcgi?db=clinvar&term=XIAP`. RFC 3986 / RFC 1123.
+    WebLocator(String),
+    /// A curated-database identifier with a published prefix — `HGNC:592`.
+    PrefixedId(String),
+    /// A software version — `v4.1`, `4.8a`, `ABE7.10`.
+    Version(String),
+}
+
+/// The one-letter amino-acid codes, in the IUPAC set, plus `*` for a stop.
+const ONE_LETTER: &str = "ACDEFGHIKLMNPQRSTVWY";
+
+/// The three-letter amino-acid codes, plus `Ter` for a stop.
+const THREE_LETTER: &[&str] = &[
+    "Ala", "Arg", "Asn", "Asp", "Cys", "Gln", "Glu", "Gly", "His", "Ile", "Leu", "Lys", "Met",
+    "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val", "Ter", "Sec", "Pyl", "Xaa",
+];
+
+fn is_three_letter(r: &str) -> bool {
+    THREE_LETTER.contains(&r)
+}
+
+/// `N108Q` / `L145T` — a protein change in ONE-letter codes, which is how an editor's mutations are
+/// written (`ABE9 = ABE8e + N108Q + L145T`). Deliberately separate from [`hgvs::parse_p`], whose
+/// contract refuses the one-letter form because the registry's alleles must not be read from it.
+fn parse_one_letter_change(body: &str) -> Option<hgvs::Change> {
+    let mut cs = body.chars();
+    let ref_res = cs.next()?;
+    if !ONE_LETTER.contains(ref_res) {
+        return None;
+    }
+    let rest: String = cs.collect();
+    let split = rest.find(|c: char| !c.is_ascii_digit())?;
+    let (pos, alt) = rest.split_at(split);
+    if pos.is_empty() || alt.chars().count() != 1 {
+        return None;
+    }
+    let a = alt.chars().next()?;
+    if !ONE_LETTER.contains(a) && a != '*' {
+        return None;
+    }
+    Some(hgvs::Change {
+        start: pos.parse().ok()?,
+        end: pos.parse().ok()?,
+        ref_state: Some(ref_res.to_string()),
+        alt: alt.to_string(),
+    })
+}
+
+/// `c.1139`, `c.1135-1145` — a coding position or interval with NO change. The document cites
+/// positions this way when it is locating a site rather than describing a substitution.
+fn parse_coding_position(body: &str) -> Option<Notation> {
+    let num = |x: &str| x.parse::<u32>().ok().filter(|_| !x.starts_with('0'));
+    let (a, b) = match body.split_once(['-', '\u{2013}', '_']) {
+        Some((l, r)) => (num(l)?, num(r)?),
+        None => {
+            let n = num(body)?;
+            (n, n)
+        }
+    };
+    (a <= b).then_some(Notation::CodingPosition { start: a, end: b })
+}
+
+/// `Met375-Arg381` — an interval between two residue positions, after dash normalisation. Rejected
+/// when it runs backwards, as `parse_c` rejects a backwards coding interval.
+fn parse_residue_range(t: &str) -> Option<Notation> {
+    let (lhs, rhs) = t.split_once('-')?;
+    let (
+        Some(Notation::ResiduePosition {
+            residue: a,
+            position: st,
+        }),
+        Some(Notation::ResiduePosition {
+            residue: b,
+            position: en,
+        }),
+    ) = (parse_residue_position(lhs), parse_residue_position(rhs))
+    else {
+        return None;
+    };
+    (st <= en).then_some(Notation::ResidueRange {
+        start_residue: a,
+        start: st,
+        end_residue: b,
+        end: en,
+    })
+}
+
+/// `Arg381`, `Ile380` — a residue and its position with NO change stated. Distinct from a change:
+/// the document says where something is, not what it becomes.
+fn parse_residue_position(t: &str) -> Option<Notation> {
+    if !t.is_ascii() || t.len() < 4 || !is_three_letter(&t[..3]) {
+        return None;
+    }
+    let pos = &t[3..];
+    if pos.is_empty() || !pos.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(Notation::ResiduePosition {
+        residue: t[..3].to_string(),
+        position: pos.parse().ok()?,
+    })
+}
+
+/// A UniProt accession, in the two published shapes:
+/// `[OPQ][0-9][A-Z0-9]{3}[0-9]` and `[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]`.
+fn is_uniprot(t: &str) -> bool {
+    let b = t.as_bytes();
+    let up = |i: usize| b[i].is_ascii_uppercase();
+    let dg = |i: usize| b[i].is_ascii_digit();
+    let an = |i: usize| b[i].is_ascii_uppercase() || b[i].is_ascii_digit();
+    if b.len() == 6 {
+        let first_opq = matches!(b[0], b'O' | b'P' | b'Q');
+        if first_opq && dg(1) && an(2) && an(3) && an(4) && dg(5) {
+            return true;
+        }
+        let a_nr_z = up(0) && !matches!(b[0], b'O' | b'P' | b'Q');
+        return a_nr_z && dg(1) && up(2) && an(3) && an(4) && dg(5);
+    }
+    false
+}
+
+/// Are a change's reference and alternate states real amino acids?
+///
+/// [`hgvs::parse_p`] checks a residue by SHAPE — three characters, Title-case — which is right for
+/// a registry reading curated rows, and wrong here: over arbitrary prose it reads `Ile380Xyz` as a
+/// protein change. A notation source must validate against the actual IUPAC set, so this re-checks
+/// what `parse_p` admitted rather than loosening a contract the registry depends on. (Caught by
+/// the negative test, not by inspection.)
+fn is_real_protein_change(c: &hgvs::Change) -> bool {
+    let residue_ok = |r: &str| match r.len() {
+        1 => ONE_LETTER.contains(r),
+        3 => is_three_letter(r),
+        _ => false,
+    };
+    let ref_ok = c.ref_state.as_deref().is_some_and(residue_ok);
+    // The alternate is a residue, a stop, or a frameshift whose first residue is one.
+    let alt_ok = residue_ok(&c.alt)
+        || c.alt == "*"
+        || (c.alt.len() > 3 && is_three_letter(&c.alt[..3]) && c.alt[3..].starts_with("fs"));
+    ref_ok && alt_ok
+}
+
+/// Does the token's sequence position read as HGVS writes one — at least one digit, no leading
+/// zero? `Ile0380Thr` is not HGVS, and admitting it would make this source's grammar-is-the-
+/// evidence claim false in the only place it is checkable.
+fn position_well_formed(token: &str) -> bool {
+    let digits: String = token
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    !digits.is_empty() && !digits.starts_with('0')
+}
+
+/// Does `rest` open with a coordinate-system prefix — `c.`, `g.`, `p.`, `n.` or `m.`?
+fn is_qualified_change(rest: &str) -> bool {
+    let b = rest.as_bytes();
+    b.len() > 2 && b[1] == b'.' && matches!(b[0], b'c' | b'g' | b'p' | b'n' | b'm')
+}
+
+/// Top-level domains this corpus uses. A CLOSED list on purpose: "ends in letters" called
+/// `dbnsfp.aa.pos` a hostname, and a dotted FIELD PATH is not an address. Over-matching here does
+/// not merely mislabel — it takes the token from the code-span source, which would have recorded
+/// the author's own markup instead of a guess.
+const TLDS: &[&str] = &[
+    "org", "com", "net", "edu", "gov", "info", "io", "ac", "uk", "nl", "de", "fr", "jp", "ch",
+];
+
+/// A dotted host name, RFC 1123: labels of letters/digits/hyphens, and a RECOGNISED TLD.
+fn is_hostname(t: &str) -> bool {
+    let labels: Vec<&str> = t.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        && labels.last().is_some_and(|tld| TLDS.contains(tld))
+}
+
+/// A software version: an optional `v`, two or more dot-separated numeric components, and an
+/// optional single trailing letter. `v4.1`, `4.8a`, `v4.1.1`.
+///
+/// Deliberately narrow. `ABE7.10` is NOT a version by this rule — its leading `ABE7` is not
+/// numeric — and `2026AA` is not either, having no dot. Both are product names, which the
+/// recurrent-name source claims on its own evidence.
+fn is_version(t: &str) -> bool {
+    let body = t.strip_prefix('v').unwrap_or(t);
+    let core = body
+        .strip_suffix(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(body);
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() >= 2
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Recognise one whitespace-delimited token, stripped of surrounding punctuation by the caller.
+///
+/// Returns `None` for anything whose grammar does not match — this source never guesses. Order
+/// matters only where two grammars could both match; each arm below is disjoint in practice.
+pub fn recognize(token: &str) -> Option<Notation> {
+    let t = token.trim();
+    // An en- or em-dash is a hyphen. Normalised BEFORE the ASCII guard, because the document writes
+    // residue ranges with an en-dash (`Thr369–Asn373`) and that made the whole token non-ASCII —
+    // the guard then rejected it entire, taking BOTH endpoints with it, which is why `Asn373` and
+    // `Asn416` stayed OOV after the first wiring. 9 distinct ranges over 8 units.
+    let dashed = t.replace(['\u{2013}', '\u{2014}'], "-");
+    let t = dashed.as_str();
+    // Every notation here is ASCII by specification, so a token carrying anything else is not one
+    // of them. Stated once, at the top, rather than guarded in each arm — and it is also what
+    // keeps the byte-indexed readers below from meeting a multi-byte char at all.
+    if t.is_empty() || !t.is_ascii() {
+        return None;
+    }
+    // FULLY QUALIFIED first — `<accession>:<c|g|p|n|m>.<change>` is a change ON a reference, and
+    // the accession patterns below would otherwise claim it: `NM_001167.4:c.1141C>T` matched the
+    // RefSeq prefix and came back a SequenceRecord, which is the one form whose reference is
+    // stated and therefore the one that can carry true allele identity.
+    if let Some((acc, rest)) = t.split_once(':') {
+        if !acc.is_empty() && is_qualified_change(rest) {
+            if let Ok(c) = hgvs::parse_c(rest) {
+                return Some(Notation::CodingChange(c));
+            }
+            if let Ok(c) = hgvs::parse_p(rest) {
+                return is_real_protein_change(&c).then_some(Notation::ProteinChange(c));
+            }
+            // `g.`/`n.`/`m.` are coordinate systems this crate does not parse yet; the token is
+            // still a coordinate on a named reference, which is more than nothing.
+            return Some(Notation::GenomicCoordinate(t.to_string()));
+        }
+    }
+    // Changes, prefixed. `parse_p`/`parse_c` own their contracts; this only routes to them.
+    if !t.starts_with("chr") && t.chars().any(|c| c.is_ascii_digit()) && !position_well_formed(t) {
+        // A malformed position disqualifies every change and residue arm below. Accessions and
+        // coordinates are exempt: `A5D8Q0` and `chrX:0123` carry no sequence position.
+        if t.starts_with("p.") || t.starts_with("c.") || parse_residue_position(t).is_some() {
+            return None;
+        }
+        if hgvs::parse_p(&format!("p.{t}")).is_ok() || parse_one_letter_change(t).is_some() {
+            return None;
+        }
+    }
+    if t.starts_with("p.") {
+        if let Ok(c) = hgvs::parse_p(t) {
+            return is_real_protein_change(&c).then_some(Notation::ProteinChange(c));
+        }
+        let body = t.trim_start_matches("p.");
+        if let Some(c) = parse_one_letter_change(body) {
+            return Some(Notation::ProteinChange(c));
+        }
+        // `p.Ala379` — a residue and position with no alternate stated.
+        return parse_residue_range(body).or_else(|| parse_residue_position(body));
+    }
+    if t.starts_with("c.") {
+        if let Ok(c) = hgvs::parse_c(t) {
+            return Some(Notation::CodingChange(c));
+        }
+        // No change stated — a position, which is a location, not a change.
+        return parse_coding_position(t.trim_start_matches("c."));
+    }
+    // Bare changes, as the report also writes them (`Ile380Thr`, `N108Q`). `parse_p` refuses an
+    // unprefixed notation — correct for a registry, where coding and protein coordinates are
+    // ambiguous — so the prefix is supplied here, for a glossary that only needs the parts.
+    if let Ok(c) = hgvs::parse_p(&format!("p.{t}")) {
+        if is_real_protein_change(&c) {
+            return Some(Notation::ProteinChange(c));
+        }
+    }
+    if let Some(n) = parse_residue_range(t) {
+        return Some(n);
+    }
+    if let Some(n) = parse_residue_position(t) {
+        return Some(n);
+    }
+    if let Some(c) = parse_one_letter_change(t) {
+        return Some(Notation::ProteinChange(c));
+    }
+    // ISO 8601 date, before anything numeric can claim it.
+    if t.len() == 10 && t.as_bytes()[4] == b'-' && t.as_bytes()[7] == b'-' {
+        let (y, rest) = t.split_at(4);
+        let (m, d) = (&rest[1..3], &rest[4..6]);
+        if [y, m, d]
+            .iter()
+            .all(|p| p.chars().all(|c| c.is_ascii_digit()))
+            && (1..=12).contains(&m.parse::<u32>().unwrap_or(0))
+            && (1..=31).contains(&d.parse::<u32>().unwrap_or(0))
+        {
+            return Some(Notation::IsoDate(t.to_string()));
+        }
+    }
+    // `2019;20` — a reference list's year and volume.
+    if let Some((y, v)) = t.split_once(';') {
+        if y.len() == 4
+            && y.chars().all(|c| c.is_ascii_digit())
+            && !v.is_empty()
+            && v.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(Notation::CitationLocus(t.to_string()));
+        }
+    }
+    // A web address or a component of one: a scheme, a query, or a dotted host/path.
+    if t.contains("://")
+        || t.contains('?')
+        || t.contains('&')
+        || (t.contains('.') && t.contains('/'))
+        || is_hostname(t)
+    {
+        return Some(Notation::WebLocator(t.to_string()));
+    }
+    // `HGNC:592` — a published registry prefix over a numeric id.
+    if let Some((prefix, id)) = t.split_once(':') {
+        if !prefix.is_empty()
+            && prefix.chars().all(|c| c.is_ascii_uppercase())
+            && !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(Notation::PrefixedId(t.to_string()));
+        }
+    }
+    // A version: `v4.1`, `4.8a`, `ABE7.10`.
+    if is_version(t) {
+        return Some(Notation::Version(t.to_string()));
+    }
+    // Accessions and records, each by its published pattern.
+    if let Some(rest) = t.strip_prefix("rs") {
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+            return Some(Notation::DbSnp(t.to_string()));
+        }
+    }
+    if let Some(rest) = t.strip_prefix("VCV") {
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+            return Some(Notation::ClinVar(t.to_string()));
+        }
+    }
+    if is_uniprot(t) {
+        return Some(Notation::UniProt(t.to_string()));
+    }
+    if (t.starts_with("ENSG") || t.starts_with("ENST") || t.starts_with("NM_"))
+        && t.chars().any(|c| c.is_ascii_digit())
+    {
+        return Some(Notation::SequenceRecord(t.to_string()));
+    }
+    if let Some(rest) = t.strip_prefix("chr") {
+        if rest.contains(':')
+            && rest
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+        {
+            return Some(Notation::GenomicCoordinate(t.to_string()));
+        }
+    }
+    // A PDB id is four characters, a digit then three alphanumerics (`2KNA`). Last, because the
+    // pattern is loose enough to shadow a short accession if tried earlier.
+    let b = t.as_bytes();
+    if b.len() == 4
+        && b[0].is_ascii_digit()
+        && b[0] != b'0'
+        && b[1..].iter().all(|c| c.is_ascii_alphanumeric())
+        && t.chars().any(|c| c.is_ascii_alphabetic())
+    {
+        return Some(Notation::PdbEntry(t.to_string()));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn protein(t: &str) -> hgvs::Change {
+        match recognize(t) {
+            Some(Notation::ProteinChange(c)) => c,
+            other => panic!("{t} should be a protein change, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_tokens_that_blocked_the_xiap_report() {
+        // The 20-unit blocker, in both forms the document writes.
+        for t in ["p.Ile380Thr", "Ile380Thr"] {
+            let c = protein(t);
+            assert_eq!(
+                (c.start, c.ref_state.as_deref(), c.alt.as_str()),
+                (380, Some("Ile"), "Thr"),
+                "{t}"
+            );
+        }
+        assert_eq!(protein("p.Ile380Val").alt, "Val");
+        assert_eq!(protein("p.Ala379Thr").start, 379);
+        assert_eq!(protein("p.Arg381Ter").alt, "Ter");
+
+        // ONE-letter, how an editor's mutations are written (`ABE9 = ABE8e + N108Q + L145T`).
+        let c = protein("L145T");
+        assert_eq!(
+            (c.start, c.ref_state.as_deref(), c.alt.as_str()),
+            (145, Some("L"), "T")
+        );
+        assert_eq!(protein("N108Q").start, 108);
+
+        assert_eq!(
+            recognize("Arg381"),
+            Some(Notation::ResiduePosition {
+                residue: "Arg".into(),
+                position: 381
+            })
+        );
+        // Residue RANGES, as the document writes helix extents — en-dash, em-dash and hyphen.
+        for r in [
+            "Met375\u{2013}Arg381",
+            "Met375\u{2014}Arg381",
+            "Met375-Arg381",
+        ] {
+            assert_eq!(
+                recognize(r),
+                Some(Notation::ResidueRange {
+                    start_residue: "Met".into(),
+                    start: 375,
+                    end_residue: "Arg".into(),
+                    end: 381
+                }),
+                "{r}"
+            );
+        }
+        // The endpoints the en-dash form used to swallow whole.
+        assert!(matches!(
+            recognize("Thr369\u{2013}Asn373"),
+            Some(Notation::ResidueRange { end: 373, .. })
+        ));
+        // A backwards interval is refused, as parse_c refuses a backwards coding interval.
+        assert_eq!(recognize("Arg381-Met375"), None);
+
+        assert_eq!(
+            recognize("P98170"),
+            Some(Notation::UniProt("P98170".into()))
+        );
+        assert_eq!(
+            recognize("A5D8Q0"),
+            Some(Notation::UniProt("A5D8Q0".into()))
+        );
+        assert_eq!(recognize("2KNA"), Some(Notation::PdbEntry("2KNA".into())));
+        assert_eq!(
+            recognize("rs370533935"),
+            Some(Notation::DbSnp("rs370533935".into()))
+        );
+        assert_eq!(
+            recognize("VCV004699404"),
+            Some(Notation::ClinVar("VCV004699404".into()))
+        );
+        assert_eq!(
+            recognize("ENSG00000101966"),
+            Some(Notation::SequenceRecord("ENSG00000101966".into()))
+        );
+        assert_eq!(
+            recognize("NM_001167.4"),
+            Some(Notation::SequenceRecord("NM_001167.4".into()))
+        );
+        assert!(matches!(
+            recognize("chrX:123900530"),
+            Some(Notation::GenomicCoordinate(_))
+        ));
+        assert!(matches!(
+            recognize("c.1141C>T"),
+            Some(Notation::CodingChange(_))
+        ));
+
+        // FULLY QUALIFIED: the one form whose reference accession is stated, and so the only one
+        // that can carry true allele identity. It must not be swallowed by the RefSeq pattern.
+        match recognize("NM_001167.4:c.1141C>T") {
+            Some(Notation::CodingChange(c)) => assert_eq!(
+                (c.start, c.ref_state.as_deref(), c.alt.as_str()),
+                (1141, Some("C"), "T")
+            ),
+            other => panic!("a qualified coding change, got {other:?}"),
+        }
+        // The bare accession still reads as a record.
+        assert_eq!(
+            recognize("NM_001167.4"),
+            Some(Notation::SequenceRecord("NM_001167.4".into()))
+        );
+    }
+
+    /// The precision side, which matters more: this source runs over OOV tokens and must not
+    /// reclassify the document's ordinary vocabulary as notation. Every token below is one the
+    /// XIAP corpus actually contains.
+    #[test]
+    fn what_is_not_a_notation_is_refused() {
+        for t in [
+            // The product names that remain OOV after this source — editors, predictors,
+            // databases, versions. Recognising any as notation would be a false ground.
+            "ABE9",
+            "ABE8e",
+            "ABE-NW1",
+            "ABE7.10",
+            "SIFT4G",
+            "VEST4",
+            "BayesDel",
+            "AlphaFold",
+            "AlphaMissense",
+            "ClinPred",
+            "MaveDB",
+            "HGMD",
+            "SpliceAI",
+            "SiPhy",
+            "LOVD",
+            "dbNSFP",
+            "2026AA",
+            // Ordinary words, including the residue codes standing alone.
+            "Thr",
+            "Ile",
+            "Ter",
+            "the",
+            "residue",
+            "dimerisation",
+            "paywalled",
+            "helix",
+            // Near-misses by shape.
+            "Ile",
+            "Ile380Xyz",
+            // `p.Ile380` used to be here as a near-miss. It is now a POSITIVE: a bare protein
+            // position is a variant:Location, which is what `p.Ala379` in the document needed.
+            // The expectation changed with the feature; it was not loosened to pass.
+            "p.",
+            "c.",
+            "rs",
+            "VCV",
+            "chrX",
+            "Ile0380Thr",
+            "c.0139",
+            "c.",
+            "c.1145-1135",
+            // Years and bare numbers, which a loose coordinate or PDB pattern would swallow.
+            "2026",
+            "1998",
+            "380",
+            "0KNA",
+            // Non-ASCII, which byte-indexed readers must refuse rather than panic on. (A residue
+            // RANGE is no longer here — dash normalisation admits it; these stay rejected.)
+            "3₁₀",
+            "α1",
+            "p.Ilé380Thr",
+            // Hyphenated tokens that are NOT ranges, now that the range arm splits on a hyphen.
+            "Ile-Thr",
+            "ABE9-SpRY",
+            "Gyrd-Hansen",
+            "157-nucleotide",
+        ] {
+            assert_eq!(
+                recognize(t),
+                None,
+                "`{t}` must not be recognised as notation"
+            );
+        }
+    }
+
+    /// A known ambiguity, recorded rather than hidden: the published UniProt pattern also admits
+    /// gene symbols of the shape `letter digit …` (`P2RY12`). The mitigation is structural — this
+    /// source is an OOV closure, so it only ever sees tokens the lexicon failed to supply, and a
+    /// gene symbol the lexicon knows never reaches it.
+    #[test]
+    fn the_uniprot_pattern_collides_with_some_gene_symbols() {
+        assert_eq!(
+            recognize("P2RY12"),
+            Some(Notation::UniProt("P2RY12".into()))
+        );
+    }
+
+    /// `parse_p`'s contract is untouched by the move: the registry still refuses the one-letter
+    /// form, and only `recognize` admits it.
+    #[test]
+    fn the_registrys_refusal_still_stands() {
+        assert!(hgvs::parse_p("p.L44P").is_err());
+        assert!(matches!(
+            recognize("p.L44P"),
+            Some(Notation::ProteinChange(_))
+        ));
+    }
+}

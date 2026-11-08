@@ -9,6 +9,536 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **MOVING MACHINES?** Read [uab-xiap-handoff.md](uab-xiap-handoff.md) FIRST. Most of this entry's
+> work product is gitignored and does not travel with the branch, and the CNL rewrite
+> (`experiments/parsing/derived/step5/c0*.py`) is hand-authored and unrecoverable if not copied
+> out of band.
+>
+> **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
+> OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
+>
+> **Store: `wordnet-umls-hpo-aligned-2026-11-07-systematic`** (reseeded `2026-11-08` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Replaced all word-specific `if matches!(s_lc, ...)` and `if s_lc == ...` blocks in
+> `kernel/src/dcg/parse/seed.rs` and `kernel/src/dcg/parse/mod.rs` with systematic mechanisms across
+> four layers:
+> (1) **Category-driven parser rules (`combinators.rs`, `constructions.rs`, `seed.rs`, `category.rs`)**:
+> `copula_cp` (`is`/`are`/`was`/`were`/`be [not]` + `cat_cp`), `gq_obj_vp_comp` (GQ object of a
+> 3-place object-predicative / object-control verb), `distribute_vpadjunct_object` (distributive
+> `cat_group` object of a 3-place VP-adjunct preposition in `apply_group`), `is_vp_adjunct_prep`
+> tightened to require `bwd(VP, VP)` rather than any `bwd`, `coordinate_np` allowing `conn_and`
+> groups to extend with `conn_or` (`X and Y or Z`) and allowing bare common-noun kinds (`kind_of`)
+> to coordinate across simple and Σ-refined members, `gerund_subject` blocking coordinated VPs,
+> and category-keyed lifts in `seed.rs` for prepositions (`cat_pp`/`cat_pp_arg`/VP-adjunct),
+> clausal subordinators, auxiliaries (`do`/`be`/`have`), modals, `not`, `only`, and `worth`-family
+> gerund-complement adjectives (`(S[dcl,adj]\NP)/(S[dcl,ger]\NP)` → `/NP`).
+> (2) **Productive morphology, compounding, spelling normalization, and per-POS sense-cap preservation
+> (`parse/mod.rs`, `seed.rs`)**: British-to-American `-ise`/`-ize`, `-isation`/`-ization`, `-our`/
+> `-or`, `-re`/`-er`, `-ogue`/`-og`, `haem-`/`hem-`, and doubled-`l` (`-lled`/`-lling`) normalization
+> in `candidate_lemmas`; productive prefix (`re-`, `under-`, `over-`, `self-`, `co-`, `out-`, `cross-`,
+> `pre-`, `de-`, `sub-`, `non-`, `un-`, `mis-`, `in-`, `bi-`, `tri-`, `homo-`, `multi-`, `inter-`,
+> `intra-`, `trans-`, `post-`, `anti-`, `para-`, `per-`) and suffix (`-mer`/`-mers`, `-logue`/`-logues`,
+> `-able`/`-ible`, `-ous`, `-ed`/`-ing`, `-ation`/`-isation`/`-ization`/`-ity`/`-age`) morphology;
+> per-POS sense-cap preservation so top-ranked noun/verb senses do not crowd out lexical adjective
+> (`a`/`s`), comparative adjective (`-er`), adverb (`r`), or inflected verb (`v`) senses.
+> (3) **Declarative closed-class & unit lexicon (`ontologies/lexicon/closed-class.esl`)**: migrated all
+> closed-class determiners, pronouns, reflexives, possessives, prepositions, subordinators,
+> complementizers, discourse adverbs, comparatives/superlatives, bioinformatics post-numeral unit
+> heads (`bp`, `kb`, `mb`, `nt`, `kda`, `aa`, `nucleotides`, `stars`, `orders`), and closed-class
+> polysemy supplements into declarative `lexicon:LexicalEntry` resources.
+> (4) **Open-class WordNet verb frame importer (`crates/eigenius-wordnet/src/convert.rs`)**: added
+> systematic emission of object-predicative (`((S\NP)/(S\NP))/NP` and passive `((S[pss]\NP)/NP)/Adj`),
+> linking/inchoative copular (`(S\NP)/(S[adj]\NP)` and `(S\NP)/NP` for frames 6/7), bare-infinitive
+> (`((S\NP)/(S[bse]\NP))/NP` for frame 25), and intransitive/unaccusative verb frames from WordNet
+> `frames.vrb`.
+> **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
+> families!)**, page grammar-gap **0** (**1,056 / 1,056 units parsed = 100.0%, `COVERAGE: PASS`!**),
+> encoded **19**, ambiguous **783**, open **254**, readings **101,509**, skeletons **46,763**.
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-11-05-core-en-89` (reseeded `2026-11-05` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Batch 1 (reseeded): gerund VP subjects (`gerund_subject` unary shift in `constructions.rs` +
+> `UNARY_SHIFTS`), `there`-existentials (`there_sem`, `there_expl`), `to`-infinitive subject control
+> (`to_inf` + WordNet frame 28 `FrameKind::SubjectControl`), ECM `to`-infinitives (`be_copula`,
+> `to_ecm`), and simple-past verb lemmatizer number relaxation (`with_past_verb_num` in `seed.rs` for
+> verbs whose simple past differs from their participle, e.g. `showed`/`shown`, `began`/`begun`).
+> Batch 2 (kernel-only on the same store): fixed `short_passive_participial_cat` `Fin` declaration
+> IRI bug (`combinators.rs` + `ProvGuard::RightNotShortPassiveParticipial`), non-finite backward VP
+> adverb modification (`pass`, `ger`, `bse`, `inf` in `category.rs` and `seed.rs`), `coordinate_but_not_prop`
+> object-GQ raising and `common_cat` generalization (`constructions.rs` / `registry.rs`), preposition +
+> gerund VP rules (`ger_prep_ppmod`, `ger_prep_by_vpadjunct`, `ger_prep_argmarker`, `ger_prep_vpadjunct`),
+> fronted PP with quantified/demonstrative object (`gq_prep_vpadjunct` `ForwardApp` provenance +
+> `front_adjunct_lifts` finiteness variable), and predicative adjective / passive participle +
+> `to`-infinitive complements (`pred_infinitive`). Batch 3 (kernel-only on the same store):
+> standalone demonstrative pronoun `that` + 1st-person singular pronoun `I` (`seed.rs`), spelled
+> cardinal numerals `eleven`–`twenty` (`preprocess.rs`), `both of` partitive + `all <num>` determiner +
+> fused-head `<det> <num>` (`all`/`the`/`these`/`those`) + bare-numeral `of` partitive + predicative
+> possessives (`yours`/`mine`/`ours`/`theirs`), `worth` + gerund VP (`seed.rs` + `ger_tv_adj` +
+> `ger_tv_vpadjunct`), non-finite verbal `not` (`pss`/`pass`/`ger`), `vp_functor_bwd_adv` (adverb on
+> unsaturated copular/verbal functors), `copula_pp`, `adj_pp_mod`, `adj_pass_mod`, `noun_adj_pred`,
+> `as_adj_arg` + `as` VP-adjunct categories, `name_numeral` classifier + numeral designator, singular
+> `kind_raised_nps` for capitalized/alphanumeric identifier tokens, all-caps verb-homograph acronym NP
+> fallback, `mis-` verbal stem lookup, and participial head fallback in `hyphen_compound_items`. Batch 4
+> (kernel-only on the same store): closed-class pronoun/determiner completions (`you`, `them`, `me`,
+> `us`, `itself`, `themselves` including post-nominal/post-NP emphatic reflexives, `any`, `any of`,
+> correlative pre-GQ/pre-NP `both`), post-modified indefinite pronouns (`nothing`/`something`/`anything`/
+> `everything`/`someone`/`anyone`/etc. taking post-nominal `cat_pp`, predicative adjective, passive
+> participial, or gerund participial modifiers), subordinating conjunctions (`where`, `so that`,
+> `before`, `after`, `once`, `since`, `until`) plus post-nominal relative `where`, embedded
+> clausal/free-relative complementizers (`why`, `how`, `whether`, `whatever`, `how much`, `how many`),
+> non-integer/negative numeral dimensionless `cat_mp` seeding + measure-value prepositions (`to`,
+> `from`, `above`, `below`, `under`, `over`) + bare-numeral range `to` + plural `name_numeral`
+> classifiers + bounded `cat_factor` (`by` + bound modifiers), productive hyphen-prefix stem lookup
+> (`re-`, `under-`, `over-`, `self-`, `co-`, `out-`, `cross-`, `pre-`, `de-`), fronted passive
+> participials in `front_participial`, `pss` backward adverb modifiers, discourse adverbs (`instead`,
+> `otherwise`, `then`, `still`, `already`), and sentence-initial negative imperatives (`Do not …`).
+> Batch 5 (kernel-only on the same store): identifier/notation/OOV-name `cat_n(Entity, sg)` +
+> `cat_np(ProperName, sg)` siblings for close-naming apposition (`name`) and determined/classifier
+> positions, `group_compound` (`[cat_group] [cat_n]` coordinated nominal pre-modifiers), preposition
+> paradigm completions (`through`, `across`, `against`, `inside`, `outside`, `onto`, `behind`, `along`,
+> `alongside`, `besides`, `among`, `around`, `past`, `out of`, `ahead of`, `apart from`, `away from`,
+> `plus`, `upstream of`, `downstream of`), generic non-finite VP-adjunct completion (`bse`, `inf`,
+> `ger`, `pss`, `pass`) for finite VP-adjunct prepositions, preposition stranding (`to act against`,
+> `to fall back on`, `is used for`), bare singular abstract/technical nominal complements of
+> prepositions, object-predicative verb frames (`call`, `make`, `rate`, `rank`, `leave`, `keep`, `get`,
+> `consider`, `deem`, `render`), inchoative/linking copulas (`become`, `stay`, `remain`),
+> intransitive/unaccusative alternations (`express`, `resolve`, `match`, `compensate`, `cancel`,
+> `cluster`, `tally`), propositional copular complements (`is [not] that S`), `adj_cp_comp` and
+> `tv_cp_comp`, floating `each`, bare-numeral verb objects (`tv_num_obj`, `dtv_num_obj`) and
+> bare-numeral prepositions/bounds, non-integer decimal count determiners, `expected`/`observed` plural
+> nominals, `nucleotides`/`stars`/`orders` bare-numeral measure/NP post-heads, `long` predicative
+> measure adjective, `inf_rel_vp`/`inf_rel_tv` post-nominal `to`-infinitive relatives + `for NP to VP`
+> PPs, sentence-initial affirmative imperatives, and `least`/`worse`/`better`/`one`/`such`/`as was`.
+> Batch 6 (kernel-only on the same store): fixed `derivation_augmentation` and `compound_augmentation`
+> in `glossary.rs` to ground derived/compound nominals to `common_noun_concept(base, ...)` (or
+> `lexicon:Entity`) instead of `e.id()` (`lexicon:LexicalEntry`), Σ-witness projection (`Exp::Fst`) in
+> `SemRecipe::DetRefine` when a determiner result is a free-relative functor (`which_fr_s`/`which_fr_o`
+> over refined nouns), root-level imperative VP saturation (`saturate_imperative_vp` in `paths.rs` when
+> no finite clause or wh-question spans `[0..n-1]`), `cat_factor` → `cat_mod_cat` lift in `mod_lifts`,
+> non-finite forward VP-adverb siblings (`pss`, `pass`, `ger`, `bse`, `inf` in `category.rs` +
+> finite-only `adv_initial_cat` guard), bioinformatics post-numeral unit heads (`bp`, `kb`, `mb`, `nt`,
+> `kda`, `aa`), `worse`/`better` comparative `than` + `than no` + `larger than`/`smaller than`/
+> `greater than`, `worth` `ger` VP result categories, `as` predicative-adjective / PP / NP frames,
+> extraction-ready `not` (on `TV`) and `does`/`do`/`did` (on `TV` and `CV`), object-control /
+> passive-complement `lets`/`let`/`help`/`want`/`need`, `;` VP coordination, British/domain stem
+> aliases and predicative adjective fallbacks, `-isation`/`-ization` mass-noun siblings, post-nominal
+> `cat_pp`/adverbials and degree modifiers, `so` pro-form NP, plural acronym (`SNVs`, `NOEs`, `rsIDs`)
+> and UMLS individual `cat_np`/`cat_n`/`ProperName` completion, participial head fallback in
+> `hyphen_compound_items`, and `haem-`/`-ally` adverb base stripping.
+> Batch 7 (kernel-only on the same store): fixed 8 dead-code seed blocks (`not` on `TV`, `as` on `NP`,
+> `worse`/`better`, `larger than`/`smaller than`/`greater than`, domain predicative adjectives,
+> post-nominal `cat_pp` adverbials, `unrelated`, and pro-form `one`) that looked up non-existent
+> `logic:True`/`logic:Not` instead of `logic:False` (`P -> False` and `False -> False`), normalized
+> `mass`/`name` classifier number to `sg` in `build_name` so `definite_designation` emits
+> `cat_np(C, sg)` when UMLS imports acronym/classifier nouns with `mass`, relaxed `common_cat`
+> `cat_np`/`cat_n` number meet so `num_any` meets concrete `sg`/`pl` in GQ coordination, moved
+> `saturate_imperative_vp` fallback in `paths.rs` to also fire when all `top` `cat_s` candidates fail
+> `classify_felicitous`, fixed passive object-predicative category (`((S[dcl,pss]\NP)/NP)/Adj`), added
+> `cat_pp/cat_pp` and `cat_measure/cat_measure` forward modifiers for adverbs, `as` NP-adjunct and
+> equative `as <adj> as` frames, `as was` VP-adjuncts, `without` `cat_pp/NP` post-nominal modifier,
+> `wild type` mass-noun sibling, `cat_n(Entity, mass)` sibling for alphanumeric/proper identifier
+> tokens so modified/PP-refined identifiers shift via `BareNp`, `with_past_verb_num` on hyphen-prefixed
+> verb stems, `cat_measure` on domain adjectives, and `-mer`/`-mers`/`3-prime`/`5-prime` seeding.
+> Batch 8 (kernel-only on the same store): fixed `freshen_gate_holes` (`holes.rs`) to memoize
+> `(raw_subterm, walked_subterm)` during traversal and reuse the already-freshened proposition `P'` when
+> typing `hypothesis_of(P')` holes (fixing `classify_felicitous` rejections when `because` co-occurs with
+> a demonstrative), tightened `Guard::NotComposed` (`combinators.rs`) to exclude `Combinator::BackwardApp`
+> so stranded-preposition VPs do not consume bare numerals on the right, added plural-acronym casing
+> preservation in `lookup_span` (`seed.rs` `surface_all_caps`), plural determiner siblings (`cat_forall(pl, …)`)
+> for `no`, standalone plural pronoun `both`, predeterminer MWEs (`all these`/`all those`/`all the`/`both these`/
+> `both those`/`both the`) and `all` NP/GQ modifiers, `the <num>` plain `cat_np` determiner + `the most`/
+> `the least` superlative measure-phrase modifier (`((cat_mp/cat_mp)/cat_sup_mod)`), `of` + `cat_numpred`
+> (`cat_pp/cat_numpred`), `between` measure-phrase and bare-numeral prepositions, `only` on `cat_factor`/
+> `cat_num`/VP-adjuncts, comma-prefixed subordinators (`, because`/`, while`/`, although`/`, whereas`/
+> `, since`/`, if`/`, when`) and sentence-initial `But`/`And` (`S[dcl,fin]/S[dcl,fin]`), VP-adjunct and
+> bare-singular-noun preposition completions (`under`/`over`/`above`/`below`/`between`/`at`/`by`/`of`/`in`),
+> object-extracted `obj_rel_cat` on `want`/`need`/`let`/`help`, `be`/`being` progressive/predicative-NP and
+> `has`/`have`/`had` bare-participle completions, intransitive `bear` and `-ity` mass-noun fallback, and
+> `back` + gerund, `most` VP-adverb, `matters` + comparative, and `report` bare-numeral/coordinate frames.
+> Batch 9 (kernel-only on the same store + CNL guideline updates): early return in `candidate_lemmas`
+> (`parse/mod.rs`) for plural all-caps acronyms (`<ACR>s`) so Morphy never strips `-es` to a closed-class
+> base form, mixed-case/alphanumeric symbol casing preservation in `lookup_span` and `contextual_sense_ranks`,
+> `cat_measure/cat_measure` forward modifier in `adverb_modifier_cats` (`category.rs`), saturated
+> intransitive `ger` VP lift (`is_saturated_ger_vp`) in `participial_restrictor` (`combinators.rs`),
+> contact object relative clauses (`contact_rel_obj`), post-verbal VP-adjunct PPs on object-extracted
+> finite clauses (`obj_gap_clause_vpadjunct`), distributive `cat_group` subjects in object extraction
+> (`apply_group`), `who`/`whom` `cat_pp` relative-clause functors, `to` object-gapped infinitival
+> VP-adjuncts (`((S[dcl,fin]\NP)\(S[dcl,fin]\NP)) / ((S[dcl,bse]\NP)/NP)`), `to`/`from` `adj` VP-adjunct
+> siblings, `but` predicative `adj`/`pass` coordination, clause-final/VP-final adverbial `since`,
+> polymorphic subject-GQ focus `only`, `already` `cat_pp/cat_pp` modifier, and targeted nominal/adjectival
+> closed-class supplements (`parse`, `else`, `message`, `enumeration`, plus CNL guideline additions in
+> `docs/method/controlled-english-style-guide.md`).
+> **Battery 89 of 89 (`grammar-gap 0`, `missing-lexeme 0` — full coverage across all 54 core-en
+> families!)**, page grammar-gap **0** (−452 vs `452` before Batch 1, −24 vs `24` after Batch 8;
+> **1,056 / 1,056 units parsed = 100.0%, `COVERAGE: PASS`!**), encoded **6**, ambiguous **757**,
+> open **293**, claim units **274 / 274** (**100.0%** of non-PROV claim units fully parsed; 0 one-away,
+> 0 multi-gap), readings 100,125, skeletons 33,691.
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-11-05-very-poss-only-wh` (reseeded `2026-11-05` via
+> `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
+> 864). Batch: adjectival degree `very` (`very_deg`, `very_deg_sem`, `very_adj`), possessive clitic
+> `'s` (`poss_s_subj_sem`, `poss_s_obj_sem`, `poss_s_{subj,obj}_{sg,pl}` + preprocessor clitic split),
+> pre-nominal NP focus `only` (`only_subj_sem`, `only_obj_sem`, `only_s`, `only_o` + `adv_initial_lifts`
+> gate), and determiner free relatives (`which_free_rel_sem`, `which_fr_s`, `which_fr_o`). Battery
+> **85 of 89** (`missing-lexeme surfaces: 0`), page grammar-gap **452**, encoded 18, ambiguous 435,
+> open 151, claim units **69**, one-away 84, readings 41,431, skeletons 5,387. The promoted store is
+> unit-for-unit IDENTICAL to the layered probe arm (0 per-unit disposition diffs on both the battery
+> and the page).
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-10-31-freerel-who` (reseeded `2026-10-31` via
+> `scripts/reseed-chain.sh`, which GATES on the three provenance counts rather than printing them —
+> 38,391 / 20,533 / 864, all reproduced). Batch: the free relative (`what`, 3 entries) plus the
+> `who` relativizer (`rc_who`, 1 resource). Battery **83 of 89**, page grammar-gap **456**,
+> encoded 18, ambiguous 432, open 150, claim units **67**, one-away 85.
+>
+> Both were measured as LAYERS first and the promoted store is unit-for-unit IDENTICAL to the
+> layered arm — an empty per-unit disposition diff — so layering predicted promotion exactly here.
+> The kernel at this store also carries the superlative work (partitive, post-nominal relational,
+> `most` as a leaf functor; `7b3978b2`), which accounts for grammar-gap 460 → 459 and claim units
+> 64 on the PREVIOUS store before either promotion.
+>
+> Previous: `wordnet-umls-hpo-aligned-2026-10-28-advfold` (reseeded `2026-10-28` at `a23e4e12`; the
+> six folded entries — short passive ×2, `neither` ×2, `when` ×2 — plus the fronted-adverb lift).
+> Battery 80 of 89, grammar-gap 460, claim units 64. Retained on disk; the demo picks the NEWEST
+> aligned snapshot by mtime (`demo/prose-to-formulas-v2/run.sh::newest_snapshot`), so nothing pins
+> a path that needed re-pointing.
+>
+> The fronted adverb is a KERNEL LIFT, not an entry, and needs no event variable: `S/S` is
+> unavailable event-free (`⟦S⟧ = Prop`, while `ADV` needs the predicate and its subject separately),
+> so it modifies the TYPE-RAISED SUBJECT instead — `(S/(S\NP))/(S/(S\NP))` over
+> `lexicon:adv_initial_sem` = `λA. λQ. λV. Q(A(V))`, reusing the adverb's own `ADV` term. Productive,
+> not lexicalised: «Carefully the study reported genes.» and «Genes slowly affect cells.» (a
+> kind-raised subject) both parse.
+>
+> **Its page yield is 3 focus particles and 1 `such`** — «Only an assay will resolve it.», «Only the
+> hemizygous allele count exists.», «Only one pattern is safe.», «Such a sub-region is depleted…».
+> The fronted and medial readings of `only` are BYTE-IDENTICAL, so the lift introduced no new reading
+> shape; but `And(V(s), adv(V,s))` is the intersective form, and §"What this does not settle" of
+> `event-free-modification.md` says focus particles are not VP-predicate modifiers and that the
+> encoding "says nothing about them". The lift makes that known-imperfect treatment reachable in the
+> position focus particles most often occupy. **Focus particles are now the visible follow-up.**
+>
+> Superseded store: `wordnet-umls-hpo-aligned-2026-10-26-basic` (reseeded `2026-10-26` at `292dc5ab` for
+> the basic-grammar batch; 53 min for all four steps, and all three provenance counts reproduced —
+> 38,391 merge rows, 20,533 HPO resources, 864 equivalences).
+>
+> **The basic-grammar batch (`2026-10-26`): 13 entries, measured one variable at a time.** The order
+> is core-en's 54 families, not XIAP unit-yield — basic grammatical coverage before the CNL rewrite.
+> Battery `experiments/parsing/battery/core-en-families.txt`, 89 sentences, one per family:
+>
+> | fix | battery | XIAP units | kind |
+> |---|---:|---:|---|
+> | plain definite NP (2 entries) | +2 | **+8** | missing category |
+> | fronted subordinators (8) | +3 | 0 | missing entries |
+> | `or` proximity agreement (0) | +1 | 0 | **correctness defect** |
+> | bare demonstratives (3) | 0 | 0 | missing category |
+> | short passive + `neither` (4) | +2 | **+4** | incomplete paradigm |
+>
+> Battery **70 → 78 of 89**. The `or` fix is the one no coverage metric could have found:
+> `coordinate_np` hardcoded `cat_group(C, conn, pl)` for both connectives, so «The gene or the
+> protein **affects**» was refused and «… **affect**» accepted. One pinned test had encoded the
+> defect.
+>
+> **Reseed verification.** Predicted before measuring: battery 76 (the battery's only demonstrative
+> is a determiner), grammar-gap 477 → 473–475, encoded/ambiguous unchanged, units ≥ 59. Measured:
+> battery **76**, grammar-gap **474**, encoded **18**, ambiguous **421**, readings **40,146** — all
+> three byte-identical — units **59**, open 140 → **143**, skeletons 5,078 → **5,119**. Exactly 3
+> units moved, all GRAMMAR-GAP → OPEN: units 249 and 877 are the target construction (bare `This` /
+> `Those` as subject), unit 1017 (`Finding 9 reports those scores`) closes through the KNOWN
+> compound-rule defect — a pronoun NP is eligible as a noun-compound modifier, so `those scores`
+> also builds `cat_n(Σx. compound(x, $anaphor$), pl)`. Readings held because `unit_readings` is 0
+> for an `Open` unit while `unit_skeletons` counts it, so those 3 units hold all 41 new skeletons.
+>
+> **PENDING a reseed (`experiments/parsing/probes/short-passive-neither.esl`, measured, NOT in
+> `closed-class.esl`):** 4 entries — `be`/`been` short passive + `neither`. Merging them moves the
+> manifest and strands `wordnet-umls-hpo-aligned-2026-10-26-basic`, so they wait for the next
+> batch. On the probe store: grammar-gap 474 → 466, claim units 59 → **63**, 8 units gained, 0 lost.
+> SEVEN of the eight are the short passive, which was reachable only under a FINITE auxiliary —
+> «The gene may be affected.» had no parse at all for any verb, while the LONG passive's
+> non-finite entry (`be_passive_by`) made «…may be affected by HeLa.» parse.
+>
+> **11 battery failures remain:** to-infinitive (×2), free relative (×2), there-existential,
+> gerund subject, `'s` possessive, predicative `very`, superlative `most`, fronted adverb, `when`
+> (no subordinator entry in either order, and no temporal relation to denote one with).
+>
+> **Where the remaining 11 live**, which is the axis that prices them — 4 are missing closed-class
+> entries (`there`, `when`, `very`, `'s`), 5 are wrong categories on forms that already have
+> entries (`most`, free relative ×2, fronted adverb, gerund subject), and **2 are an IMPORTER
+> change**: the to-infinitive pair. `convert.rs::classify` returns `None` for frames 24/25/28/30/
+> 32/33/35 (control / raising), a documented deferral with a test pinning `classify(32) == None`,
+> and the importer emits no `Control` FrameKind. So an infinitival
+> `to : (S[inf]\NP)/(S[bse]\NP)` — core-en's real `To-Infinitive` family, `indexRel="*NoSem*"` —
+> would be INERT: no verb selects an infinitival complement. That is a reseed and a reopened design
+> decision, not a lexical entry. The ECM half needs a third thing the boundary instrument named:
+> `be`'s only `bse` category is the passive auxiliary, so it cannot take an adjective predicate.
+>
+> **Item 3 of step 3's order, the closed-class batch: ZERO units converted.** 44 entries over three
+> bootstrap edits — 20 possessive determiners, `unless`/`whereas`, 22 indefinite pronouns. XIAP page
+> grammar-gap 280 → 281, ambiguous 12 → 11, readings 2440 → 2303, unevidenced fallback 64 → **60**.
+>
+> The one unit that changed went AMBIG → GRAMMAR-GAP, and it is CORRECT: it is two sentences in one
+> unit (a converter artifact), and its old parse existed only because the fallback had minted `Your`
+> as an opaque doc-local NP, which let the parser span both. A real possessive determiner removes
+> that. **An opaque fallback individual does not merely fail to help — it can MANUFACTURE a parse**,
+> which is the warning filed with the 64 unevidenced entries, now measured.
+>
+> Possessive determiners 1 → 6 of 7; subordinators 3 → 5 of 14. The INDEFINITES are entries without
+> an analysis: «Something is clear» parses, «Something in the study is clear» does not, because a
+> type-raised subject `S/(S\NP)` cannot take a post-modifier — and the corpus uses modified
+> indefinites almost exclusively. `cannot` was not added.
+>
+> **Three fixes, three measurements: 1 unit, 1 unit, 0 units** (short-passive lift; `rather than`,
+> 41 gaps; closed-class, 44 sole-blocker gaps). The batch was chosen as the best-ratio KIND of fix
+> and did worst. Grammar work does not close this gate — step 4's rewrite does, and the clause-splice
+> A/B already measured 11 pieces recovered against a construction's one.
+>
+> **Superseded store: `wordnet-umls-hpo-aligned-2026-10-12-rt`** (reseeded `2026-10-12` for the
+> `rather than` bootstrap edit; all three provenance counts reproduced — 38,391 merges, 20,533 HPO
+> resources, 864 equivalences — and the CNL baseline page measured IDENTICALLY to the old store,
+> 1264 readings / 304 skeletons / 53 hits, so the reseed is faithful in effect and not only in
+> provenance). Superseding `wordnet-umls-hpo-aligned-2026-10-10-d101`, which no longer resumes.
+>
+> **The d101 store:** The D101 reseed, `2026-10-10`, 56 m 40 s
+> for all five steps of the chain in entry 3's recipe. Every provenance input matched the previous
+> store exactly, and all three expected counts reproduced — 38,391 merges, 20,533 HPO resources,
+> 864 equivalences — which is what established that `ontologies/encoding/encoding.esl` was the only
+> bootstrap-affecting change. The gate PASSES on it: grammar-gap 0, expected-hits 62/62, miss-set
+> unchanged, readings 799→819 (ceiling 895), skeletons 290→280.
+>
+> **D101 gave the encoding ontology its document structure** —
+> [d101-document-structure-in-the-encoding-ontology.md](../design/d101-document-structure-in-the-encoding-ontology.md).
+> `Document`, `Block`, `Section`, `Paragraph`, `Table`, `RefList`, `Ref`, `SectionKind`,
+> `ReferenceSpan`, `ReferenceType`, `locator`. Three resources on three axes, none subsuming
+> another: `reference:Reference` the published WORK, `enc:Document` the observed MANIFESTATION,
+> `enc:ReasoningStructure` the derived output. The XIAP report is 450 units in that tree; the
+> register join holds at 427/427 by containment.
+>
+> **Step 2 is CLOSED: `missing-lexeme` 0, distinct OOV 0** (`2026-10-11`), measured cap-only on the
+> d101 store over the 325 PROSE units — D102 decision 2 routes the 125 `kind_table` units out, so
+> they are no longer counted as gaps. [uab-xiap-oov-document-model.md](uab-xiap-oov-document-model.md)
+> has the per-block tables.
+>
+> | | start | +notation | +names | +tail | +code+deriv | +shared tokenizer |
+> |---|---:|---:|---:|---:|---:|---:|
+> | missing-lexeme | 267 | 193 | 119 | 106 | 75 | 71 |
+> | grammar-gap | 164 | 225 | 294 | 306 | 335 | 338 |
+> | residual OOV | 242 | 157 | 119 | 113 | 79 | 77 |
+>
+> **That table is 450 units with table rows counted as prose, and its gate was wrong twice over.**
+> On the 325 prose units, with the parser's own `unknown_words` as the gate and every source
+> enumerating the same units (D102 decision 7):
+>
+> | | missing-lexeme | distinct OOV | grammar-gap | non-prose | scale-bound |
+> |---|---:|---:|---:|---:|---:|
+> | page-level `has_token` gate, page-level sources | 66 | 102 | 225 | 10 | 8 |
+> | `unknown_words` gate, page-level sources | 59 | 89 | 231 | 11 | 8 |
+> | `unknown_words` gate, unit-level sources | **0** | **0** | 282 | 15 | 12 |
+>
+> The 66 did not become encodings: 57 → grammar-gap, 5 → non-prose, 4 → scale-bound, exactly 66.
+> Closing the lexical gap routes a unit to the grammar; it does not parse it. 421 entries, of which
+> 64 rest on no evidence beyond occurrence — D102 "What the 64 unevidenced entries are" buckets them,
+> and the largest actionable one is 6 author surnames the model already carries in
+> `reference:creator` on its 63 `enc:Ref` entries.
+>
+> **One defect, found FOUR times: a source minting entries under surfaces the parser never asks
+> for.** The gate used `has_token` per surface where the encoder uses `unknown_words` per unit; five
+> sources enumerated page-level tokens, and joining the page DELETES 613 distinct surfaces (the
+> lexer strips a parenthetical that opens in one unit and closes in a later one) and MANUFACTURES 13
+> (`SpCas9`, which the fallback had minted an entry for); and `code_span_augmentation` split spans
+> with `split_whitespace`, minting `gene(gene_symbol:` and `[CHRPOS]`; and the named-entity source
+> did the same, minting `axis Damgaard` from `axis (Damgaard et al. 2012)` and `CAT PAM` from
+> `` the `CAT` PAM `` — dead multiword keys the parser can never match. `SegmentedDocument` carries
+> the units and their text, built once, and all seven sources take it. Named entities 6 → 3, every
+> other source and the whole parse unchanged.
+>
+> The named-entity head test is now the author's MARKUP, per occurrence, not orthography: rejecting
+> ALL-CAPS heads would also have caught `CAT PAM` and would have been wrong, since this page's
+> all-caps-headed appositions are `CFTR W1282X`, `ACMG PM2`, `MANE CDS` and `REST API`, all real.
+> Re-measuring caught one regression on the way: the parser drops `:` and sentence-final `.` rather
+> than emitting them, so `Two errata: Nat Commun` read as one apposition; a clause boundary is now
+> read from the gap between two token spans.
+>
+> The sources, in merge order: notation (published grammars — HGVS both alphabets, accessions,
+> coordinates, bare positions), recurrent OOV names (orthography + repetition, admissible ONLY
+> because of the OOV gate), inline code spans (the author's own markup — 48 of 113 were marked),
+> derivation from an attested base (SUFFIXES ONLY, see below).
+>
+> **The glossary now uses the PARSER'S tokenizer** (`preprocess::tokenize` over
+> `ProseUnits::load`). Guessing at it failed four times — a recognised range left its endpoint OOV,
+> a recognised coordinate left its prefix OOV, a code-marked field path left its tail OOV twice —
+> and each patch was one more punctuation class. A source must mint under the surface the parser
+> will ASK FOR. `Notation::ResidueRange` never fires as a result: every dash range is split before
+> recognition.
+>
+> **Two rules were CUT after measuring, not tightened.** Derivational PREFIXES are unsound in
+> general — WordNet gives `discuss`→`cuss`, `research`→`search`, `remove`→`move`, `report`→`port`,
+> `nonsense`→`sense`, all with attested stems; they did not misfire here only because those words
+> are themselves in the lexicon. `disanalogy` and `overread` land in the UNEVIDENCED fallback —
+> `LlmSynthesized` would be the designed route and still has no producer (below).
+> And the name source has now had THREE precision defects of one shape — `Gyrd` (a surname half),
+> `AND` (a function word in caps), `Your` (a sentence-initial capital). Expect a fourth.
+>
+> grammar-gap RISING is the result: a unit cannot be scored on grammar until it clears the lexicon.
+> With the lexicon fully closed, step 3 has **282** gaps over the 325 prose units, where 267 units
+> never used to get far enough to produce one.
+>
+> **`enc:LexicalGap` now has a writer**, after being declared since D62 with no producer at all —
+> 384 records on the prose units (238 injected, 145 bound, 1 unresolvable; it was 497/213/171/113
+> before step 2 closed and before the table units were routed out). D62 §9 calls the gap
+> stream a first-class coverage signal; nothing emitted it. It is also the INSTRUMENT: every tail
+> figure before it came from re-tokenising the page in Python, which left 27 units unattributable.
+>
+> **`ResolutionMethod::LlmSynthesized` is the same shape — declared, one reference, no producer.**
+> That is the designed route for a word absent from the lexicon, and it does not exist.
+>
+> **Unresolvable is now 1.** What used to be 113 is the 64 UNEVIDENCED entries, which is a different
+> and better-posed question: every surface reaches the grammar, but 64 do so on no evidence beyond
+> occurrence. D102 "What the 64 unevidenced entries are" buckets them — 13 derivational morphology,
+> 11 possessives of an attested base, 11 unmarked tool names, 9 joined compounds with an OOV part,
+> 9 published identifiers with no grammar in the recognizer, 6 author surnames.
+>
+> **Item 2 of step 3's work order DONE (`2026-10-12`): `rather than`.** `X rather than Y` is
+> `X ∧ ¬Y` — `but not`'s truth condition — so it needed a TRIGGER and no semantics;
+> `build_coord_excluding` is reused verbatim. Declared as a PAIR, not two kinds, because neither
+> half carries the meaning alone (`rather` is a degree adverb, `than` the comparative marker); both
+> halves stay unreserved. `construct_form` now admits a multi-token form and `ReservedTable` has a
+> `by_phrase` longest-match lookup. One operator, two triggers, and the probes prove it — identical
+> counts in every position (ADJ ×8, V ×8, PP ×4, NP GAP for both `rather than` and `but not`).
+>
+> Measured on the reseeded store: CNL baseline UNCHANGED (grammar-gap 0, 1264 readings, 304
+> skeletons, 53 hits); battery 12 → **15** parsed of 39; XIAP page grammar-gap 281 → **280**, open
+> 4 → 5, readings 2440 → 2440, skeletons 467 → 491. The unit that moved went GAP → OPEN, and
+> `total_readings` counts closed parses only, hence readings flat.
+>
+> **One page unit, for the second construction running.** Two families closed, each converting
+> exactly one unit. Incidence ranks the families; it does not predict conversions.
+>
+> **Step 3 MEASURED (`2026-10-12`).** Parse success **16 of 325 (4.9%)** — 1 encoded, 12 ambiguous,
+> 3 open — against 282 grammar gaps, 15 non-prose, 12 scale-bound.
+> [uab-xiap-grammar-gaps.md](uab-xiap-grammar-gaps.md) has it all.
+>
+> Length dominates: 22% at 5–9 tokens, 9% at 10–14, 4% at 15–19, 2% at 20–39, **0% above 40**. All
+> 282 gaps are `WIDEN [Exhausted]` on an unpruned final rung, so they are established no-parse; only
+> 7 had any Lever-B cell-beam drop. Markdown markup is NOT a cause — the lexer already strips
+> `**bold**`, `*italic*`, bullets and headings.
+>
+> Three experiments. (1) The lexer DROPS `:` and `;`, splicing two clauses into one unit; splitting
+> the 68 affected gaps into 145 pieces takes 11 from 0 to parsed and leaves 125 — real, not dominant.
+> (2) "The gap is really a verbless NP" is FALSE: framing the 148 plain-prose gaps as an NP subject
+> parses 6, at a rate indistinguishable from the corpus baseline at the same length. (3) A 29-probe
+> construction battery (`probe_step5_construction_families`) — 17 parse, 11 constructional gaps, 1
+> lexical.
+>
+> The battery tags LEX-GAP separately from GAP, and that corrected two readings taken from the page
+> where the augmentation had supplied a missing word and the unit failed anyway: the passive AGENT
+> by-phrase actually parses, and `cannot` has NO entry in the served chain at all (7 uses on the
+> page). **A surface the fallback grounds with an opaque individual clears `missing-lexeme` and then
+> scores as a grammar gap** — the general warning for the 64 unevidenced entries.
+>
+> Work order from the measurement, item 1 DONE (`2026-10-12`): **the short-passive participial lift**.
+> `reduced_relative` fires only on `pass`, and `pass` had exactly ONE producer —
+> `gq_prep_passive_agent`, the long passive's by-phrase — so the same construction with the agent
+> left out had no route. The diagnosis in the probe table was wrong and localizing fixed it: the
+> blocker is not "adjunct PP" but the verb's FRAME. `expressed in the liver` parses because `express`
+> has a WordNet PP frame and rides `oblique_participial_lifts`; `query` has none. Confirmed by the
+> frame being preposition-agnostic (`expressed for/with …` parse) and by
+> «The resource was queried in the study.» parsing finitely.
+>
+> `short_passive_participial_lifts`: `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, agent
+> existentially closed by `lexicon:passive_sem` — the SAME term the finite short passive carries,
+> resolved from the chain so the two cannot drift. The UNSATURATED functor is the guard (lifting the
+> saturated `pss` is what built relativizer-less subject relatives). The leaf also emits the shifted
+> `cat_pp`, by calling `reduced_relative` rather than repeating its mapping, because a `UnaryShift`
+> never sees a one-token cell.
+>
+> Measured. 62-unit CNL baseline page, cap-only, A/B against the unmodified tree: grammar-gap 0 →
+> 0, missing-lexeme 0 → 0, ambiguous 41 → 41, open 21 → 21, expected-hits 53 → 53, readings 1258 →
+> 1264, skeletons 296 → 304. Probe battery 17 → 19 of 29 parsed. XIAP page: grammar-gap 282 → **281**,
+> open 3 → 4, readings 2057 → 2440, skeletons 458 → 467.
+>
+> **One page unit.** That is the planning number: a construction fix converts two probes and one unit,
+> because a 20-to-40-token sentence fails for several reasons at once.
+>
+> **Item 5, the active `ger` participial lift (`2026-10-14`): TWO page units — the best per-construction
+> yield measured here.** `reduced_relative` fired on `fin = pass` only; it now fires on
+> `fin ∈ {pass, ger}`, with `ger_participial_lifts` emitting the one-token intransitive at seed time
+> (the `UnaryShift` table starts at `len 2`). Kernel-only, no reseed. The gap count had UNDERSTATED
+> the construction: «The gene encoding a helicase is essential.» parsed as a three-deep
+> `compound_kind` noun pile and «A patient waiting was found.» as an adjective degree, so three
+> probes counted as covered were wrong parses. The reduced form now derives a restrictor
+> byte-identical to the `that`-ful relative's.
+>
+> XIAP page: grammar-gap 281 → **279**, ambiguous 11 → **13**, readings 2303 → 4015, skeletons 521 →
+> 1190, wall-clock 814s → 884s. The whole reading increase is the two NEW units (1658 + 54 = 1712
+> exactly); every histogram bucket is unchanged except the two they land in, so no existing unit
+> gained a reading. The two converted units are a post-posed `, <adv> -ing <NP>` adjunct (16 tok) and
+> a bare plural head + `-ing <NP>` + coordinated PPs (8 tok). Page total now **19 of 325 (5.85%)**.
+>
+> Remaining order — the comma appositive, `rather than` over participles, the demonstrative partitive,
+> the zero relative/complementizer — but at 0-2 units each the leverage is step 4's rewrite, which
+> addresses length, the dominant variable.
+>
+> **Carried from item 5:** «waiting» and «encoding a helicase» stay shadowed by a lexical adjective and
+> a noun-in-compound reading; the `ger` verb entry does not reach the chart for those surfaces, and
+> which of `SENSE_CAP=2` / `CELL_BEAM=64` cuts it is NOT localized.
+>
+> **Survey §4 step 4 run as SPECIFIED (`2026-10-14`) — per-kind over the 427 gold claim spans, which
+> no earlier measurement used** (they all used the 325 narrative page units). 22 parsed of 427, or
+> **6.1% on the 362 prose spans against the page's 6.4%** — the same, though claim spans are a quarter
+> shorter at the median (18 vs 23 tokens, 88% vs 69% under the 31-token ceiling). Length is necessary,
+> not sufficient, and this is the measurement that establishes it. `missing-lexeme` 0 over all 427:
+> the lexicon blocks no claim in the register. Per-kind, `marked` 14.0% / `declared` 10.1% /
+> `derived` 4.5% / `observed` 3.8% (52% of the register, the worst-covered) / `compressed` and
+> `exempt` 0 of 25.
+>
+> **64 of the 427 gold spans are BIBLIOGRAPHIC RECORDS, not propositions** — 61 of them in `observed`,
+> and 56 carry a `PMID` inside a reference-list entry. The skill registers them as `observed` because
+> it certifies the citation RESOLVES; the harness calls them `non-prose`, correctly. A citation is
+> provenance, which the certificate's `resource:`/`data:` fields already hold for every other
+> `observed` claim. **D96 must separate the two**, or 13% of the register is unparseable by
+> construction and scored as failure. `compressed` (a span over several claims) and `exempt` (a
+> statement of why a claim is not checkable) are candidates for the same treatment.
+>
+> **Step 4 EXECUTED (`2026-10-15`) — the whole page rewritten against the final guide.** 325 source
+> units → **1,056 CNL sentences** (3.84x), median 9 tokens, max 22, **0 over R1's 31-token budget**;
+> 275 units rewrote as claims and 50 went to provenance under R3. Corpus and the source-unit →
+> output-line map live at `experiments/parsing/derived/step5/cnl-page.txt` and `cnl-map.tsv`
+> (gitignored); step 6 needs that map to verbalize each encoding back against the original prose.
+>
+> **The result is 2x, not 8x.** Source units FULLY covered (every piece parses) 19/298 → **37/275,
+> 6.4% → 13.5%**; 191 partially covered, 47 with no piece parsing. The sentence-level 45.9% runs on a
+> denominator the rewrite inflated 3.84x and is not the result. `missing-lexeme` 0, `scale-bound`
+> 12 → 0, `non-prose` 15 → 7, and all 7 survivors are the token `Å`.
+>
+> **Two A/B tests, 28 and 30 sentences, both run before acting.** Mid-sentence transitional adverbs
+> ranked +15.3pp over 97 sentences and are **REFUTED** — MID 1/14 vs FRONT 1/14, identical. **A bare
+> decimal numeral does not parse** and is CONFIRMED — DECIMAL 0/15 vs INTEGER 7/15, only the numeral
+> changed. A D95 gap, not a style problem.
+>
+> **But the quantity gap is not the lever per unit.** Fixing decimals AND `Å` entirely caps at **47 of
+> 275 fully covered (17.1%)**, up from 37; **228 units are blocked by a diffuse tail**. Same shape as
+> the DON'T-row census — no single cause dominates. Step 5's iteration has no large lever to pull.
+>
+> **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
+> each encoding via `verbalize` against the original prose.
+>
+> **Open, carried:** the parse baselines are not re-measured since the reseed (`reading-unadjudicated
+> 15` blocks a clean selection score); `enc:gap_unit` is unset because an augmentation is built per
+> DOCUMENT; `ResolutionMethod` is not machine-readable and a property for it costs a reseed — batch
+> it with `enc:gap_injected`'s description, which still says "(LLM)" though injection is now
+> deterministic.
+>
+> **Batched for the next reseed — closed-class omissions.** `is_closed_class_surface` does not own
+> `while`, `whereas`, `although`, `because`, `during`, `whether`, nor `your`, `my`, `everything`,
+> `likewise`. Measured cost: `while` has a WordNet noun sense ("a while"), so it passes
+> `is_apposition_head` and the named-entity source minted **`while Ile380`** from "buried at ~0%
+> while Ile380 is 18–30% exposed" — a multiword NP entry that can block the subordinate-clause
+> reading. The fix is the closed-class layer owning the surface, which changes what the importer
+> seeds; adding `while` to the source's own 56-entry `HEAD_STOP_WORDS` would be the fifth patch on a
+> hand-list that has now failed five times.
+
+---
+
 > **entry 6 (`2026-10-09`, closed `2026-10-10`). UAB survey step 4 — parse coverage, and the
 > adverb import behind it. DONE, merged `2026-10-10`. The gate PASSES every
 > criterion against `baseline.json`.

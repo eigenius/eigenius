@@ -462,6 +462,36 @@ data lexicon:Cat : Type 1 {
     // ratio is neither a number nor a measure phrase: before `fewer`, `10%` and `3` state differences.
     // The factor comparatives (`0.56-fold fewer`) take it.
     cat_factor : lexicon:Cat,
+    // NUMPRED — a DIMENSIONLESS MEASURED VALUE as a predicate (D95 slice 7, decision 6's closing
+    // gloss, revisited 2026-10-22): `0.94` in "the observed-to-expected ratio is 0.94".
+    // ⟦cat_numpred⟧ = lexicon:Entity -> core:Prop, over `λx. ontology:has_quantity(x, u"1", q)` —
+    // the same denotation a predicative adjective `S[adj]\NP` carries, so the copula's semantics
+    // needs no change to take it.
+    //
+    // **It is a DISTINCT CATEGORY rather than `S[adj]\NP`, and that is the whole design.** Decision
+    // 6 removed the numeral's measure-phrase seeding after slice 4 had it: a bound marker's measure
+    // predicate took the bare number, the modifier lift made it prenominal, and `at least 1,000
+    // cells` gained a second reading — cells with a quantity of at least 1000. A first cut at
+    // restoring the predicate seeded `S[adj]\NP` behind a provenance guard on the modifier lift,
+    // and MEASURED THE DEFECT BACK (2026-10-21): `at least` composed with the leaf as a degree
+    // modifier FIRST, the composed adjective carried the combinator's own provenance rather than the
+    // leaf's, and the lift took it — `at least 1,000 cells` went from 2 readings to 4, the `per
+    // sample` form from 4 to 12, with `has_quantity` inside the noun's Σ restrictor exactly as
+    // decision 6 described. A provenance tag cannot survive the composition that precedes the lift.
+    //
+    // A category can. `mod_lifts` keys on `is_adjective_cat`, which `cat_numpred` does not satisfy,
+    // so nothing lifts it prenominally; no `cat_mp` is seeded, so no measure consumer or bound
+    // marker reaches it; and no adjective-modifying adverb can compose with it. The defect is
+    // UNREACHABLE rather than blocked. Only an entry that names `cat_numpred` takes it, and the
+    // copula is the one that does.
+    //
+    // What this reopens is decision 6's gloss — "a bare number as a dimensionless measured value
+    // (`P = 0.02`) is a statistic, which the CNL keeps out of a claim" — not its mechanism. That
+    // holds for a test statistic, a property of an inference procedure. It fails for a measured
+    // quantity of the subject matter, which has a truth condition. Measured on the UAB certification
+    // log (2026-10-21): 53 of its 427 gold claim spans carry a bare dimensionless decimal, 38 of
+    // them `observed` — 17% of every `observed` claim, each with a `reproduce:` line.
+    cat_numpred : lexicon:Cat,
     // STAT — a STATISTIC over a group's members (D95 slice 9, decision 3): `a median`. ⟦cat_stat⟧ =
     // (Entity → core:float) → Entity → core:float, a measure to its summary over a group; the factor
     // comparatives apply it to both measures they compare (`a median 0.56-fold fewer`).
@@ -677,7 +707,7 @@ class lexicon:ReservedConstruct {
 // (typed_resource_iris), never through the `lexicon:form` value index — so it neither belongs to that
 // domain nor should pollute that index.
 property lexicon:construct_form : core:string {
-    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …).";
+    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …). A form containing a SPACE is a multi-token construct, matched against that many consecutive tokens (`rather than`) — for a fixed pair whose halves carry the meaning only together. `but not` is NOT one of these: `but` and `not` are each reserved in their own right and compose, which is why they stay two kinds.";
     domain lexicon:ReservedConstruct;
 }
 // ReservedKind — the CLOSED vocabulary of grammatical roles a reserved construct plays, as a
@@ -716,12 +746,16 @@ resource lexicon:rk_reciprocal_each : lexicon:ReservedKind {
 resource lexicon:rk_reciprocal_other : lexicon:ReservedKind {
     core:description = "`other` — second token of the reciprocal `each other`.";
 }
+resource lexicon:rk_coord_rather_than : lexicon:ReservedKind {
+    core:description = "`rather than` — the EXCLUDING coordinator, written as one two-token construct_form. Truth-conditionally identical to `but not` (`X ∧ ¬Y`), so it shares that builder; the difference is the correction/preference it conveys, which is not truth-conditional. Unlike `but not` — two independently reserved tokens composed — neither half carries this meaning alone: `rather` is an ordinary degree adverb (`rather clear`) and `than` is the comparative marker (`larger than`). Declaring the PAIR is what leaves both of those readings untouched.";
+}
 property lexicon:construct_kind : core:resource {
     description = "The reserved construct's grammatical role the CKY keys on — a lexicon:ReservedKind individual. allows_only enforces the closed vocabulary at commit; the parser maps the referenced IRI to its internal ReservedKind.";
     class_types lexicon:ReservedKind;
     allows_only lexicon:rk_coord_and, lexicon:rk_coord_or, lexicon:rk_comma,
         lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
-        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
+        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other,
+        lexicon:rk_coord_rather_than;
     domain lexicon:ReservedConstruct;
 }
 

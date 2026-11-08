@@ -29,6 +29,14 @@ use crate::nbe::term::Exp;
 /// The placeholder axiom a pronoun's `sem` carries in the lexicon, before freshening.
 const ANAPHOR_IRI: &str = "urn:eigenius:lexicon:anaphor";
 
+/// The placeholder a FACTIVE subordinator's `sem` carries for each of its two proof arguments
+/// (D62 2d Fork A). The `Prop` sibling of `anaphor_of`: it stands in the derivation as a closed
+/// constant so the entry gate-passes and the term stays a `Prop` through composition, and the
+/// felicity gate freshens it into a typed free variable — a [`HoleKind::ProofObligation`].
+///
+/// [`HoleKind::ProofObligation`]: super::parse::HoleKind::ProofObligation
+const HYPOTHESIS_OF_IRI: &str = "urn:eigenius:lexicon:hypothesis_of";
+
 /// Base name of the referent-hole free variable for a pronoun/possessive spanning tokens
 /// `[i, j]`. Position-keyed, so distinct occurrences are distinct holes.
 pub(super) fn hole_base(i: usize, j: usize) -> String {
@@ -41,6 +49,22 @@ pub(super) fn hole_base(i: usize, j: usize) -> String {
 /// sem) and possessive-determiner sems (nested inside the λ — `poss_of(A, x, anaphor)`); the
 /// compound forms those traverse are covered below, and every other form is returned
 /// unchanged (no anaphor occurs there).
+/// Is this sem a **bare referential pronoun** — exactly the `lexicon:anaphor` placeholder, with
+/// nothing wrapped around it?
+///
+/// EXACTLY, not "contains": the possessive `its` / `their` carries the same axiom NESTED inside the
+/// determiner's λ (it is the possessor, not the referent), and the demonstrative DETERMINER carries
+/// the restrictor-typed sibling `anaphor_of` instead. Only a bare pronoun — `it`, `they`, and the
+/// bare demonstratives — denotes the hole itself. Checked before [`freshen_anaphor`] runs, since
+/// after it the placeholder is an ordinary `Exp::Var` indistinguishable from any other.
+pub(super) fn is_bare_pronoun_sem(exp: &Exp) -> bool {
+    matches!(
+        exp,
+        Exp::EigonAxiom(a)
+            if a.as_str() == ANAPHOR_IRI || a.as_str() == "urn:eigenius:lexicon:speaker"
+    )
+}
+
 pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
     let go = |e: &Exp| freshen_anaphor(e, fresh);
     match exp {
@@ -91,15 +115,25 @@ pub(crate) fn count_value(q: &Exp) -> Option<usize> {
     }
 }
 
-/// A demonstrative's referent hole, as [`freshen_anaphor_of`] finds it: the fresh variable, the
-/// restrictor type it stands at, and the count a numeral after the demonstrative states.
-pub(super) struct DemonstrativeHole {
+/// A hole [`freshen_gate_holes`] finds in a normal form: the fresh variable, the type it stands at,
+/// the count a numeral after a demonstrative states, and WHICH placeholder produced it.
+pub(super) struct GateHole {
     pub(super) var: String,
     pub(super) ty: Exp,
     pub(super) count: Option<Exp>,
+    /// `true` for a factive subordinator's proof argument (`hypothesis_of`), `false` for a
+    /// demonstrative's referent (`anaphor_of`). The two are freshened in ONE traversal because they
+    /// have the same shape — a one-argument axiom whose argument IS the hole's type — and differ
+    /// only in what resolves them: an antecedent from the chain, or a witness from the
+    /// justification layer.
+    pub(super) is_proof: bool,
 }
 
-/// Freshen every `lexicon:anaphor_of(A)` application in a NORMAL FORM into a typed referent hole:
+/// Freshen every `lexicon:anaphor_of(A)` and `lexicon:hypothesis_of(P)` application in a NORMAL
+/// FORM into a typed hole. ONE traversal for both, because they have the same shape — a
+/// one-argument axiom whose argument IS the hole's type — and differ only in what resolves them.
+///
+/// For the referent holes:
 /// each occurrence is replaced by a fresh variable (`$demref$<k>_0`, traversal order — the
 /// skeleton normalizer α-normalizes the `$name$digits_digits` shape, so the naming is
 /// drift-free), and `(var, A)` is returned so the gate can carry the hole at the RESTRICTOR type
@@ -109,59 +143,92 @@ pub(super) struct DemonstrativeHole {
 /// `anaphor_of` head cannot occur in a well-typed nf; a bare un-applied constant is left alone
 /// (nothing to type the hole with) and the gate's closed `check` rejects the candidate. A counted
 /// occurrence, `anaphor_of_count(A, q)`, returns its count `q` beside the type.
-pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<DemonstrativeHole>) {
-    fn walk(e: &Exp, holes: &mut Vec<DemonstrativeHole>) -> Exp {
+pub(super) fn freshen_gate_holes(exp: &Exp) -> (Exp, Vec<GateHole>) {
+    fn walk(e: &Exp, holes: &mut Vec<GateHole>, memo: &mut Vec<(Exp, Exp)>) -> Exp {
         if let Exp::App(f, a) = e {
             let head = |g: &Exp, iri: &str| matches!(g, Exp::EigonAxiom(i) if i.as_str() == iri);
-            let (ty, count) = if head(f, ANAPHOR_OF_IRI) {
-                (Some(a.as_ref().clone()), None)
+            let (ty, count, is_proof) = if head(f, ANAPHOR_OF_IRI) {
+                (Some(a.as_ref().clone()), None, false)
+            } else if head(f, HYPOTHESIS_OF_IRI) {
+                // `hypothesis_of(P)` — the argument IS the proposition the hypothesis proves, so it
+                // types the hole directly, reusing the already-freshened `P` when `P` was walked
+                // earlier in the same subordinator spine (`Because(s1, s2, hypothesis_of(s1), …)`).
+                let walked_a = memo
+                    .iter()
+                    .find(|(raw, _)| raw == a.as_ref())
+                    .map(|(_, w)| w.clone())
+                    .unwrap_or_else(|| walk(a, holes, memo));
+                (Some(walked_a), None, true)
             } else if let Exp::App(g, t) = f.as_ref() {
                 if head(g, ANAPHOR_OF_COUNT_IRI) {
-                    (Some(t.as_ref().clone()), Some(a.as_ref().clone()))
+                    (Some(t.as_ref().clone()), Some(a.as_ref().clone()), false)
                 } else {
-                    (None, None)
+                    (None, None, false)
                 }
             } else {
-                (None, None)
+                (None, None, false)
             };
             if let Some(ty) = ty {
-                let var = format!("$demref${}_0", holes.len());
-                holes.push(DemonstrativeHole {
+                let var = if is_proof {
+                    format!("$proof${}_0", holes.len())
+                } else {
+                    format!("$demref${}_0", holes.len())
+                };
+                holes.push(GateHole {
                     var: var.clone(),
                     ty,
                     count,
+                    is_proof,
                 });
                 return Exp::Var(var);
             }
         }
-        match e {
-            Exp::App(f, x) => Exp::App(Box::new(walk(f, holes)), Box::new(walk(x, holes))),
-            Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(walk(b, holes))),
+        let res = match e {
+            Exp::App(f, x) => Exp::App(
+                Box::new(walk(f, holes, memo)),
+                Box::new(walk(x, holes, memo)),
+            ),
+            Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(walk(b, holes, memo))),
             Exp::Pi(p, a, b) => Exp::Pi(
                 p.clone(),
-                Box::new(walk(a, holes)),
-                Box::new(walk(b, holes)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
             ),
             Exp::Sig(p, a, b) => Exp::Sig(
                 p.clone(),
-                Box::new(walk(a, holes)),
-                Box::new(walk(b, holes)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
             ),
-            Exp::Arrow(a, b) => Exp::Arrow(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Times(a, b) => Exp::Times(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Fst(x) => Exp::Fst(Box::new(walk(x, holes))),
-            Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes))),
-            Exp::Pair(a, b) => Exp::Pair(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
-            Exp::Ann(x, t) => Exp::Ann(Box::new(walk(x, holes)), Box::new(walk(t, holes))),
+            Exp::Arrow(a, b) => Exp::Arrow(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Times(a, b) => Exp::Times(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Fst(x) => Exp::Fst(Box::new(walk(x, holes, memo))),
+            Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes, memo))),
+            Exp::Pair(a, b) => Exp::Pair(
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Ann(x, t) => Exp::Ann(
+                Box::new(walk(x, holes, memo)),
+                Box::new(walk(t, holes, memo)),
+            ),
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),
                 n.clone(),
-                args.iter().map(|x| walk(x, holes)).collect(),
+                args.iter().map(|x| walk(x, holes, memo)).collect(),
             ),
             other => other.clone(),
-        }
+        };
+        memo.push((e.clone(), res.clone()));
+        res
     }
     let mut holes = Vec::new();
-    let out = walk(exp, &mut holes);
+    let mut memo = Vec::new();
+    let out = walk(exp, &mut holes, &mut memo);
     (out, holes)
 }

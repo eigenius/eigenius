@@ -10,6 +10,9 @@ description = "Convert PMI Case Registry records (UAB experiment 02) into an ESL
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+# HGVS parsing, shared with the kernel's document glossary since 2026-10-11. Zero-dependency leaf
+# crate, so this does not pull the kernel into a lib that is deliberately kernel-free.
+eigenius-notation = { path = "../eigenius-notation" }
 
 [dev-dependencies]
 eigenius-kernel = { path = "../../kernel" }

@@ -21,7 +21,9 @@
 # Why this exists as a separate, scripted step: reading these numbers by eye is how they get read
 # WRONG. Three specific traps, each of which has silently produced a false result:
 #
-#   1. `grammar-gap` MUST come from the `=== WRN first page over FULL lexicon: … ===` summary line.
+#   1. `grammar-gap` MUST come from the `=== <page> over FULL lexicon: … ===` summary line. The
+#      banner NAMES the measured page since 2026-10-25; it used to say "WRN first page" whatever
+#      corpus was read. The pattern below matches both spellings so archived logs still parse.
 #      The per-unit listing enumerates only AMBIG units and OMITS grammar gaps — counting from it
 #      reports 0 gaps on a run that had many.
 #   2. A run that never printed a summary line DID NOT COMPLETE (stack overflow / abort / SKIP).
@@ -65,7 +67,7 @@ done
 [[ -f "$LOG" ]] || { echo "error: no such log: $LOG" >&2; exit 2; }
 
 # ── Trap 2: did the run COMPLETE? ────────────────────────────────────────────
-summary_of() { grep -m1 -E '^=== WRN first page over FULL lexicon' "$1" || true; }
+summary_of() { grep -m1 -E '^=== .* over FULL lexicon' "$1" || true; }
 
 SUMMARY="$(summary_of "$LOG")"
 if [[ -z "$SUMMARY" ]]; then
@@ -242,6 +244,36 @@ if [[ "$USE_JSON" == "1" ]]; then
   BUNI=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected']['units'])")
   echo
   echo "  vs committed baseline (experiments/parsing/baseline.json):"
+  BRERANK_J=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON')).get('provenance',{}).get('reranker',''))")
+  BKIND_J=reranked
+  case "${BRERANK_J,,}" in ''|none|caponly|'cap-only'*) BKIND_J=caponly ;; esac
+
+  # The KIND guard belongs HERE most of all. `eval-parse-rate.sh`'s own header and
+  # experiments/parsing/README.md:237 both say this script "refuses to compare across kinds", but
+  # until 2026-10-10 that refusal existed only in the log-vs-log path below — not in `--baseline`,
+  # which is the path `measure-parse-rate.sh` runs and the one README §3 warns about by name:
+  # scoring a cap-only run against baseline.json loses 8 pins the reranker keeps (54/62 against
+  # 62/62) and reads as eight regressions that all pass on the gated arm.
+  if [[ "$KIND" != "$BKIND_J" ]]; then
+    echo "    NOT COMPARABLE: this run is '$KIND', baseline.json is '$BKIND_J'."
+    echo "    A cap-only run inflates gaps by construction. Compare like with like."
+    exit 1
+  fi
+
+  if [[ "$KIND" == reranked ]]; then
+    RMODEL="${RERANK%% *}"
+    if [[ -z "$BRERANK_J" ]]; then
+      echo "    NOTE: baseline.json records no provenance.reranker — the instrument cannot be verified."
+    elif [[ "$BRERANK_J" != *"$RMODEL"* ]]; then
+      echo "    NOT COMPARABLE: the reranker model differs."
+      echo "      this run : $RMODEL"
+      echo "      baseline : $BRERANK_J"
+      echo "    Re-baseline deliberately, or re-run on the baseline's model. A model change is an"
+      echo "    instrument change: its delta cannot be told from the change under test."
+      exit 1
+    fi
+  fi
+
   [[ "$U" -ne "$BUNI" ]] && echo "    NOTE: unit count differs ($BUNI → $U) — a different page or segmentation."
   printf '    %-16s %s → %s %s\n' "grammar-gap" "$BGAP" "$GAP" \
     "$([[ "$GAP" -gt "$BGAP" ]] && echo '  REGRESSION' || { [[ "$GAP" -lt "$BGAP" ]] && echo '  improved' || echo '  (unchanged)'; })"
@@ -252,6 +284,17 @@ if [[ "$USE_JSON" == "1" ]]; then
     "$([[ "$ENC" -lt "$BENC" ]] && echo '  lower (not gated — see expected-hits)' || { [[ "$ENC" -gt "$BENC" ]] && echo '  higher' || echo '  (unchanged)'; })"
   [[ "$GAP" -gt "$BGAP" ]] && RC=2
 
+  # ── Trap 3b: WHICH reranker, not just whether one ran. ──────────────────────
+  # The KIND check (cap-only vs reranked) is the only instrument check this path had, so until
+  # 2026-10-10 a run that swapped the sense-ranker MODEL scored as comparable and every delta it
+  # caused was attributed to the code or lexicon under test. The model is as much an instrument as
+  # the knobs: `claude-sonnet-5-5` was measured against `claude-sonnet-4-6` on this very page
+  # (kernel/src/dcg/model_config.rs, eigenius#59 strand 2) and held only 20 of 41 selections
+  # stable across draws against 38 — a swap moves the numbers on its own.
+  #
+  # The two sides record it differently — the log as a leading model id ("claude-sonnet-4-6
+  # (live) — RECORDING to …"), baseline.json as prose that names it — so this compares the run's
+  # MODEL ID against the baseline's recorded string rather than the strings themselves.
   # ── Faithfulness gate: no curated unit may LOSE its expected (verified-correct) reading ──────────
   BEH=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_hits',0))")
   BEC=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_curated',0))")
@@ -378,11 +421,35 @@ if [[ -n "$BASE" && -f "$BASE" ]]; then
     exit 1
   fi
   BKIND=caponly; grep -qE '^contextual reranker: .*\(live\)' "$BASE" && BKIND=reranked
+  BRERANK="$(grep -m1 -E '^contextual reranker:' "$BASE" | sed 's/^contextual reranker: //' || echo 'unknown')"
   BCONFIG="$(grep -m1 -E '^# config:' "$BASE" | sed 's/^# config: *//' || echo 'not recorded')"
   echo
   if [[ "$KIND" != "$BKIND" ]]; then
     echo "  NOT COMPARABLE: this run is '$KIND', baseline is '$BKIND'."
     echo "  A cap-only run inflates gaps by construction. Compare like with like."
+    exit 1
+  fi
+  # ── Trap 3b: WHICH reranker, not just whether one ran. ─────────────────────
+  # The kind check above separates cap-only from reranked and stops there, so until 2026-10-10 a
+  # run that swapped the sense-ranker MODEL scored as comparable and every delta it caused was
+  # attributed to the code or lexicon under test. The model is as much an instrument as the config
+  # below: `claude-sonnet-5-5` was measured against `claude-sonnet-4-6` on this very page
+  # (kernel/src/dcg/model_config.rs, eigenius#59 strand 2) and held only 20 of 41 selections
+  # stable across draws against 38 — a swap moves the numbers on its own.
+  #
+  # Compare the MODEL ID, not the whole line: the line continues "— RECORDING to <run dir>", which
+  # differs between any two live runs, so comparing the strings refused every legitimate live-vs-live
+  # A/B — the comparison README §"Isolating a LEXICON change" asks for. Caught by testing the same
+  # model from two run dirs.
+  #
+  # Reranked runs only: a cap-only run has no model, and the kind check has already guaranteed
+  # both logs carry the line by the time control reaches here.
+  if [[ "$KIND" == reranked && "${RERANK%% *}" != "${BRERANK%% *}" ]]; then
+    echo "  NOT COMPARABLE: the reranker model differs."
+    echo "    this run : ${RERANK%% *}"
+    echo "    baseline : ${BRERANK%% *}"
+    echo "  Re-baseline deliberately, or re-run on the baseline's model. A model change is an"
+    echo "  instrument change: its delta cannot be told from the change under test."
     exit 1
   fi
   # The knobs (pos_prune / combinatory_core / SENSE_CAP / CELL_BEAM) change the RESULT. Two runs on

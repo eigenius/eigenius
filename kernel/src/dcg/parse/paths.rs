@@ -46,6 +46,75 @@ fn spread_over_skeletons<T>(candidates: Vec<T>, sem: impl Fn(&T) -> &Exp) -> Vec
     })
 }
 
+fn is_bse_verb_cat(cat: &Exp) -> bool {
+    use super::super::category::slash_parts;
+    if let Some((_m, s_cat, np_subj)) = slash_parts(cat, "bwd") {
+        return is_ctor(np_subj, "cat_np").is_some()
+            && matches!(
+                is_ctor(s_cat, "cat_s"),
+                Some([_, Exp::InductiveCtor(_, fnm, _)]) if fnm == "bse"
+            );
+    }
+    if let Some((_m, res, _arg)) = slash_parts(cat, "fwd") {
+        return is_bse_verb_cat(res);
+    }
+    false
+}
+
+fn has_initial_imperative_verb(tokens: &[Token], leaves: &super::super::chart::Chart) -> bool {
+    let n = tokens.len();
+    if n == 0 || tokens[0].surface() == "Do" {
+        return false;
+    }
+    for (imp_idx, row) in leaves.iter().enumerate().take(n.min(2)) {
+        if imp_idx == 1 && !super::seed::is_lexicalized_adverb(&tokens[0].surface().to_lowercase())
+        {
+            break;
+        }
+        if row[imp_idx].iter().any(|it| is_bse_verb_cat(it.cat())) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_imperative_root_vp(cat: &Exp) -> bool {
+    use super::super::category::slash_parts;
+    let Some((_m, s_cat, np_subj)) = slash_parts(cat, "bwd") else {
+        return false;
+    };
+    is_ctor(np_subj, "cat_np").is_some()
+        && matches!(
+            is_ctor(s_cat, "cat_s"),
+            Some([Exp::InductiveCtor(_, m, _), Exp::InductiveCtor(_, f, _)])
+                if m == "dcl" && (f == "fin" || f == "bse")
+        )
+}
+
+fn saturate_imperative_vp(it: &Item) -> Option<Item> {
+    use super::super::category::slash_parts;
+    let (_m, s_cat, np_subj) = slash_parts(it.cat(), "bwd")?;
+    is_ctor(np_subj, "cat_np")?;
+    let [mood, Exp::InductiveCtor(fin_decl, fnm, _)] = is_ctor(s_cat, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, m, _) if m == "dcl")
+        || !matches!(fnm.as_str(), "fin" | "bse")
+    {
+        return None;
+    }
+    let Exp::InductiveCtor(cat_decl, _, _) = s_cat else {
+        return None;
+    };
+    let spk = Iri::parse("urn:eigenius:lexicon:speaker").ok()?;
+    let fin = Exp::InductiveCtor(fin_decl.clone(), "fin".into(), Vec::new());
+    let s_fin = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![mood.clone(), fin]);
+    let sem = Exp::App(Box::new(it.sem().clone()), Box::new(Exp::EigonAxiom(spk)));
+    let mut sat = Item::from_parts(s_fin, sem, it.prov(), it.cost());
+    sat.derivation = it.derivation.clone();
+    Some(sat)
+}
+
 impl Parser {
     /// Packed-forest parse (D63 Option A, blueprint §11 3d): the shared attempt policy
     /// ([`Self::parse_widening`]) over the packed forest + cube-pruning extractor
@@ -130,12 +199,64 @@ impl Parser {
             );
         }
 
+        // Gap-boundary localization (set `EIGENIUS_GAP_BOUNDARY`, see `chart::boundary`): when the
+        // sentence produced NO top-span clause, say where the derivation stopped and which two
+        // categories refused to combine there. Gated on `top.is_empty()` because that is the only
+        // case it answers — a sentence that parsed has no boundary to find, and printing for it would
+        // drown the gaps in a page run. Fires once per cap rung, like the trace above; the header
+        // carries the cap so an early rung and the widened one can be told apart.
+        if top.is_empty() && std::env::var("EIGENIUS_GAP_BOUNDARY").is_ok() {
+            let header = format!(
+                "===== GAP BOUNDARY cap={cap:?} nodes={} tokens={:?} =====",
+                forest.nodes.len(),
+                tokens.iter().map(|t| t.surface()).collect::<Vec<_>>(),
+            );
+            // The token-keyed binary rules are span-keyed, so only the parser holds what they need.
+            // The instrument asks whether one actually COMBINES a seam's pair — not whether a site
+            // merely exists there: `trig_appose_group` emits a site at every split of every cell, so
+            // site existence is true everywhere and diagnoses nothing.
+            let bin_rule_combines =
+                |l_span: (usize, usize), r_span: (usize, usize), l: &Item, r: &Item| {
+                    self.grammar
+                        .binary_sites(&tokens, l_span.0, r_span.1)
+                        .into_iter()
+                        .filter(|site| site.left == l_span && site.right == r_span)
+                        .any(|site| self.grammar.apply_bin_rule(site.rule, l, r).is_some())
+                };
+            eprint!(
+                "{}",
+                super::super::chart::boundary::gap_report(
+                    &forest,
+                    &tokens,
+                    &top,
+                    &self.grammar.layer,
+                    &bin_rule_combines,
+                    &header,
+                )
+            );
+        }
+
         let mut candidates: Vec<Item> = Vec::new();
         for id in top.iter().copied() {
             candidates.extend(
                 self.grammar
                     .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo),
             );
+        }
+        let tried_imp_fallback = candidates.is_empty();
+        if tried_imp_fallback && has_initial_imperative_verb(&tokens, &leaves) {
+            for &id in forest.cells[0][n - 1].values() {
+                if is_imperative_root_vp(forest.nodes[id].rep.cat()) {
+                    for it in self
+                        .grammar
+                        .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo)
+                    {
+                        if let Some(sat) = saturate_imperative_vp(&it) {
+                            candidates.push(sat);
+                        }
+                    }
+                }
+            }
         }
         candidates.sort_by_key(|it| it.cost());
         let raw_candidates = candidates.len();
@@ -195,6 +316,40 @@ impl Parser {
                 }
             } else if let Some(c) = self.reduced_felicitous(it) {
                 forest_out.push(c);
+            }
+        }
+        if forest_out.is_empty()
+            && open.is_empty()
+            && !tried_imp_fallback
+            && has_initial_imperative_verb(&tokens, &leaves)
+        {
+            let mut imp_candidates: Vec<Item> = Vec::new();
+            for &id in forest.cells[0][n - 1].values() {
+                if is_imperative_root_vp(forest.nodes[id].rep.cat()) {
+                    for it in self
+                        .grammar
+                        .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo)
+                    {
+                        if let Some(sat) = saturate_imperative_vp(&it) {
+                            imp_candidates.push(sat);
+                        }
+                    }
+                }
+            }
+            imp_candidates.sort_by_key(|it| it.cost());
+            retain_distinct_sems(&mut imp_candidates, |it| it.sem());
+            let mut imp_candidates = spread_over_skeletons(imp_candidates, |it| it.sem());
+            imp_candidates.truncate(CLASSIFY_BUDGET);
+            for it in &imp_candidates {
+                if types_ok {
+                    match self.classify_felicitous(it, &hole_specs) {
+                        Some(FelicitousOutcome::Closed(c)) => forest_out.push(c),
+                        Some(FelicitousOutcome::Open(o)) => open.push(o),
+                        None => {}
+                    }
+                } else if let Some(c) = self.reduced_felicitous(it) {
+                    forest_out.push(c);
+                }
             }
         }
         Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
@@ -333,6 +488,17 @@ impl Parser {
                 is_finite_clause(it.cat()) || is_ctor(it.cat(), "cat_q").is_some()
             })
             .collect();
+        let tried_imp_fallback = candidates.is_empty();
+        let imp_fallback: Vec<Item> =
+            if !tried_imp_fallback || !has_initial_imperative_verb(&tokens, &chart) {
+                Vec::new()
+            } else {
+                chart[0][n - 1]
+                    .iter()
+                    .filter_map(saturate_imperative_vp)
+                    .collect()
+            };
+        candidates.extend(imp_fallback.iter());
         let n_candidates = candidates.len();
         candidates.sort_by_key(|it| it.cost());
         retain_distinct_sems(&mut candidates, |it| it.sem());
@@ -374,6 +540,31 @@ impl Parser {
             } else if let Some(c) = self.reduced_felicitous(it) {
                 // Hole types unavailable (should not happen): closed path only.
                 forest.push(c);
+            }
+        }
+        if forest.is_empty()
+            && open.is_empty()
+            && !tried_imp_fallback
+            && has_initial_imperative_verb(&tokens, &chart)
+        {
+            let mut imp_candidates: Vec<Item> = chart[0][n - 1]
+                .iter()
+                .filter_map(saturate_imperative_vp)
+                .collect();
+            imp_candidates.sort_by_key(|it| it.cost());
+            retain_distinct_sems(&mut imp_candidates, |it| it.sem());
+            let mut imp_candidates = spread_over_skeletons(imp_candidates, |it| it.sem());
+            imp_candidates.truncate(CLASSIFY_BUDGET);
+            for it in &imp_candidates {
+                if types_ok {
+                    match self.classify_felicitous(it, &hole_specs) {
+                        Some(FelicitousOutcome::Closed(c)) => forest.push(c),
+                        Some(FelicitousOutcome::Open(o)) => open.push(o),
+                        None => {}
+                    }
+                } else if let Some(c) = self.reduced_felicitous(it) {
+                    forest.push(c);
+                }
             }
         }
         Self::subsume_duplicates(&mut forest); // D3: collapse definitionally-equal readings

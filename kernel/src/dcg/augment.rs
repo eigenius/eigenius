@@ -85,18 +85,41 @@ impl CategoryProposer for NominalCategoryProposer {
     }
 }
 
-/// How a proposed lexical entry was resolved — a **trust signal** on the binding, most-trusted first.
+/// How a proposed lexical entry was resolved — a **trust signal** on the binding, most-trusted
+/// first.
+///
+/// THE ORDER IS LOAD-BEARING, not documentation. `lexicon:LexiconProfile` makes a parse scope an
+/// ordered list of lexica where "array order IS resolution precedence", and the parser folds an
+/// entry's position into the rank as "the primary key, before sense-frequency" (D65 §4.1/§4.2).
+/// A glossary split by method and ordered by this enum therefore ranks a surface closed by a
+/// published grammar above one closed on nothing — and because precedence there is a SOFT rank
+/// with no shadowing, the weak ones still stay in the forest rather than being removed.
+///
+/// Six variants were added on `2026-10-11` without honouring the ordering, leaving
+/// `UnevidencedFallback` — which asserts only that a token occurred — fourth, above
+/// `NotationRecognized`. Harmless while nothing read the order; wrong the moment a profile does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolutionMethod {
     /// The document itself defined it (Schwartz-Hearst / a definitional pattern). Deterministic.
     DefinitionExtracted,
-    /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
+    /// string rather than a word, and D96's rule is that assignment follows the element.
+    MarkedAsCode,
+    /// grammar is published and is its own evidence — no recurrence, no stop-list, no threshold.
+    NotationRecognized,
     /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
     NameRecognized,
+    /// own join, not a guess about word boundaries.
+    CompoundOfKnownParts,
+    /// synthesis because the base is attested and the affix's contribution is stated, not guessed.
+    DerivedFromBase,
     /// A retrieval hit against the committed lexicon (the form / description text index) grounded it.
     RetrievalGrounded,
+    /// objection does not reach a surface the lexicon has NO sense for.
+    RecurrentOovName,
     /// An LLM synthesized a provisional type/grounding from a retrieved definition. Lowest trust.
     LlmSynthesized,
+    /// than a lower one that does not.
+    UnevidencedFallback,
 }
 
 /// The provenance envelope on a [`LexicalBinding`]: how the wrapped entry was produced + how far to trust

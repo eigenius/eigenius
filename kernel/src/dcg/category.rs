@@ -114,6 +114,18 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             Vec::new(),
             vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
         )),
+        // ⟦NUMPRED⟧ = Entity → Prop — a dimensionless measured value AS A PREDICATE, over
+        // `λx. has_quantity(x, u"1", q)` (D95 slice 7 decision 6's gloss, revisited 2026-10-22).
+        // The same denotation `S[adj]\NP` carries, deliberately: the copula's semantics is unchanged
+        // and only the CATEGORY differs, which is what keeps it out of `mod_lifts` and away from
+        // every adjective-modifying adverb. See `lexicon:cat_numpred` for the measurement that
+        // rejected a provenance guard in its place.
+        ("cat_numpred", []) => {
+            let entity = Exp::EigonClass(
+                Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+            );
+            Ok(Exp::Arrow(Box::new(entity), Box::new(Exp::sort(0))))
+        }
         // ⟦STAT⟧ = (Entity → float) → Entity → float — a statistic takes a measure to its summary over
         // a group's members (D95 slice 9, decision 3).
         ("cat_stat", []) => {
@@ -534,6 +546,17 @@ pub fn measure_phrase_cat(
     ))
 }
 
+/// A dimensionless measured value's PREDICATE category `cat_numpred` (D95 slice 7 decision 6's
+/// gloss, revisited 2026-10-22), for the second item a numeral seeds — `λx. has_quantity(x, u"1", q)`,
+/// which the copula takes in "the observed-to-expected ratio is 0.94". Distinct from `S[adj]\NP` so
+/// that no modifier lift and no adjective-modifying adverb can reach it; see `lexicon:cat_numpred`
+/// for the measurement that rejected a provenance guard in its place. `None` if the layer lacks the
+/// `Cat` inductive.
+pub(super) fn numpred_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_numpred".to_string(), vec![]))
+}
+
 /// A bare number's category `cat_num` (D95 slice 7), for the item a numeral seeds. `None` if
 /// `lexicon:Cat` does not resolve.
 pub fn number_cat(layer: &Arc<Layer>) -> Option<Exp> {
@@ -837,11 +860,78 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     let bound = clause(Exp::Var("ADV#fin".to_string()));
     let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
 
-    // 2. Backward VP modifier — verbal only; returns the `fin` it accepts, so nothing to bind.
-    let vp = clause(Exp::InductiveCtor(fin, "fin".to_string(), vec![]));
-    let vp_mod_bwd = ctor("bwd", vec![m_all, vp.clone(), vp]);
+    // 2. Backward VP modifier — verbal only (`fin`, `pss`, `pass`, `ger`, `bse`, `inf`; excludes
+    //    `adj` and `pred`); returns the finiteness feature it accepts.
+    let mut out = vec![fwd_mod];
+    for f_name in ["fin", "pss", "pass", "ger", "bse", "inf"] {
+        let vp = clause(Exp::InductiveCtor(fin.clone(), f_name.to_string(), vec![]));
+        out.push(ctor("bwd", vec![m_all.clone(), vp.clone(), vp]));
+    }
+    let meas = ctor("cat_measure", vec![]);
+    out.push(ctor("fwd", vec![m_all, meas.clone(), meas]));
 
-    Some(vec![fwd_mod, vp_mod_bwd])
+    Some(out)
+}
+
+/// If `cat` is a finite backward or forward VP-modifier category
+/// `bwd|fwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
+/// (the shape imported WordNet adverbs carry in `data.adv`), return its five non-finite verbal
+/// siblings (`pss`, `pass`, `ger`, `bse`, `inf`) on the same `Fin` declaration so adverbs also
+/// attach to passive, gerund, bare-infinitive, and `to`-infinitive VPs ("queried directly",
+/// "already cited", "stating precisely", "can affect cells directly", "to report directly").
+/// Excludes `adj` and `pred`.
+pub(crate) fn nonfinite_bwd_adverb_cats(cat: &Exp) -> Vec<Exp> {
+    let (outer_dir, (m_outer, res_vp, arg_vp)) = if let Some(p) = slash_parts(cat, "bwd") {
+        ("bwd", p)
+    } else if let Some(p) = slash_parts(cat, "fwd") {
+        ("fwd", p)
+    } else {
+        return Vec::new();
+    };
+    if res_vp != arg_vp {
+        return Vec::new();
+    }
+    let Some((m_vp, s, np)) = slash_parts(res_vp, "bwd") else {
+        return Vec::new();
+    };
+    let Some([mood, fin]) = is_ctor(s, "cat_s") else {
+        return Vec::new();
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return Vec::new();
+    }
+    let Exp::InductiveCtor(fin_decl, fin_name, _) = fin else {
+        return Vec::new();
+    };
+    if fin_name != "fin" {
+        return Vec::new();
+    }
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return Vec::new();
+    };
+    ["pss", "pass", "ger", "bse", "inf"]
+        .into_iter()
+        .map(|f_name| {
+            let s_f = Exp::InductiveCtor(
+                cat_decl.clone(),
+                "cat_s".into(),
+                vec![
+                    mood.clone(),
+                    Exp::InductiveCtor(fin_decl.clone(), f_name.into(), Vec::new()),
+                ],
+            );
+            let vp_f = Exp::InductiveCtor(
+                cat_decl.clone(),
+                "bwd".into(),
+                vec![m_vp.clone(), s_f, np.clone()],
+            );
+            Exp::InductiveCtor(
+                cat_decl.clone(),
+                outer_dir.into(),
+                vec![m_outer.clone(), vp_f.clone(), vp_f],
+            )
+        })
+        .collect()
 }
 
 /// The transparent **sentence modifier** categories `S/S` and `S\S` (D62 Phase 3) — for
@@ -901,15 +991,15 @@ pub(crate) fn common_cat(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     // `cat_np(T, num)` / `cat_n(T, num)`: widen the type index to the common supertype; the number
     // feature must match (both raised object slots carry `num_any`, so this holds for the GQ case).
     if (nx == "cat_np" || nx == "cat_n") && ax.len() == 2 {
-        if ax[1] != ay[1] {
+        let num = if ax[1] == ay[1] || is_any_feat(&ay[1]) {
+            ax[1].clone()
+        } else if is_any_feat(&ax[1]) {
+            ay[1].clone()
+        } else {
             return None;
-        }
+        };
         let t = common_super(&ax[0], &ay[0], layer)?;
-        return Some(Exp::InductiveCtor(
-            dx.clone(),
-            nx.clone(),
-            vec![t, ax[1].clone()],
-        ));
+        return Some(Exp::InductiveCtor(dx.clone(), nx.clone(), vec![t, num]));
     }
     // Structural (`fwd`/`bwd`/`cat_s`/…): ctor + arity already match; recurse on corresponding args.
     let mut args = Vec::with_capacity(ax.len());
@@ -1150,7 +1240,10 @@ fn is_subject_gq(cat: &Exp) -> bool {
 /// whose sem (`λx.λV.λs. And(V(s), prep(s,x))`) threads the fronted antecedent into the VP.
 pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
     matches!(slash_parts(cat, "fwd"),
-        Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
+        Some((_m, res, np))
+            if slash_parts(res, "bwd")
+                .is_some_and(|(_, r, a)| is_ctor(r, "bwd").is_some() && is_ctor(a, "bwd").is_some())
+                && is_ctor(np, "cat_np").is_some())
 }
 
 /// The prepositions a `lexicon:Prep` value names, as (surface, constructor). An importer that finds a

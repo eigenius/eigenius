@@ -86,9 +86,9 @@ fn pow10(n: i32) -> Rational {
 #[test]
 fn the_layer_holds_the_declared_vocabulary() {
     let units = instances("NamedUnit");
-    // 7 base + the gram + 22 derived + D93's 9 non-SI + the 3 plane angles + standard gravity, the
-    // molar and the week.
-    assert_eq!(units.len(), 45, "{:?}", units.keys().collect::<Vec<_>>());
+    // 7 base + the gram + 22 derived + D95's 9 non-SI + the 3 plane angles + standard gravity, the
+    // molar, the week and the ångström.
+    assert_eq!(units.len(), 46, "{:?}", units.keys().collect::<Vec<_>>());
     assert_eq!(instances("Prefix").len(), 24);
 }
 
@@ -178,6 +178,7 @@ fn every_dimension_matches_its_si_definition() {
         ("dalton", kg.clone()),
         ("electronvolt", j.clone()),
         ("astronomical_unit", m.clone()),
+        ("angstrom", m.clone()),
         ("standard_gravity", m.div(&p(&s, 2)).unwrap()),
         ("molar", mol.div(&p(&m, 3)).unwrap()),
         ("week", s.clone()),
@@ -210,6 +211,9 @@ fn every_factor_is_the_exact_si_value() {
         ("arcsecond", (q(1, 648000), 1)),
         ("hectare", (q(10000, 1), 0)),
         ("litre", (pow10(-3), 0)),
+        // The ångström is 10⁻¹⁰ m exactly — an exact decimal power, unlike `Da`, so a magnitude
+        // converted through it stays exact.
+        ("angstrom", (pow10(-10), 0)),
         ("tonne", (q(1000, 1), 0)),
         (
             "electronvolt",

@@ -464,6 +464,30 @@ impl Parser {
         if self.grammar.reserved.coord_connective(&s_lc).is_some() {
             return true;
         }
+        if (s_lc.len() >= 5 && (s_lc.ends_with("-mer") || s_lc.ends_with("-mers")))
+            || (s_lc.ends_with("logue") || s_lc.ends_with("logues"))
+            || s_lc.split_once('-').is_some_and(|(l, r)| {
+                !l.is_empty()
+                    && !r.is_empty()
+                    && ((l.chars().all(|c| c.is_ascii_digit())
+                        && (r.chars().all(|c| c.is_ascii_digit())
+                            || !self.lex.entries_for(r).is_empty()))
+                        || (matches!(l, "non" | "per") && !self.lex.entries_for(r).is_empty()))
+            })
+        {
+            return true;
+        }
+        for prefix in [
+            "mis-", "re-", "under-", "over-", "self-", "co-", "out-", "cross-", "pre-", "de-",
+            "dis-", "over", "dis",
+        ] {
+            if let Some(stem) = s_lc.strip_prefix(prefix) {
+                let min_stem = if prefix.ends_with('-') { 3 } else { 4 };
+                if stem.len() >= min_stem && self.has_token(stem, lemmatizer) {
+                    return true;
+                }
+            }
+        }
         // Exactly the lemmas the SEEDER will try ([`super::seed`] opens with the same call), so a
         // token this reports missing is a token the parser could not have seeded. The list used to
         // be re-derived here — raw surface, Morphy lemmas, the hyphen rule — and had drifted: it
@@ -598,10 +622,37 @@ impl Parser {
     /// pre-pass), so the two see exactly the same candidate set.
     fn candidate_lemmas(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> BTreeSet<String> {
         let mut candidates: BTreeSet<String> = BTreeSet::new();
-        candidates.insert(surface.trim().to_lowercase());
+        let trimmed = surface.trim();
+        candidates.insert(trimmed.to_lowercase());
+        if let Some(stem) = trimmed
+            .strip_suffix('s')
+            .filter(|st| st.len() >= 2 && all_caps_symbol(st))
+        {
+            candidates.insert(stem.to_lowercase());
+            return candidates;
+        }
         for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
             for lemma in lemmatizer.lemmas(surface, pos) {
                 candidates.insert(lemma.trim().to_lowercase());
+            }
+        }
+        if let Some(amer) = british_to_american(&trimmed.to_lowercase()) {
+            let amer_resolves = !self.lex.entries_for(&amer).is_empty()
+                || [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv]
+                    .iter()
+                    .any(|&pos| {
+                        lemmatizer
+                            .lemmas(&amer, pos)
+                            .into_iter()
+                            .any(|l| !self.lex.entries_for(&l.trim().to_lowercase()).is_empty())
+                    });
+            if amer_resolves {
+                candidates.insert(amer.clone());
+                for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
+                    for lemma in lemmatizer.lemmas(&amer, pos) {
+                        candidates.insert(lemma.trim().to_lowercase());
+                    }
+                }
             }
         }
         // **Hyphen-joined multiword** (D69 §7h): a hyphenated surface whose SPACE form is a real
@@ -702,6 +753,11 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>, WidenTrace) {
+        // One sentence = one gap report, however many cap rungs the widen ladder runs
+        // (`chart::boundary`). Clearing here, at the per-SENTENCE entry point, is what makes the
+        // per-rung dedup inside the instrument mean "this rung repeats the previous rung" rather than
+        // "this sentence repeats the previous sentence".
+        super::chart::boundary::reset_rung_dedup();
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
         // when packing is enabled, the combinatory-core spike is off, and this sentence is not
         // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).
@@ -1148,7 +1204,13 @@ impl Parser {
                 // Deliberately NOT measurable with the cap-only instrument: this whole function is
                 // gated on `sense_ranker`, so cap-only never executes it. Its reach was measured
                 // instead as rank-key misses against the tracked recording — see the commit.
-                let surface_all_caps = all_caps_symbol(surface.trim());
+                let surface_all_caps = all_caps_symbol(surface.trim())
+                    || surface
+                        .trim()
+                        .chars()
+                        .skip(1)
+                        .any(|c| c.is_ascii_uppercase())
+                    || surface.trim().chars().any(|c| c.is_ascii_digit());
                 for c in self.candidate_lemmas(&surface, lemmatizer) {
                     for e in self.scoped(self.lex.entries_for(&c), scope) {
                         if !surface_all_caps && all_caps_symbol(&e.form) {
@@ -1371,6 +1433,30 @@ pub fn all_caps_symbol(s: &str) -> bool {
         saw_upper |= c.is_uppercase();
     }
     saw_upper
+}
+
+/// Systematic British-to-American orthographic suffix normalization (`-ise` → `-ize`,
+/// `-isation` → `-ization`, `-lled`/`-lling` → `-led`/`-ling`, `-logue` → `-log`).
+pub(super) fn british_to_american(s_lc: &str) -> Option<String> {
+    for (brit, amer) in [
+        ("isations", "izations"),
+        ("isation", "ization"),
+        ("ising", "izing"),
+        ("ised", "ized"),
+        ("ises", "izes"),
+        ("ise", "ize"),
+        ("lling", "ling"),
+        ("lled", "led"),
+        ("logues", "logs"),
+        ("logue", "log"),
+    ] {
+        if let Some(stem) = s_lc.strip_suffix(brit) {
+            if stem.len() >= 3 {
+                return Some(format!("{stem}{amer}"));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
