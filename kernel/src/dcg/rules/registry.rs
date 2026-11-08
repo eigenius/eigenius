@@ -472,6 +472,10 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
     // member sems (which would make its firing decision sem-dependent and need a new packing bit).
     let prov = if is_derived_individual(l) || is_derived_individual(r) {
         Combinator::DerivedIndividual
+    } else if matches!(l.prov(), Combinator::ForwardApp | Combinator::BackwardApp)
+        || matches!(r.prov(), Combinator::ForwardApp | Combinator::BackwardApp)
+    {
+        Combinator::ForwardApp
     } else {
         Combinator::Other
     };

@@ -1797,6 +1797,9 @@ const FRONT_F: &str = "__fr_F";
 /// surface to check), where the cost PENALTY ([`PARTICIPIAL_MOD_PENALTY`]) keeps it below a real
 /// adjective. Additive: the participle stays available for its passive-VP uses ("is predicted").
 pub(crate) fn participial_lifts(it: &Item) -> Vec<Item> {
+    if it.prov() == Combinator::BackwardApp {
+        return Vec::new();
+    }
     match participial_restrictor(it.cat(), it.sem()) {
         Some(restr) => vec![Item::from_parts(
             cat_mod_cat(),
