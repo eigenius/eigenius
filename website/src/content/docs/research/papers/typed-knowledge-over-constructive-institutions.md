@@ -10,7 +10,7 @@ Hans-Martin Will
 
 Preprint, 249 pages · [doi:10.5281/zenodo.23884679](https://doi.org/10.5281/zenodo.23884679)
 · Lean 4 formalization: [github.com/eigenius/theory](https://github.com/eigenius/theory)
-· CC BY-NC 4.0
+· CC BY-NC-ND 4.0
 
 The DOI resolves to the current version of the book on Zenodo.
 
