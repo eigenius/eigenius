@@ -1,0 +1,34 @@
+---
+// The Eigenius publications, rendered as a card grid. Used by the
+// landing page's Research section and by /research/, so the list is
+// kept here once rather than in each page.
+import PaperCard from "./PaperCard.astro";
+---
+
+<div class="paper-grid">
+  <PaperCard
+    venue="Zenodo"
+    title="Typed Knowledge over Constructive Institutions"
+    abstract="Volume I of the Eigenius series: a dependent type theory in which proof irrelevance is a provable fact rather than a rule of conversion, so independent derivations of one claim remain distinct terms; a justification logic over its propositions; institutions for extending the store and admitting external verdicts; and a typed knowledge-graph theory. A Lean 4 formalization accompanies the book."
+    href="/research/papers/typed-knowledge-over-constructive-institutions/"
+    links={[
+      { label: "Read on Zenodo", href: "https://doi.org/10.5281/zenodo.23884679" },
+      { label: "Lean formalization", href: "https://github.com/eigenius/theory" },
+    ]}
+    status="Preprint · Vol. I: Theory"
+  />
+  <PaperCard
+    venue="LICS"
+    title="Typed Knowledge over Constructive Institutions: A Proof-Relevant Type Theory for Verified Science"
+    href="/research/papers/proof-relevant-type-theory/"
+    comingSoon
+  />
+  <PaperCard
+    venue="arXiv"
+    title="Eigenius: A Typed Knowledge-Graph DBMS with Epistemic Stratification and Institution-Mediated Reasoning"
+    abstract="A typed knowledge-graph DBMS that makes provenance a structural invariant rather than something reconstructed across subsystems: epistemic status is a commit-time check, institutions are strongly typed integration boundaries, and cross-system translations materialize into the graph as first-class resources."
+    href="/research/papers/typed-knowledge-graph-dbms/"
+    links={[{ label: "Download PDF", href: "https://arxiv.org/pdf/2608.04457" }]}
+    status="Preprint · cs.DB"
+  />
+</div>

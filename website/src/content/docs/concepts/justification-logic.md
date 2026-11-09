@@ -3,9 +3,10 @@ title: Justification logic
 description: The modal calculus that underlies the four-warrant taxonomy. For the academically curious — the chain instantiation of Artemov's logic of justification.
 ---
 
-> **This page is being written.** It will be expanded with a
-> formal treatment and the relationship to the four-warrant
-> taxonomy. In the interim, the
+> **This page is being written.** It will be expanded with the
+> relationship to the four-warrant taxonomy. Chapter 3 of the
+> [monograph](/research/papers/typed-knowledge-over-constructive-institutions/)
+> gives the formal treatment, formalized in Lean 4; the
 > [Eigenius systems paper](/research/papers/typed-knowledge-graph-dbms/)
 > is the bridge from Artemov's calculus to the chain-resident form.
 
@@ -35,10 +36,15 @@ justifies. The kernel verifies that the pairing is well-formed.
 - Will, H.-M., Brown Jr., A. L., Fuchs, M. *Eigenius: A Typed
   Knowledge-Graph DBMS with Epistemic Stratification and
   Institution-Mediated Reasoning.* arXiv:2608.04457, 2026.
+- Will, H.-M. *Typed Knowledge over Constructive Institutions.*
+  Eigenius, Volume I: Theory. Zenodo, 2026.
+  doi:10.5281/zenodo.23884679.
 
 ## See also
 
 - **[Concepts overview](/concepts/)** — the four-warrant taxonomy
   at user-facing depth
+- **[The monograph](/research/papers/typed-knowledge-over-constructive-institutions/)** —
+  Chapter 3, the justification logic over the kernel's propositions
 - **[Eigenius systems paper](/research/papers/typed-knowledge-graph-dbms/)** —
   the bridge from Artemov to the chain

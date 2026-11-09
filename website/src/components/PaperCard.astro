@@ -1,23 +1,29 @@
 ---
-// A card for one of the papers (CACM, Science).
+// A card for one of the papers. The list itself lives in PaperGrid.
 //
 // Props:
-//   - venue: e.g. "CACM"
+//   - venue: e.g. "arXiv"
 //   - title: full paper title
 //   - abstract: one or two sentence summary (omitted when comingSoon)
 //   - href: destination — typically a /research/papers/... slug
-//   - downloadHref: optional direct PDF link (suppressed when comingSoon)
-//   - status: short pill, e.g. "Submission draft"
-//   - comingSoon: if true, suppresses the abstract and download link and
+//   - links: optional secondary actions after "Abstract & details",
+//     e.g. the PDF or a code repository (suppressed when comingSoon)
+//   - status: short pill, e.g. "Preprint · cs.DB"
+//   - comingSoon: if true, suppresses the abstract and links and
 //     forces a distinguishing "Coming soon" pill. Use when the paper is
 //     still in preparation and we don't want a draft circulating.
+
+export interface PaperLink {
+  label: string;
+  href: string;
+}
 
 interface Props {
   venue: string;
   title: string;
   abstract?: string;
   href: string;
-  downloadHref?: string;
+  links?: PaperLink[];
   status?: string;
   comingSoon?: boolean;
 }
@@ -27,7 +33,7 @@ const {
   title,
   abstract,
   href,
-  downloadHref,
+  links = [],
   status,
   comingSoon = false,
 } = Astro.props;
@@ -57,11 +63,11 @@ const {
     <a class="paper-action paper-action-primary" href={href}>
       {comingSoon ? "Read what's planned →" : "Abstract & details"}
     </a>
-    {!comingSoon && downloadHref && (
-      <a class="paper-action" href={downloadHref}>
-        Download PDF
+    {!comingSoon && links.map((link) => (
+      <a class="paper-action" href={link.href}>
+        {link.label}
       </a>
-    )}
+    ))}
   </footer>
 </article>
 
@@ -137,6 +143,7 @@ const {
 
   .paper-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.8rem;
     font-size: 0.85rem;
   }

@@ -3,6 +3,7 @@ title: "Part III — Making Reasoning Checkable"
 subtitle: "Institutions, Part III — Witnesses, the Missing Substrate, and Eigenius"
 description: "The constructive turn: a claim is only as good as the witness that accompanies it. Why the substrate for warranted, machine-checkable reasoning did not exist — and what Eigenius is."
 pubDate: 2026-07-30
+updatedDate: 2026-11-08
 author: "Eigenius"
 tags: ["institutions", "warrants", "eigenius"]
 draft: false
@@ -77,4 +78,4 @@ That is the vision this series exists to motivate. Institutions began, in the 19
 
 ## Further reading
 
-For the constructive turn, see Reynolds and Monahan, *Reasoning about Logical Systems in the Coq Proof Assistant* (Science of Computer Programming, 2024). For the calculus of evidence, Artemov and Fitting, *Justification Logic: Reasoning with Reasons* (Cambridge University Press, 2019). The foundational papers behind Parts I and II remain Goguen and Burstall, *Institutions* (J. ACM, 1992), and Goguen and Roșu, *Institution Morphisms* (Formal Aspects of Computing, 2002); Diaconescu's *Institution-Independent Model Theory* develops the mathematics in depth. The substrate discussed in Sections 11–12 is under active construction at Eigenius (eigenius.io), whose concepts pages and worked drug-screening example make the correspondence to institution theory concrete; its planned papers on typed knowledge graphs and audit closure are the place to follow the engineering.
+For the constructive turn, see Reynolds and Monahan, *Reasoning about Logical Systems in the Coq Proof Assistant* (Science of Computer Programming, 2024). For the calculus of evidence, Artemov and Fitting, *Justification Logic: Reasoning with Reasons* (Cambridge University Press, 2019). The foundational papers behind Parts I and II remain Goguen and Burstall, *Institutions* (J. ACM, 1992), and Goguen and Roșu, *Institution Morphisms* (Formal Aspects of Computing, 2002); Diaconescu's *Institution-Independent Model Theory* develops the mathematics in depth. The substrate discussed in Sections 11–12 is under active construction at Eigenius (eigenius.io), whose concepts pages and worked drug-screening example make the correspondence to institution theory concrete. The monograph *Typed Knowledge over Constructive Institutions* (Zenodo, 2026) develops the theory, with a Lean 4 formalization, and the systems preprint (arXiv:2608.04457) describes the engineering.

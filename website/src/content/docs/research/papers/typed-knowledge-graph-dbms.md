@@ -60,7 +60,9 @@ platform chapters document the implementation the paper describes:
 - **The dependent type theory** —
   [ESL §7 — Type-theory primer](/docs/esl/07-type-theory-primer/) and
   [ESL §6 — Resources, types, and the layer](/docs/esl/06-resources-types-and-the-layer/),
-  which is the bridge between the resource graph and the kernel.
+  which is the bridge between the resource graph and the kernel. The
+  [monograph](/research/papers/typed-knowledge-over-constructive-institutions/)
+  develops the type theory and its metatheory in full.
 - **The Lean 4 term checker** —
   the [Lean institution tutorial](/docs/platform/lean-institution/),
   which runs in-process, no IPC.
