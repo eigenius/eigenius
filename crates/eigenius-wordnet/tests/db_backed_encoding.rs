@@ -5113,7 +5113,7 @@ fn resolve_document_discourse_close_out() {
     };
     let lem = morphy();
     let aug = page_augmentation(&head, &page, &lem);
-    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let index = build_index_over(&head, Some(&aug)).with_document(page_units(&page), 0);
 
     // The recency proposer: every in-scope candidate, most-recent-first (the order
     // `resolve_document` assembles). The kernel's restrictor veto is the whole filter — this is
@@ -5315,7 +5315,7 @@ fn resolve_document_discourse_close_out() {
     // lands at EIGENIUS_SELECTIONS; the others at EIGENIUS_SELECTIONS_OUT.
     let selection_recorder = ranker.map(eigenius_kernel::dcg::RecordingReadingRanker::new);
 
-    let sentences: Vec<String> = segment_sentences(&page)
+    let sentences: Vec<String> = page_units(&page)
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect();
@@ -5417,7 +5417,7 @@ fn resolve_document_discourse_close_out() {
             SentenceOutcome::Encoded(item) => {
                 enc += 1;
                 eprintln!("[unit {i:>2}] ENCODED{mark} «{}»", s.trim());
-                if is_dem(s) {
+                if is_dem(s) || r.resolution.is_some() {
                     eprintln!("           sk={}", erase_senses(&pretty_term(item.sem())));
                 }
             }
@@ -5432,12 +5432,116 @@ fn resolve_document_discourse_close_out() {
                     o.holes.len(),
                     s.trim()
                 );
+                for h in &o.holes {
+                    let cnt = h
+                        .count
+                        .as_ref()
+                        .map(|q| format!(" [count={}]", pretty_term(q)))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "           hole {}: {:?} : {}{}",
+                        h.var,
+                        h.kind,
+                        pretty_term(&h.ty),
+                        cnt
+                    );
+                }
             }
             SentenceOutcome::Gap => {
                 gap += 1;
                 eprintln!("[unit {i:>2}] GAP{mark} «{}»", s.trim());
             }
         }
+        if let Some(res) = &r.resolution {
+            let binds: Vec<String> = res
+                .bindings
+                .iter()
+                .map(|b| {
+                    format!(
+                        "{} -> {} «{}»",
+                        b.hole,
+                        b.antecedent.key(),
+                        b.antecedent.surface()
+                    )
+                })
+                .collect();
+            eprintln!("           resolved: {}", binds.join("; "));
+        }
+    }
+    if let Ok(vb_path) = std::env::var("EIGENIUS_VERBALIZE_OUT") {
+        use std::io::Write;
+        let mut f =
+            std::fs::File::create(&vb_path).unwrap_or_else(|e| panic!("create {vb_path}: {e}"));
+        writeln!(
+            f,
+            "unit\tstatus\tpool_len\tcnl_sentence\ttop_gloss\ttop_sem\tbindings"
+        )
+        .expect("write header");
+        let mut prior_names: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for (i, (s, r)) in sentences.iter().zip(&resolutions).enumerate() {
+            let mut vnames = unit_sense_names(s, &index, &lem, &head);
+            for (k, v) in &prior_names {
+                vnames.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            for (k, v) in unit_sense_names(s, &index, &lem, &head) {
+                prior_names.entry(k).or_insert(v);
+            }
+            let vb = Vb::surface(&vnames, &head);
+            let (status, pool_len, top_gloss, top_sem) = match &r.outcome {
+                SentenceOutcome::Encoded(item) => (
+                    "ENCODED",
+                    1usize,
+                    verbalize(item.sem(), &vb),
+                    pretty_term(item.sem()),
+                ),
+                SentenceOutcome::Ambiguous(pool) => {
+                    let first = pool.first().expect("non-empty pool");
+                    (
+                        "AMBIGUOUS",
+                        pool.len(),
+                        verbalize(first.sem(), &vb),
+                        pretty_term(first.sem()),
+                    )
+                }
+                SentenceOutcome::Open(o) => (
+                    "OPEN",
+                    1usize,
+                    verbalize(o.item.sem(), &vb),
+                    pretty_term(o.item.sem()),
+                ),
+                SentenceOutcome::Gap => ("GAP", 0usize, String::new(), String::new()),
+            };
+            let binds = r
+                .resolution
+                .as_ref()
+                .map(|res| {
+                    res.bindings
+                        .iter()
+                        .map(|b| {
+                            format!(
+                                "{} -> {} «{}»",
+                                b.hole,
+                                b.antecedent.key(),
+                                b.antecedent.surface()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .unwrap_or_default();
+            let clean = |txt: &str| txt.replace(['\t', '\n', '\r'], " ");
+            writeln!(
+                f,
+                "{i}\t{status}\t{pool_len}\t{}\t{}\t{}\t{}",
+                clean(s.trim()),
+                clean(&top_gloss),
+                clean(&top_sem),
+                clean(&binds)
+            )
+            .expect("write row");
+        }
+        eprintln!("verbalized {} unit(s) → {vb_path}", sentences.len());
     }
     eprintln!(
         "=== DISCOURSE ({proposer_arm} proposer, {selection_arm} ranker, {:.0}s): encoded {enc}, ambiguous \
@@ -5467,18 +5571,32 @@ fn resolve_document_discourse_close_out() {
     // in the loop the ambiguous pools collapse into Encoded by design, so the tuple necessarily
     // differs — asserting it there would be asserting the ranker's draw, which the sweep's
     // selection-accuracy gate is what measures.
-    if proposer_arm == "recency" && kinds_arm == "none" && selection_arm == "none" {
+    if page_path == WRN_PAGE_CNL
+        && proposer_arm == "recency"
+        && kinds_arm == "none"
+        && selection_arm == "none"
+    {
         // The deterministic floor (no kind classifier: unmarked claims land Assertion,
-        // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
-        // must HOLD exactly).
+        // unreferable — claim antecedents contribute nothing here).
+        // Re-baselined 2026-11-10 on store `wordnet-umls-hpo-aligned-2026-11-07-systematic`
+        // (38,391 / 20,533 / 864) from the 2026-08-11 `(12, 35, 15)` floor: systematic WordNet
+        // verb-frame and morphology expansion widened single-reading pools into Ambiguous under
+        // `selection_arm == "none"`, while counted-demonstrative, quantifier-witness, Σ-head
+        // subsumption, and propositional-equality (`Exp::Id`) resolution closed 10 of the 15
+        // documented deferrals (`open 15 -> 5`: only claim-referent units 19, 45, 60 and
+        // verb/adjective-to-noun bridgings 8, 23 remain Open without a kind classifier).
         assert_eq!(
             (enc, amb, open_n),
-            (12, 35, 15),
-            "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
-             ambiguous 35, open 15)"
+            (0, 57, 5),
+            "discourse close-out drifted from the pinned 2026-11-10 baseline (encoded 0, \
+             ambiguous 57, open 5)"
         );
     }
-    if proposer_arm == "recency" && kinds_arm == "replay" && selection_arm == "none" {
+    if page_path == WRN_PAGE_CNL
+        && proposer_arm == "recency"
+        && kinds_arm == "replay"
+        && selection_arm == "none"
+    {
         // The D68 close-out baseline (2026-08-12, kinds draw
         // experiments/parsing/kinds/2026-08-12-reference.json): ALL FIVE claim-referent units
         // close — 19/20 «These findings show…», 45 «These classifications…», 49 «These
@@ -5675,7 +5793,7 @@ fn probe_claim_unit_restrictors() {
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
     let aug = page_augmentation(&head, &page, &lem);
-    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let index = build_index_over(&head, Some(&aug)).with_document(page_units(&page), 0);
     let needles = [
         "These findings show that WRN is a synthetic-lethal",
         "These findings show that WRN is a promising drug",

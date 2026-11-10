@@ -68,29 +68,41 @@ pub fn unit_sense_names(
         }
         let tok = tok.surface();
         for (_closed, _cat, sense) in index.debug_form_entries(tok, lem) {
-            // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
-            // may itself contain '.').
-            if let Some(rest) = sense.strip_prefix("wn:") {
-                let parts: Vec<&str> = rest.rsplitn(3, '.').collect(); // [offset, tag, lemma]
-                if let [offset, tag, lemma] = parts.as_slice() {
-                    m.entry(format!("{tag}{offset}"))
-                        .or_insert_with(|| lemma.replace('_', " "));
-                }
-            } else if let Some(cui) = sense.strip_prefix("umls:") {
-                if let Some(name) = cui_label(cui, layer) {
-                    m.entry(cui.to_string()).or_insert(name);
-                }
-            }
+            insert_sense_name(&mut m, &sense, Some(tok), layer);
         }
     }
-    // A document's named individual has no lexicon label: its name is the span that introduced it
-    // («Project Achilles»), which a single token never is.
+    // Multi-token spans («Project Achilles», «adenine base editor», «PolyPhen-2»): never overwrite
+    // a single-token entry already recorded above.
     for (words, sense) in index.span_senses(text, lem) {
-        if let Some(key) = sense_key(&sense).filter(|k| k.starts_with(NAMED_INDIVIDUAL)) {
-            m.entry(key).or_insert(words);
-        }
+        insert_sense_name(&mut m, &sense, Some(words.as_str()), layer);
     }
     m
+}
+
+fn insert_sense_name(
+    m: &mut BTreeMap<String, String>,
+    sense: &str,
+    surface: Option<&str>,
+    layer: &Arc<Layer>,
+) {
+    // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
+    // may itself contain '.').
+    if let Some(rest) = sense.strip_prefix("wn:") {
+        let parts: Vec<&str> = rest.rsplitn(3, '.').collect(); // [offset, tag, lemma]
+        if let [offset, tag, lemma] = parts.as_slice() {
+            m.entry(format!("{tag}{offset}"))
+                .or_insert_with(|| lemma.replace('_', " "));
+        }
+    } else if let Some(cui) = sense.strip_prefix("umls:") {
+        if let Some(name) = cui_label(cui, layer) {
+            m.entry(cui.to_string()).or_insert(name);
+        }
+    } else if let (Some(slug), Some(words)) = (sense.strip_prefix("doc:"), surface) {
+        for prefix in DOC_LOCAL_PREFIXES {
+            m.entry(format!("{prefix}{slug}"))
+                .or_insert_with(|| words.to_string());
+        }
+    }
 }
 
 /// A short display label for a chain resource: its `core:description` up to the definition
@@ -170,11 +182,7 @@ fn collect_concepts(e: &Exp, vb: &Vb, out: &mut BTreeMap<String, ConceptNote>) {
         // The gloss prints the STRIPPED key (`name_atom` drops the `_t`/`deg_` wrappers), so the
         // legend must key on that to line up — while the DEFINITION lives at the full IRI.
         let local = iri_key(iri.as_str());
-        let core = local
-            .strip_prefix("deg_")
-            .or_else(|| local.strip_prefix("std_"))
-            .unwrap_or(local);
-        let id = core.split('_').next().unwrap_or(core).to_string();
+        let id = atom_key(local).to_string();
         if !id.is_empty() && !out.contains_key(&id) {
             let label = atom_label(&id, vb).unwrap_or_else(|| id.clone());
             out.insert(
@@ -217,9 +225,11 @@ fn child_exps(e: &Exp) -> Vec<&Exp> {
     match e {
         Exp::App(f, x) => vec![f.as_ref(), x.as_ref()],
         Exp::Sig(_, a, b) | Exp::Pi(_, a, b) => vec![a.as_ref(), b.as_ref()],
+        Exp::Arrow(a, b) => vec![a.as_ref(), b.as_ref()],
         Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
         Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
         Exp::Pair(a, b) => vec![a.as_ref(), b.as_ref()],
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => vec![t.as_ref(), a.as_ref(), b.as_ref()],
         e if e.as_const_spine().is_some() => e.as_const_spine().expect("just matched").2,
         _ => Vec::new(),
     }
@@ -340,6 +350,19 @@ fn is_false(e: &Exp) -> bool {
     }
 }
 
+/// Tautological `False → False` (`⊤`), emitted as a no-op conjunct by syntactic-only modifiers.
+fn is_trivially_true(e: &Exp) -> bool {
+    if let Some((a, b)) = as_arrow(e) {
+        return is_false(a) && is_false(b);
+    }
+    if let Some((head, _, args)) = e.as_const_spine() {
+        if head.as_str().ends_with("logic:And") && args.len() == 2 {
+            return is_trivially_true(args[0]) && is_trivially_true(args[1]);
+        }
+    }
+    false
+}
+
 /// The word for a sense atom: the unit's own lemma map first, then the concept's layer label
 /// (via `cui_label`), else the local name.
 fn name_atom(local: &str, vb: &Vb) -> String {
@@ -359,8 +382,9 @@ fn name_atom(local: &str, vb: &Vb) -> String {
 /// An atom's sense key: the `deg_`/`std_` adjective wrappers stripped, and any suffix after the key
 /// — a verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
 fn atom_key(local: &str) -> &str {
-    // A document's named individual (`ni_project_achilles`): its local name is the key.
-    if local.starts_with(NAMED_INDIVIDUAL) {
+    // A document-local entity or class (`ni_project_achilles`, `unk_…`, `class_…`, `lit_…`): its
+    // whole local name is the key.
+    if is_doc_local_key(local) {
         return local;
     }
     let core = local
@@ -370,12 +394,18 @@ fn atom_key(local: &str) -> &str {
     core.split('_').next().unwrap_or(core)
 }
 
-/// The local-name prefix of a document's named individual (`glossary::named_entity_augmentation`
-/// mints `urn:eigenius:doc:ni_<slug>`; its lexical entry's sense is `doc:<slug>`).
+/// The local-name prefixes of document-local individuals and classes minted by `glossary`.
+#[cfg(test)]
 const NAMED_INDIVIDUAL: &str = "ni_";
+const DOC_LOCAL_PREFIXES: [&str; 4] = ["ni_", "unk_", "class_", "lit_"];
+
+fn is_doc_local_key(s: &str) -> bool {
+    DOC_LOCAL_PREFIXES.iter().any(|p| s.starts_with(p))
+}
 
 /// The atom key a lexical entry's sense names: `wn:{lemma}.{tag}.{offset}` → `{tag}{offset}`,
 /// `umls:{cui}` → the CUI, a document entry's `doc:{slug}` → its named individual `ni_{slug}`.
+#[cfg(test)]
 fn sense_key(sense: &str) -> Option<String> {
     if let Some(rest) = sense.strip_prefix("wn:") {
         match rest.rsplitn(3, '.').collect::<Vec<_>>().as_slice() {
@@ -397,7 +427,7 @@ pub(crate) fn sense_atoms(e: &Exp) -> Vec<String> {
     fn walk(e: &Exp, out: &mut Vec<String>) {
         if let Some(local) = axiom_local(e) {
             let key = atom_key(local);
-            let sense = key.starts_with(NAMED_INDIVIDUAL)
+            let sense = is_doc_local_key(key)
                 || key
                     .split(|c: char| !c.is_ascii_digit())
                     .any(|run| run.len() >= 4);
@@ -451,7 +481,34 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         Exp::Ann(inner, _) | Exp::Fst(inner) | Exp::Snd(inner) => return verbalize(inner, vb),
         Exp::Lam(_, body) => return verbalize(body, vb),
         Exp::Var(_) => return String::new(), // a bound restrictor variable — carries no surface
+        Exp::Id(_, lhs, rhs) => {
+            let l = verbalize(lhs, vb);
+            let r = verbalize(rhs, vb);
+            return if vb.register == Register::Expanded {
+                format!("{l} equals {r}")
+            } else if l.is_empty() {
+                format!("is {r}")
+            } else {
+                format!("{l} is {r}")
+            };
+        }
+        Exp::Apart(_, lhs, rhs) => {
+            let l = verbalize(lhs, vb);
+            let r = verbalize(rhs, vb);
+            return if vb.register == Register::Expanded {
+                format!("{l} is distinct from {r}")
+            } else {
+                format!("{l} is not {r}")
+            };
+        }
         _ => {}
+    }
+    if is_trivially_true(sem) {
+        return if vb.register == Register::Expanded {
+            "[true]".to_string()
+        } else {
+            "true".to_string()
+        };
     }
     if let Some((head, _, args)) = sem.as_const_spine() {
         let d = head.as_str();
@@ -459,6 +516,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             // Verb + shared-subject PP is ONE clause, not a conjunction: `And(V(subj), prep(subj, o))`
             // → "subj V prep o" (e.g. "MSI arises from Lynch syndrome"), the dominant sentence shape.
             if d.ends_with("And") {
+                if vb.register == Register::Surface {
+                    if is_trivially_true(args[0]) && !is_trivially_true(args[1]) {
+                        return verbalize(args[1], vb);
+                    }
+                    if is_trivially_true(args[1]) && !is_trivially_true(args[0]) {
+                        return verbalize(args[0], vb);
+                    }
+                    if let Some(merged) = clause_adverb(args[0], args[1], vb) {
+                        return merged;
+                    }
+                }
                 if let Some(text) = factor_comparison(args[0], args[1], vb) {
                     return text;
                 }
@@ -517,7 +585,13 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             return format!("every {}", quant_clause(dom, binder, cod, vb));
         }
+        if matches!(binder, Patt::Unit) {
+            return format!("if {}, then {}", verbalize(dom, vb), verbalize(cod, vb));
+        }
         return bracket(sem); // other Π — not verbalizable yet
+    }
+    if let Some((a, b)) = as_arrow(sem) {
+        return format!("if {}, then {}", verbalize(a, vb), verbalize(b, vb));
     }
     if let Exp::Sig(_, base, restr) = sem {
         let np = noun_phrase(base, restr, vb);
@@ -604,8 +678,88 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     return format!("{} is {}", verbalize(subj, vb), name_atom(dl, vb));
                 }
             }
+            ("ge" | "le", 2) => {
+                let (h0, a0) = app_spine(args[0]);
+                let (h1, a1) = app_spine(args[1]);
+                let l0 = axiom_local(h0);
+                let cmp = if local == "ge" {
+                    "at least as"
+                } else {
+                    "at most as"
+                };
+                if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
+                    if d0.starts_with("deg_") && d0 == d1 {
+                        if let Some(prep) = relational_degree_preposition(d0) {
+                            if a0.len() == 2 && a1.len() == 2 {
+                                let s0 = verbalize(a0[1], vb);
+                                let s1 = verbalize(a1[1], vb);
+                                let lhs = if s0.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("{s0} ")
+                                };
+                                let rhs = if s1.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" as {s1}")
+                                };
+                                return format!(
+                                    "{lhs}is {cmp} {} {prep} {}{rhs}",
+                                    name_atom(d0, vb),
+                                    verbalize(a0[0], vb)
+                                );
+                            }
+                        }
+                        if let (Some(s0_e), Some(s1_e)) = (a0.first(), a1.first()) {
+                            let s0 = verbalize(s0_e, vb);
+                            let s1 = verbalize(s1_e, vb);
+                            let lhs = if s0.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{s0} ")
+                            };
+                            let rhs = if s1.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" as {s1}")
+                            };
+                            return format!("{lhs}is {cmp} {}{rhs}", name_atom(d0, vb));
+                        }
+                    }
+                }
+            }
             ("kind_of", 1) => return verbalize(args[0], vb),
             ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
+            // Two-arg GQ `the(Σx:T. φ, λx. P(x.1))` produced by `DetRefine` under object/modifier
+            // abstraction (`λP. the(Σx:T. φ, λx. P(x.1))`).
+            ("the", 2) => {
+                let np = bare_np(args[0], vb);
+                let is_eta_cont = match args[1] {
+                    Exp::Lam(Patt::Var(y), body) => match body.as_ref() {
+                        Exp::App(f, arg) if matches!(f.as_ref(), Exp::Var(_)) => match arg.as_ref()
+                        {
+                            Exp::Var(y2) => y2 == y,
+                            Exp::Fst(inner) => matches!(inner.as_ref(), Exp::Var(y2) if y2 == y),
+                            _ => false,
+                        },
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                let pred = if is_eta_cont {
+                    String::new()
+                } else {
+                    match args[1] {
+                        Exp::Lam(binder, body) => quant_clause_pred(binder, body, vb),
+                        other => verbalize(other, vb),
+                    }
+                };
+                return match (vb.register, pred.is_empty()) {
+                    (Register::Surface, true) => format!("the {np}"),
+                    (Register::Expanded, true) => format!("the ({np})"),
+                    (_, false) => format!("the {np}, {pred}"),
+                };
+            }
             // `the_count(A, q)` (D95 slice 7d): the definite with its count, `the 4 Helicase`.
             ("the_count", 2) => {
                 let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
@@ -770,9 +924,69 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 };
             }
             ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
+            ("Necessary", 1) => return format!("necessarily, {}", verbalize(args[0], vb)),
+            ("Will", 1) => return format!("will: {}", verbalize(args[0], vb)),
+            ("Would", 1) => return format!("would: {}", verbalize(args[0], vb)),
+            ("Should", 1) => return format!("should: {}", verbalize(args[0], vb)),
+            ("compound_kind" | "compound", 2) => {
+                let subj = verbalize(args[0], vb);
+                let m = if local == "compound_kind" {
+                    bare_np(args[1], vb)
+                } else {
+                    verbalize(args[1], vb)
+                };
+                return if vb.register == Register::Expanded {
+                    format!("{subj} compound-with {m} (relation unspecified)")
+                } else if subj.is_empty() {
+                    m
+                } else {
+                    format!("{subj} is {m}")
+                };
+            }
+            ("sole", 1) => {
+                let subj = verbalize(args[0], vb);
+                return if vb.register == Register::Expanded {
+                    format!("{subj} alone [sole]")
+                } else if subj.is_empty() {
+                    "alone".to_string()
+                } else {
+                    format!("only {subj}")
+                };
+            }
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
             _ => {}
+        }
+        // Unary non-gradable / relational adjective predication: `a03145310(x)` → "x is X-linked".
+        if is_adjective(local) && !local.starts_with("deg_") && args.len() == 1 {
+            let subj = verbalize(args[0], vb);
+            let adj = name_atom(local, vb);
+            return if subj.is_empty() {
+                adj
+            } else {
+                format!("{subj} is {adj}")
+            };
+        }
+        // WordNet adverb: `r00043003(pred, subj)` or `r00043003(prop)`.
+        if is_adverb(local) {
+            let adv = name_atom(local, vb);
+            return match args.as_slice() {
+                [prop] => format!("{adv}, {}", verbalize(prop, vb)),
+                [pred, subj] => {
+                    if vb.register == Register::Expanded {
+                        let applied = apply_pred(pred, subj);
+                        format!("{adv} ({})", verbalize(&applied, vb))
+                    } else {
+                        let s = verbalize(subj, vb);
+                        if s.is_empty() {
+                            adv
+                        } else {
+                            format!("{s} ({adv})")
+                        }
+                    }
+                }
+                _ => bracket(sem),
+            };
         }
         // A PP predication standing ALONE — `prep_in(subj, obj)`. `verb_pp` merges the common
         // `And(V(subj), prep(subj, obj))` shape into a single clause, but a PP conjunct it cannot
@@ -823,6 +1037,30 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         return name_atom(local, vb);
     }
     bracket(sem)
+}
+
+/// `And(P(subj), rNNNNNNNN(P, subj))` → "clause adv" when `P` applied to `subj` matches `left`.
+fn clause_adverb(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
+    let (rh, ra) = app_spine(right);
+    let rl = axiom_local(rh)?;
+    if !is_adverb(rl) {
+        return None;
+    }
+    let [pred, subj] = ra.as_slice() else {
+        return None;
+    };
+    let applied = apply_pred(pred, subj);
+    if pretty_term(&applied) != pretty_term(left) {
+        return None;
+    }
+    Some(format!("{} {}", verbalize(left, vb), name_atom(rl, vb)))
+}
+
+fn apply_pred(pred: &Exp, subj: &Exp) -> Exp {
+    match pred {
+        Exp::Lam(Patt::Var(v), body) => subst_var(body, v, subj),
+        _ => Exp::App(Box::new(pred.clone()), Box::new(subj.clone())),
+    }
 }
 
 /// `And(V(subj), prep_X(subj, obj))` → "subj V prep obj" when the two share a subject; else `None`.
@@ -1042,6 +1280,7 @@ fn has_bound(sem: &Exp) -> bool {
         Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Pair(a, b) => {
             has_bound(a) || has_bound(b)
         }
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => has_bound(t) || has_bound(a) || has_bound(b),
         Exp::InductiveCtor(_, _, args) => args.iter().any(has_bound),
         _ => false,
     }
@@ -1066,6 +1305,8 @@ fn render_bounds(sem: &Exp) -> Exp {
         Exp::Fst(x) => Exp::Fst(go(x)),
         Exp::Snd(x) => Exp::Snd(go(x)),
         Exp::Ann(x, t) => Exp::Ann(go(x), t.clone()),
+        Exp::Id(t, a, b) => Exp::Id(go(t), go(a), go(b)),
+        Exp::Apart(t, a, b) => Exp::Apart(go(t), go(a), go(b)),
         Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
             d.clone(),
             n.clone(),
@@ -1152,6 +1393,8 @@ fn subst_var(e: &Exp, name: &str, to: &Exp) -> Exp {
         Exp::Snd(x) => Exp::Snd(Box::new(go(x))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(x, t) => Exp::Ann(Box::new(go(x)), Box::new(go(t))),
+        Exp::Id(t, a, b) => Exp::Id(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
+        Exp::Apart(t, a, b) => Exp::Apart(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
         Exp::InductiveCtor(d, n, args) => {
             Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
         }
@@ -1201,10 +1444,17 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
     let mut conj = Vec::new();
     flatten_and_exp(restr, &mut conj);
     for c in conj {
+        if is_trivially_true(c) {
+            continue;
+        }
         let (h, a) = app_spine(c);
         match axiom_local(h) {
             // A compound modifier is a bare noun ("nucleotide-repeat"), not "a nucleotide-repeat".
             Some("compound_kind" | "compound") if a.len() == 2 => pre.push(bare_np(a[1], vb)),
+            Some(adj) if is_adjective(adj) && !adj.starts_with("deg_") && a.len() == 1 => {
+                pre.push(name_atom(adj, vb));
+            }
+            Some("sole") if a.len() == 1 => post.push("alone".to_string()),
             Some("gt" | "lt") => {
                 if let Some(first) = a.first() {
                     let (dh, _) = app_spine(first);
@@ -1310,6 +1560,7 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             Some(adj) if is_adjective(adj) && matches!(a.as_slice(), [Exp::Var(_)]) => {
                 parts.push(format!("is {}", name_atom(adj, vb)))
             }
+            Some("sole") if a.len() == 1 => parts.push("alone [sole]".to_string()),
             // A counted relation to the head: `has_count(T, λy. prep_X(x, y), q)`, «an interaction
             // between two genetic events» → "between 2 T".
             Some("has_count") if a.len() == 3 => match counted_relation(a[1], vb) {
@@ -1735,6 +1986,11 @@ fn is_phrase(e: &Exp) -> bool {
 fn is_adjective(local: &str) -> bool {
     let bare = local.strip_prefix("deg_").unwrap_or(local);
     bare.len() > 4 && bare.starts_with(['a', 's']) && bare[1..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A WordNet adverb's predicate (`r00043003`).
+fn is_adverb(local: &str) -> bool {
+    local.len() > 4 && local.starts_with('r') && local[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// The head word of a phrase: an atom's word, a bound variable's phrase, or the head of the
@@ -2394,5 +2650,146 @@ mod register_tests {
             Some("v00618878")
         );
         assert_eq!(sense_key("umls:C0388246").as_deref(), Some("C0388246"));
+        assert_eq!(atom_key("unk_polyphen_2"), "unk_polyphen_2");
+        assert_eq!(atom_key("class_uba"), "class_uba");
+        assert_eq!(atom_key("lit_hgvs"), "lit_hgvs");
+    }
+
+    #[test]
+    fn modals_tautologies_adjectives_and_equality_render_without_brackets() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("C0388246", "WRN"),
+            ("n13780719", "model"),
+            ("a03145310", "essential"),
+            ("v01569566", "install"),
+            ("r00024257", "deliberately"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let surf = Vb::surface(&names, &l);
+        let expd = Vb::expanded(&names, &l);
+
+        // 1. Modals
+        let clause = app2(
+            "urn:eigenius:ontology:v01569566_t",
+            cls("urn:eigenius:umlscui:C0388246"),
+            cls("urn:eigenius:wn:n13780719"),
+        );
+        assert_eq!(
+            verbalize(&app1("urn:eigenius:logic:Would", clause.clone()), &surf),
+            "would: model install WRN"
+        );
+        assert_eq!(
+            verbalize(&app1("urn:eigenius:logic:Should", clause.clone()), &surf),
+            "should: model install WRN"
+        );
+        assert_eq!(
+            verbalize(&app1("urn:eigenius:logic:Will", clause.clone()), &surf),
+            "will: model install WRN"
+        );
+        assert_eq!(
+            verbalize(&app1("urn:eigenius:logic:Necessary", clause.clone()), &surf),
+            "necessarily, model install WRN"
+        );
+
+        // 2. Tautological `False → False` elided in Surface And/Σ, preserved distinctly in Expanded
+        let false_c = Exp::Const(Iri::parse("urn:eigenius:logic:False").expect("iri"), vec![]);
+        let triv = Exp::Arrow(Box::new(false_c.clone()), Box::new(false_c));
+        let conj_triv = and(triv.clone(), clause.clone());
+        assert_eq!(verbalize(&conj_triv, &surf), "model install WRN");
+        assert_ne!(
+            verbalize(&conj_triv, &expd),
+            verbalize(&clause, &expd),
+            "Expanded must keep [true] distinct from the un-conjoined clause (D69)"
+        );
+
+        // 3. Unary non-gradable adjective (top-level and attributive in Surface)
+        let pred_adj = app1(
+            "urn:eigenius:wn:a03145310",
+            cls("urn:eigenius:umlscui:C0388246"),
+        );
+        assert_eq!(verbalize(&pred_adj, &surf), "WRN is essential");
+        let attrib_adj = sig(
+            cls("urn:eigenius:wn:n13780719"),
+            app1("urn:eigenius:wn:a03145310", Exp::Var("x0".into())),
+        );
+        assert_eq!(verbalize(&attrib_adj, &surf), "an essential model");
+
+        // 4. Propositional equality `Exp::Id` and clause adverb
+        let eq_prop = Exp::Id(
+            Box::new(cls("urn:eigenius:lexicon:Entity")),
+            Box::new(cls("urn:eigenius:umlscui:C0388246")),
+            Box::new(Exp::Fst(Box::new(app1(
+                "urn:eigenius:ontology:the",
+                cls("urn:eigenius:wn:n13780719"),
+            )))),
+        );
+        assert_eq!(verbalize(&eq_prop, &surf), "WRN is the model");
+        assert!(verbalize(&eq_prop, &expd).contains("equals"));
+
+        let adv_conj = and(
+            clause.clone(),
+            app2(
+                "urn:eigenius:wn:r00024257",
+                Exp::Lam(
+                    Patt::Var("z".into()),
+                    Box::new(app2(
+                        "urn:eigenius:ontology:v01569566_t",
+                        cls("urn:eigenius:umlscui:C0388246"),
+                        Exp::Var("z".into()),
+                    )),
+                ),
+                cls("urn:eigenius:wn:n13780719"),
+            ),
+        );
+        assert_eq!(
+            verbalize(&adv_conj, &surf),
+            "model install WRN deliberately"
+        );
+
+        // 5. 2-arg GQ `the(Σ, λx. P(x.1))` renders cleanly in Surface and stays distinct from 1-arg `the` in Expanded
+        let the2 = Exp::Lam(
+            Patt::Var("P".into()),
+            Box::new(app2(
+                "urn:eigenius:ontology:the",
+                attrib_adj.clone(),
+                Exp::Lam(
+                    Patt::Var("y".into()),
+                    Box::new(Exp::App(
+                        Box::new(Exp::Var("P".into())),
+                        Box::new(Exp::Fst(Box::new(Exp::Var("y".into())))),
+                    )),
+                ),
+            )),
+        );
+        let the1 = app1("urn:eigenius:ontology:the", attrib_adj);
+        assert_eq!(verbalize(&the2, &surf), "the essential model");
+        assert_ne!(verbalize(&the2, &expd), verbalize(&the1, &expd));
+
+        // 6. Propositional conditional `A → B`
+        let cond = Exp::Arrow(Box::new(pred_adj.clone()), Box::new(clause));
+        assert_eq!(
+            verbalize(&cond, &surf),
+            "if WRN is essential, then model install WRN"
+        );
+
+        // 7. Superlative degree `ge(deg_*, deg_*)`
+        let sup_deg = app2(
+            "urn:eigenius:ontology:ge",
+            app1(
+                "urn:eigenius:ontology:deg_a03145310",
+                cls("urn:eigenius:umlscui:C0388246"),
+            ),
+            app1(
+                "urn:eigenius:ontology:deg_a03145310",
+                cls("urn:eigenius:wn:n13780719"),
+            ),
+        );
+        assert_eq!(
+            verbalize(&sup_deg, &surf),
+            "WRN is at least as essential as model"
+        );
     }
 }

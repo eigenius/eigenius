@@ -861,10 +861,12 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // exact. The coercion only ADDS acceptances: on a miss (base not a subclass,
         // or not peelable to a class) the term falls back to plain inference, so
         // `kind_of(K) : Entity` keeps typing through the axiom's codomain as before.
-        (Exp::App(f, k), Val::EigonClass(sup)) if is_kind_of_axiom(f) => match kind_base_class(k) {
-            Some(base) if base == sup || ctx.env.is_subclass_of(base, sup) => Ok(()),
-            _ => check_by_inference(ctx, exp, typ),
-        },
+        (e, Val::EigonClass(sup)) if nominal_kind_arg(e).is_some() => {
+            match nominal_kind_arg(e).and_then(kind_base_class) {
+                Some(base) if base == sup || ctx.env.is_subclass_of(base, sup) => Ok(()),
+                _ => check_by_inference(ctx, exp, typ),
+            }
+        }
 
         // Fallthrough: infer type and compare under subtyping.
         (e, t) => check_by_inference(ctx, e, t),
@@ -892,10 +894,33 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
     subtype_of(&ctx.env, ctx.rho.len(), &t1, t)
 }
 
-/// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
-/// Foundational-vocabulary reference, same convention as `core:is_a` in `eval`.
-fn is_kind_of_axiom(e: &Exp) -> bool {
-    matches!(e, Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
+/// Extract the underlying nominal kind/type argument `K` from `ontology:kind_of(K)`,
+/// `ontology:the(K)`, or `ontology:the_count(K, q)`.
+fn nominal_kind_arg(e: &Exp) -> Option<&Exp> {
+    match e {
+        Exp::App(f, k)
+            if matches!(
+                f.as_ref(),
+                Exp::EigonAxiom(i)
+                    if i.as_str() == "urn:eigenius:ontology:kind_of"
+                        || i.as_str() == "urn:eigenius:ontology:the"
+            ) =>
+        {
+            Some(k)
+        }
+        Exp::App(f, _) => match f.as_ref() {
+            Exp::App(f0, k)
+                if matches!(
+                    f0.as_ref(),
+                    Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:the_count"
+                ) =>
+            {
+                Some(k)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The base class of a kind's underlying type: peel `Σx:C. R` (recursively, for stacked

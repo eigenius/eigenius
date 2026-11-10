@@ -14,12 +14,30 @@ any detour.
 > (`experiments/parsing/derived/step5/c0*.py`) is hand-authored and unrecoverable if not copied
 > out of band.
 >
-> **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
-> OOV closure. Branch `uab-step5-document-model`, 84 commits ahead of `main`, not yet a PR.**
+> **entry 7 (`2026-10-10`, updated `2026-11-10`, active). UAB survey step 5 & step 6 — document-level
+> discourse close-out and verbalization verification ([uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md)).
+> Branch `uab-step6-encoding-verification`.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-11-07-systematic`** (reseeded `2026-11-08` via
+> **Step 6 (`2026-11-10`, store `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 /
+> 864`):** Wired `EIGENIUS_WRN_UNITS_PER_LINE` and `EIGENIUS_VERBALIZE_OUT` into
+> `resolve_document_discourse_close_out` (`crates/eigenius-wordnet/tests/db_backed_encoding.rs`),
+> extended document-level discourse anaphora resolution (`holes.rs`, `resolve.rs`, `paths.rs`,
+> `nbe/check`) with Σ-head subsumption, counted demonstratives (`anaphor_of_count`), quantifier-witness
+> harvesting, and `Exp::Id`/`Exp::Apart` traversal, eliminated vacuous `False -> False` erasures and
+> `Cost::ZERO` `Entity` fallbacks in `seed.rs`, and completed `verbalize.rs` (`Necessary`/`Will`/
+> `Would`/`Should`, `Surface` `False -> False` elision with D69-injective `[true]` in `Expanded`,
+> unary non-gradable adjectives, `Exp::Id`/`Exp::Apart`, clause adverbs, 2-arg GQ `the`, propositional
+> conditionals `A → B`, superlative `ge`/`le`, and multi-word/doc-local span-sense lookup). Across all
+> **1,056** CNL sentences (`275` active prose units, `20` 1-to-1 bridging/tokenization alignments
+> synced in `c001.py`–`c012.py`), all **254** isolated-sentence `Open` units close (`open 0`, `gap 0`,
+> `387` bound units), `not (⟦False⟧)` drops `150 → 0`, unfreshened `anaphor_of` drops `46 → 0`, and
+> bracketed `⟦…⟧` fallback spans drop **`540 → 0`**. On `WRN_PAGE_CNL` (`recency`, `kinds=none`,
+> `selection=none`), the same resolver extensions reduced `open` from `15` to **`5`** (`encoded 0`,
+> `ambiguous 57`, `open 5`, `gap 0`; re-baselined with provenance).
+>
+> **Step 5 (`2026-11-08`, store `wordnet-umls-hpo-aligned-2026-11-07-systematic`** — reseeded via
 > `scripts/reseed-chain.sh`, all three provenance counts reproduced and GATED — 38,391 / 20,533 /
-> 864). Replaced all word-specific `if matches!(s_lc, ...)` and `if s_lc == ...` blocks in
+> 864): Replaced all word-specific `if matches!(s_lc, ...)` and `if s_lc == ...` blocks in
 > `kernel/src/dcg/parse/seed.rs` and `kernel/src/dcg/parse/mod.rs` with systematic mechanisms across
 > four layers:
 > (1) **Category-driven parser rules (`combinators.rs`, `constructions.rs`, `seed.rs`, `category.rs`)**:

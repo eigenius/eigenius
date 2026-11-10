@@ -38,6 +38,7 @@ use crate::ontology::Resource;
 /// eval+check each. Exhaustion fails CLOSED (the parse stays open). 64 mirrors the chart's
 /// cell-beam scale: the winner is expected within the first few ranked assignments.
 const MAX_REGATE_ATTEMPTS: usize = 64;
+const MAX_RESOLVED_OPEN_PER_SENTENCE: usize = 64;
 
 impl Parser {
     /// Resolve an [`OpenParse`] by substituting each hole with a proposed antecedent and
@@ -80,7 +81,6 @@ impl Parser {
         // accepted. (Found by the slice-2 veto test: without this check, the Gene-for-CellLine
         // antecedent resolved — the veto did not exist.)
         let mut per_hole: Vec<&Ante> = Vec::with_capacity(open.holes.len());
-        let mut set_count = 0usize;
         for hole in &open.holes {
             let ante = bindings
                 .iter()
@@ -89,24 +89,30 @@ impl Parser {
             if !self.hole_accepts_ante(hole, ante) {
                 return None;
             }
-            if matches!(ante, Ante::Each(_)) {
-                set_count += 1;
-            }
             per_hole.push(ante);
         }
+        self.resolve_open_ante_checked(open, &per_hole)
+    }
+
+    /// Re-gate `open` given per-hole antecedents that have ALREADY passed [`Self::hole_accepts_ante`].
+    fn resolve_open_ante_checked(&self, open: &OpenParse, per_hole: &[&Ante]) -> Option<Item> {
+        let set_count = per_hole
+            .iter()
+            .filter(|a| matches!(a, Ante::Each(_)))
+            .count();
         if set_count > 1 {
             return None; // two set bindings ⇒ product-vs-pairwise ambiguity — fail closed
         }
 
         // One fully-applied normal form per set member (or exactly one when no set binds).
         let variants: Vec<Exp> = match per_hole.iter().position(|a| matches!(a, Ante::Each(_))) {
-            None => vec![self.apply_holes(open, &per_hole, None)?],
+            None => vec![self.apply_holes(open, per_hole, None)?],
             Some(k) => {
                 let Ante::Each(ms) = per_hole[k] else {
                     unreachable!()
                 };
                 ms.iter()
-                    .map(|m| self.apply_holes(open, &per_hole, Some((k, m))))
+                    .map(|m| self.apply_holes(open, per_hole, Some((k, m))))
                     .collect::<Option<Vec<_>>>()?
             }
         };
@@ -144,6 +150,11 @@ impl Parser {
         member: Option<(usize, &Exp)>,
     ) -> Option<Exp> {
         let mut term = open.item.sem().clone();
+        for hole in &open.holes {
+            if peel_sig_base(&hole.ty).1 > 0 {
+                term = strip_fst_of_var(&term, &hole.var);
+            }
+        }
         for (i, ante) in per_hole.iter().enumerate() {
             let arg = match (ante, member) {
                 (Ante::One(e), _) => e,
@@ -185,37 +196,87 @@ impl Parser {
         candidates: &[Candidate],
         proposer: &dyn Proposer,
     ) -> Option<(Item, ResolutionOutcome)> {
+        let mut doc_cache = ResolveCache::default();
+        let mut sent_cache = BTreeMap::new();
+        self.resolve_with_cached(
+            open,
+            doc,
+            candidates,
+            proposer,
+            &mut doc_cache,
+            &mut sent_cache,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn resolve_with_cached(
+        &self,
+        open: &OpenParse,
+        doc: &DocumentContext,
+        candidates: &[Candidate],
+        proposer: &dyn Proposer,
+        doc_cache: &mut ResolveCache,
+        sent_cache: &mut BTreeMap<
+            (String, String, Option<String>),
+            Option<(Vec<(Candidate, Ante)>, Option<String>, Option<f64>)>,
+        >,
+    ) -> Option<(Item, ResolutionOutcome)> {
         let mut ranked: Vec<Vec<(Candidate, Ante)>> = Vec::with_capacity(open.holes.len());
         let mut audits: Vec<(Option<String>, Option<f64>)> = Vec::with_capacity(open.holes.len());
         for hole in &open.holes {
-            // The type pre-filter: (candidate, antecedent) pairs the veto admits for THIS hole
-            // (a set candidate passes iff every member does).
-            let fits: Vec<(&Candidate, Ante)> = candidates
-                .iter()
-                .filter_map(|c| {
-                    let ante = self.antecedent_ante(c)?;
-                    self.hole_accepts_ante(hole, &ante).then_some((c, ante))
-                })
-                .collect();
-            if fits.is_empty() {
-                return None; // every candidate vetoed ⇒ fail closed
-            }
-            let presented: Vec<Candidate> = fits.iter().map(|(c, _)| (*c).clone()).collect();
-            let proposal = proposer.propose(&ProposeCtx {
-                doc,
-                hole,
-                candidates: &presented,
-            });
-            let antes: Vec<(Candidate, Ante)> = proposal
-                .ranked
-                .iter()
-                .filter_map(|&i| fits.get(i)) // out-of-range ⇒ ignored (untrusted input)
-                .map(|(c, a)| ((*c).clone(), a.clone()))
-                .collect();
-            if antes.is_empty() {
-                return None; // proposer declined every presented candidate ⇒ fail closed
-            }
-            audits.push((proposal.rationale, proposal.confidence));
+            let (base_ty, _) = peel_sig_base(&hole.ty);
+            let ty_key = pretty_term(base_ty);
+            let count_key = hole.count.as_ref().map(pretty_term);
+            let sent_key = (hole.var.clone(), ty_key.clone(), count_key.clone());
+            let entry = if let Some(cached) = sent_cache.get(&sent_key) {
+                cached.clone()
+            } else {
+                // The type pre-filter: (candidate, antecedent) pairs the veto admits for THIS hole
+                // (a set candidate passes iff every member does).
+                let fits: Vec<(&Candidate, Ante)> = candidates
+                    .iter()
+                    .filter_map(|c| {
+                        let c_key = c.key();
+                        let ante = doc_cache
+                            .antes
+                            .entry(c_key.clone())
+                            .or_insert_with(|| self.antecedent_ante(c))
+                            .clone()?;
+                        let veto_key = (ty_key.clone(), count_key.clone(), ante_veto_key(c));
+                        let accepts = *doc_cache
+                            .veto
+                            .entry(veto_key)
+                            .or_insert_with(|| self.hole_accepts_ante(hole, &ante));
+                        accepts.then_some((c, ante))
+                    })
+                    .collect();
+                let computed = if fits.is_empty() {
+                    None
+                } else {
+                    let presented: Vec<Candidate> =
+                        fits.iter().map(|(c, _)| (*c).clone()).collect();
+                    let proposal = proposer.propose(&ProposeCtx {
+                        doc,
+                        hole,
+                        candidates: &presented,
+                    });
+                    let antes: Vec<(Candidate, Ante)> = proposal
+                        .ranked
+                        .iter()
+                        .filter_map(|&i| fits.get(i)) // out-of-range ⇒ ignored (untrusted input)
+                        .map(|(c, a)| ((*c).clone(), a.clone()))
+                        .collect();
+                    if antes.is_empty() {
+                        None
+                    } else {
+                        Some((antes, proposal.rationale, proposal.confidence))
+                    }
+                };
+                sent_cache.insert(sent_key, computed.clone());
+                computed
+            };
+            let (antes, rationale, confidence) = entry?;
+            audits.push((rationale, confidence));
             ranked.push(antes);
         }
         let mut budget = MAX_REGATE_ATTEMPTS;
@@ -244,24 +305,29 @@ impl Parser {
     /// (the soundness authority for direct callers); [`Self::resolve_with`] uses it to filter
     /// each hole's candidates BEFORE the assignment search.
     fn hole_accepts(&self, hole: &HoleInfo, ante: &Exp) -> bool {
-        let Ok(ty_val) = eval_env(&hole.ty, &Rho::Nil, &self.grammar.env()) else {
+        let (base_ty, _) = peel_sig_base(&hole.ty);
+        let Ok(ty_val) = eval_env(base_ty, &Rho::Nil, &self.grammar.env()) else {
             return false;
         };
+        if try_readback_val(0, &ty_val).is_err() {
+            return false;
+        };
+        let base_ante = peel_ante_kind_base(ante);
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
-        check(&mut ctx, ante, &ty_val).is_ok()
+        check(&mut ctx, &base_ante, &ty_val).is_ok()
     }
 
     /// Depth-first search over per-hole ranked antecedents: assign one antecedent per hole, then
-    /// re-gate the whole assignment via [`Self::resolve_open_ante`]; the first that type-checks
-    /// closed wins, and a kernel veto backtracks to the next candidate (the trust boundary
-    /// driving retry). `budget` caps the total number of full re-gates (fail closed on
+    /// re-gate the whole assignment via [`Self::resolve_open_ante_checked`]; the first that
+    /// type-checks closed wins, and a kernel veto backtracks to the next candidate (the trust
+    /// boundary driving retry). `budget` caps the total number of full re-gates (fail closed on
     /// exhaustion). Returns the closed item plus the accepted candidates in hole order (the
     /// binding audit).
-    fn search_resolve(
+    fn search_resolve<'a>(
         &self,
         open: &OpenParse,
-        ranked: &[Vec<(Candidate, Ante)>],
-        acc: &mut Vec<(String, Ante)>,
+        ranked: &'a [Vec<(Candidate, Ante)>],
+        acc: &mut Vec<&'a Ante>,
         budget: &mut usize,
     ) -> Option<(Item, Vec<Candidate>)> {
         let i = acc.len();
@@ -270,13 +336,15 @@ impl Parser {
                 return None;
             }
             *budget -= 1;
-            return self.resolve_open_ante(open, acc).map(|it| (it, Vec::new()));
+            return self
+                .resolve_open_ante_checked(open, acc)
+                .map(|it| (it, Vec::new()));
         }
         for (cand, ante) in &ranked[i] {
             if *budget == 0 {
                 return None;
             }
-            acc.push((open.holes[i].var.clone(), ante.clone()));
+            acc.push(ante);
             if let Some((it, mut rest)) = self.search_resolve(open, ranked, acc, budget) {
                 rest.insert(0, cand.clone());
                 return Some((it, rest));
@@ -325,7 +393,7 @@ impl Parser {
     fn hole_accepts_ante(&self, hole: &HoleInfo, ante: &Ante) -> bool {
         if let Some(q) = &hole.count {
             let size = match ante {
-                Ante::One(_) => 1,
+                Ante::One(e) => ante_count_size(e),
                 Ante::Each(ms) => ms.len(),
             };
             if super::super::holes::count_value(q) != Some(size) {
@@ -378,12 +446,29 @@ impl Parser {
         // synthesized join of `sentences` would be a different string than the recordings key
         // on, and every replay would MISS); `sentences` is its segmentation, in order.
         let mut candidates: Vec<Candidate> = Vec::new();
+        if sentences
+            .first()
+            .is_some_and(|first| first.trim().to_lowercase().starts_with("this document "))
+        {
+            let doc_entries = self.scoped(self.lex.entries_for("document"), scope);
+            if !doc_entries.is_empty() {
+                let empty = BTreeMap::new();
+                let vb = Vb::surface(&empty, &self.grammar.layer);
+                let mut seen = BTreeSet::new();
+                for e in doc_entries {
+                    if let Some([cls, _]) = super::super::category::is_ctor(e.item.cat(), "cat_n") {
+                        self.emit_kind_candidate(cls, &vb, &mut candidates, &mut seen);
+                    }
+                }
+            }
+        }
         let mut prior: Vec<PriorSelection> = Vec::new();
         // The same-kind claim run (D68 §5): consecutively-landed claims sharing a discourse-kind
         // class, offered as the plural SET antecedent. Any sentence that lands nothing (or a
         // different kind) breaks it.
         let mut run: Vec<Resource> = Vec::new();
         let mut run_kind: Option<Iri> = None;
+        let mut doc_cache = ResolveCache::default();
         let mut out = Vec::with_capacity(sentences.len());
         for (ordinal, s) in sentences.iter().enumerate() {
             // SCOPED (D65 §4): the caller's lexicon order is the parse rank's primary key, so a
@@ -413,9 +498,21 @@ impl Parser {
                     // own surfaces, so there is no concept legend to add here.
                     concepts: &[],
                 };
+                let mut sent_cache = BTreeMap::new();
+                let mut resolved_open = 0usize;
                 for o in &open {
-                    if let Some((item, res)) = self.resolve_with(o, &doc_ctx, &candidates, proposer)
-                    {
+                    if resolved_open >= MAX_RESOLVED_OPEN_PER_SENTENCE {
+                        break;
+                    }
+                    if let Some((item, res)) = self.resolve_with_cached(
+                        o,
+                        &doc_ctx,
+                        &candidates,
+                        proposer,
+                        &mut doc_cache,
+                        &mut sent_cache,
+                    ) {
+                        resolved_open += 1;
                         if seen.insert(pretty_term(item.sem())) {
                             pool.push(item);
                             audits.push(Some(res));
@@ -438,7 +535,10 @@ impl Parser {
                         selection = Some(sel);
                         SentenceOutcome::Encoded(item)
                     }
-                    None => SentenceOutcome::Ambiguous(pool),
+                    None => {
+                        resolution = audits.into_iter().flatten().next();
+                        SentenceOutcome::Ambiguous(pool)
+                    }
                 }
             } else if let Some(o) = open.first() {
                 SentenceOutcome::Open(o.clone())
@@ -476,12 +576,28 @@ impl Parser {
                     run_kind = None;
                 }
             }
-            let harvest = match &outcome {
-                SentenceOutcome::Encoded(item) => Some(item.sem()),
-                SentenceOutcome::Ambiguous(items) => items.first().map(Item::sem),
-                _ => None,
+            let harvest: Vec<&Exp> = match &outcome {
+                SentenceOutcome::Encoded(item) => vec![item.sem()],
+                SentenceOutcome::Ambiguous(items) => items
+                    .iter()
+                    .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                    .map(Item::sem)
+                    .collect(),
+                SentenceOutcome::Open(_) => open
+                    .iter()
+                    .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                    .map(|o| peel_hole_lams(o.item.sem(), o.holes.len()))
+                    .collect(),
+                SentenceOutcome::Gap => Vec::new(),
             };
-            if let Some(sem) = harvest {
+            let hole_tys: Vec<(&Exp, Option<&Exp>)> = open
+                .iter()
+                .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                .flat_map(|o| &o.holes)
+                .filter(|h| h.kind == HoleKind::EntityRef && !is_entity_top(&h.ty))
+                .map(|h| (&h.ty, h.count.as_ref()))
+                .collect();
+            if !harvest.is_empty() || !hole_tys.is_empty() || landed.is_some() {
                 let mut fresh = Vec::new();
                 // This sentence's landed claim leads (it IS the sentence), then the grown
                 // same-kind set, then the sem's own referents.
@@ -505,7 +621,7 @@ impl Parser {
                         });
                     }
                 }
-                fresh.extend(self.discourse_candidates(s, lemmatizer, sem));
+                fresh.extend(self.discourse_candidates_many(s, lemmatizer, &harvest, &hole_tys));
                 // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
                 // front (recency is the salience signal); its older entry is dropped.
                 let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
@@ -522,28 +638,119 @@ impl Parser {
         out
     }
 
-    /// The discourse-antecedent candidates one resolved sem contributes (D64 §4, plan §2.3): every
-    /// `EigonResource` — a committed named entity — and every CLOSED `ontology:kind_of(…)` subterm
-    /// — a kind this sentence makes discourse-referent ("…genome-scale shRNA **libraries**" →
-    /// "These libraries…") — in first-mention order, deduplicated. Surfaces are READABLE: an
-    /// individual's layer label ([`resource_label`], falling back to the IRI local name), a kind's
-    /// verbalized gloss over this sentence's own sense names. A `kind_of` subterm mentioning a
-    /// variable bound outside it is skipped — it is not a self-standing referent (and could never
-    /// re-gate closed; the closedness walk is a pre-filter, the empty-Γ re-gate stays the
-    /// authority). Landed CLAIMS as antecedents ("These findings…") are pending Stage 3's
-    /// incremental landing — a unit whose referent is a prior claim stays honestly `Open`.
-    fn discourse_candidates(
+    /// The discourse-antecedent candidates a sentence's resolved/surviving sems contribute (D64 §4,
+    /// plan §2.3): every `EigonResource` — a committed named entity — and every CLOSED nominal kind
+    /// subterm in first-mention order, deduplicated across `sems` so the top-ranked reading's
+    /// referents lead while alternative WordNet senses from the ambiguous pool remain available.
+    fn discourse_candidates_many(
         &self,
         sentence: &str,
         lemmatizer: &dyn Lemmatizer,
-        sem: &Exp,
+        sems: &[&Exp],
+        hole_tys: &[(&Exp, Option<&Exp>)],
     ) -> Vec<Candidate> {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
         let vb = Vb::surface(&names, &self.grammar.layer);
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
-        self.walk_candidates(sem, &vb, &mut out, &mut seen);
+        for sem in sems {
+            self.walk_candidates(sem, &vb, &mut out, &mut seen);
+        }
+        for &(ty, count) in hole_tys {
+            if let Some(q) = count {
+                self.emit_counted_candidate(ty, q, &vb, &mut out, &mut seen);
+            } else {
+                self.emit_kind_candidate(ty, &vb, &mut out, &mut seen);
+            }
+            self.walk_candidates(ty, &vb, &mut out, &mut seen);
+        }
+        for tok in self.tokenize(sentence) {
+            for lemma in self.candidate_lemmas(tok.surface(), lemmatizer) {
+                for nom in derived_nominal_forms(&lemma) {
+                    for e in self.scoped(self.lex.entries_for(&nom), None) {
+                        if let Some([cls, _]) =
+                            super::super::category::is_ctor(e.item.cat(), "cat_n")
+                        {
+                            self.emit_kind_candidate(cls, &vb, &mut out, &mut seen);
+                        }
+                    }
+                }
+            }
+        }
         out
+    }
+
+    fn emit_kind_candidate(
+        &self,
+        k: &Exp,
+        vb: &Vb,
+        out: &mut Vec<Candidate>,
+        seen: &mut BTreeSet<String>,
+    ) {
+        let kind_of = Iri::parse("urn:eigenius:ontology:kind_of").expect("valid IRI");
+        let mut push_target = |target: &Exp| {
+            if !matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) || is_entity_top(target) {
+                return;
+            }
+            let term = Exp::App(
+                Box::new(Exp::EigonAxiom(kind_of.clone())),
+                Box::new(target.clone()),
+            );
+            let key = format!("k:{}", pretty_term(&term));
+            if seen.insert(key) {
+                out.push(Candidate::Kind {
+                    surface: verbalize(&term, vb),
+                    term,
+                });
+            }
+        };
+        if closed_under(k, &mut Vec::new()) {
+            push_target(k);
+        }
+        let (base, depth) = peel_sig_base(k);
+        if depth > 0 && closed_under(base, &mut Vec::new()) {
+            push_target(base);
+        }
+    }
+
+    fn emit_counted_candidate(
+        &self,
+        k: &Exp,
+        q: &Exp,
+        vb: &Vb,
+        out: &mut Vec<Candidate>,
+        seen: &mut BTreeSet<String>,
+    ) {
+        if closed_under(q, &mut Vec::new()) {
+            let the_count = Iri::parse("urn:eigenius:ontology:the_count").expect("valid IRI");
+            let mut push_counted = |target: &Exp| {
+                if !matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) || is_entity_top(target) {
+                    return;
+                }
+                let term = Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(Exp::EigonAxiom(the_count.clone())),
+                        Box::new(target.clone()),
+                    )),
+                    Box::new(q.clone()),
+                );
+                let key = format!("k:{}", pretty_term(&term));
+                if seen.insert(key) {
+                    out.push(Candidate::Kind {
+                        surface: verbalize(&term, vb),
+                        term,
+                    });
+                }
+            };
+            if closed_under(k, &mut Vec::new()) {
+                push_counted(k);
+            }
+            let (base, depth) = peel_sig_base(k);
+            if depth > 0 && closed_under(base, &mut Vec::new()) {
+                push_counted(base);
+            }
+        }
+        self.emit_kind_candidate(k, vb, out, seen);
     }
 
     fn walk_candidates(
@@ -554,21 +761,53 @@ impl Parser {
         seen: &mut BTreeSet<String>,
     ) {
         if let Exp::App(f, k) = e {
-            if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
-                && closed_under(e, &mut Vec::new())
-            {
-                let cand = Candidate::Kind {
-                    term: e.clone(),
-                    surface: verbalize(e, vb),
-                };
-                if seen.insert(cand.key()) {
-                    out.push(cand);
-                }
-                // Keep walking INSIDE the kind: a refined kind's restrictor mentions further
-                // referents ("data sets **for genes**…" — the inner kind is anaphorable too).
+            if matches!(
+                f.as_ref(),
+                Exp::EigonAxiom(i)
+                    if i.as_str() == "urn:eigenius:ontology:kind_of"
+                        || i.as_str() == "urn:eigenius:ontology:the"
+            ) {
+                self.emit_kind_candidate(k, vb, out, seen);
+                // Keep walking INSIDE the kind/definite: a refined kind's restrictor mentions
+                // further referents ("data sets **for genes**…" — the inner kind is anaphorable too).
                 self.walk_candidates(k, vb, out, seen);
                 return;
             }
+            if let Exp::App(f0, arg0) = f.as_ref() {
+                if matches!(
+                    f0.as_ref(),
+                    Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:the_count"
+                ) {
+                    self.emit_counted_candidate(arg0, k, vb, out, seen);
+                    self.walk_candidates(arg0, vb, out, seen);
+                    self.walk_candidates(k, vb, out, seen);
+                    return;
+                }
+                if matches!(
+                    f0.as_ref(),
+                    Exp::EigonAxiom(i)
+                        if i.as_str() == "urn:eigenius:ontology:is_a"
+                            || i.as_str() == "urn:eigenius:core:is_a"
+                            || i.as_str() == "urn:eigenius:ontology:compound_kind"
+                ) {
+                    self.emit_kind_candidate(k, vb, out, seen);
+                }
+                if let Exp::App(f00, k0) = f0.as_ref() {
+                    if matches!(
+                        f00.as_ref(),
+                        Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:has_count"
+                    ) {
+                        self.emit_counted_candidate(k0, k, vb, out, seen);
+                        self.walk_candidates(k0, vb, out, seen);
+                        self.walk_candidates(arg0, vb, out, seen);
+                        self.walk_candidates(k, vb, out, seen);
+                        return;
+                    }
+                }
+            }
+        }
+        if let Exp::Pi(_, dom, _) = e {
+            self.emit_kind_candidate(dom, vb, out, seen);
         }
         match e {
             Exp::EigonResource(res) => {
@@ -592,6 +831,11 @@ impl Parser {
             | Exp::Pi(_, a, b)
             | Exp::Sig(_, a, b)
             | Exp::Ann(a, b) => {
+                self.walk_candidates(a, vb, out, seen);
+                self.walk_candidates(b, vb, out, seen);
+            }
+            Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+                self.walk_candidates(t, vb, out, seen);
                 self.walk_candidates(a, vb, out, seen);
                 self.walk_candidates(b, vb, out, seen);
             }
@@ -885,10 +1129,81 @@ fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
         Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) | Exp::Ann(a, b) => {
             closed_under(a, bound) && closed_under(b, bound)
         }
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+            closed_under(t, bound) && closed_under(a, bound) && closed_under(b, bound)
+        }
         Exp::Fst(x) | Exp::Snd(x) => closed_under(x, bound),
         Exp::InductiveCtor(_, _, args) => args.iter().all(|a| closed_under(a, bound)),
         _ => true,
     }
+}
+
+fn peel_sig_base(mut ty: &Exp) -> (&Exp, usize) {
+    let mut depth = 0;
+    while let Exp::Sig(_, dom, _) = ty {
+        ty = dom;
+        depth += 1;
+    }
+    (ty, depth)
+}
+
+fn peel_hole_lams(mut e: &Exp, count: usize) -> &Exp {
+    for _ in 0..count {
+        match e {
+            Exp::Lam(_, body) => e = body,
+            _ => break,
+        }
+    }
+    e
+}
+
+fn strip_fst_of_var(e: &Exp, target: &str) -> Exp {
+    let go = |x: &Exp| strip_fst_of_var(x, target);
+    match e {
+        Exp::Fst(inner) => {
+            let inner = go(inner);
+            if matches!(&inner, Exp::Var(v) if v == target) {
+                inner
+            } else {
+                Exp::Fst(Box::new(inner))
+            }
+        }
+        Exp::Snd(inner) => Exp::Snd(Box::new(go(inner))),
+        Exp::App(f, a) => Exp::App(Box::new(go(f)), Box::new(go(a))),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
+        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
+        Exp::Ann(a, b) => Exp::Ann(Box::new(go(a)), Box::new(go(b))),
+        Exp::Id(t, a, b) => Exp::Id(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
+        Exp::Apart(t, a, b) => Exp::Apart(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
+        Exp::InductiveCtor(d, n, args) => {
+            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn ante_count_size(e: &Exp) -> usize {
+    if let Exp::App(f, q) = e {
+        if let Exp::App(f0, _) = f.as_ref() {
+            if matches!(
+                f0.as_ref(),
+                Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:the_count"
+            ) {
+                if let Some(n) = super::super::holes::count_value(q) {
+                    return n;
+                }
+            }
+        }
+    }
+    1
+}
+
+fn is_entity_top(e: &Exp) -> bool {
+    matches!(e, Exp::EigonClass(i) if i.as_str() == "urn:eigenius:lexicon:Entity")
 }
 
 /// A candidate antecedent for anaphora resolution (D64 §4, plan §2.3, D68), with its READABLE
@@ -959,6 +1274,15 @@ impl Candidate {
 enum Ante {
     One(Exp),
     Each(Vec<Exp>),
+}
+
+/// Document-scoped cache for [`Parser::resolve_with_cached`]: `antecedent_ante` per candidate key,
+/// and `hole_accepts_ante` per `(hole.ty, hole.count, cand.key())`. Both are pure functions over
+/// `&self.grammar.layer`, which is immutable across a [`Parser::resolve_document`] run.
+#[derive(Default)]
+struct ResolveCache {
+    antes: BTreeMap<String, Option<Ante>>,
+    veto: BTreeMap<(String, Option<String>, String), bool>,
 }
 
 /// The LANDING seam (D67 §4 / D68 §6): turns an encoded sentence into its landed claim resource
@@ -1041,5 +1365,77 @@ impl<T: Proposer + ?Sized> Proposer for Box<T> {
 impl<T: Proposer + ?Sized> Proposer for std::sync::Arc<T> {
     fn propose(&self, ctx: &ProposeCtx) -> Proposal {
         (**self).propose(ctx)
+    }
+}
+
+fn derived_nominal_forms(lemma: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(stem) = lemma
+        .strip_suffix("ise")
+        .or_else(|| lemma.strip_suffix("ize"))
+    {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}isation"));
+            out.push(format!("{stem}ization"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ate") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ation"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ical") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ity"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("able") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ability"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ible") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ibility"));
+        }
+    }
+    out
+}
+
+fn peel_ante_kind_base(e: &Exp) -> Exp {
+    if let Exp::App(f, k) = e {
+        if matches!(
+            f.as_ref(),
+            Exp::EigonAxiom(i)
+                if i.as_str() == "urn:eigenius:ontology:kind_of"
+                    || i.as_str() == "urn:eigenius:ontology:the"
+        ) {
+            let (base, depth) = peel_sig_base(k);
+            if depth > 0 {
+                return Exp::App(f.clone(), Box::new(base.clone()));
+            }
+        }
+        if let Exp::App(f0, k0) = f.as_ref() {
+            if matches!(
+                f0.as_ref(),
+                Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:the_count"
+            ) {
+                let (base, depth) = peel_sig_base(k0);
+                if depth > 0 {
+                    return Exp::App(
+                        Box::new(Exp::App(f0.clone(), Box::new(base.clone()))),
+                        k.clone(),
+                    );
+                }
+            }
+        }
+    }
+    e.clone()
+}
+
+fn ante_veto_key(c: &Candidate) -> String {
+    match c {
+        Candidate::Kind { term, .. } => format!("k:{}", pretty_term(&peel_ante_kind_base(term))),
+        other => other.key(),
     }
 }

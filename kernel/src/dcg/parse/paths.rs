@@ -355,6 +355,23 @@ impl Parser {
         Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
         forest_out.sort_by_key(|it| it.cost());
         forest_out.truncate(DEFAULT_FOREST_CAP);
+        open.sort_by_key(|o| o.item.cost());
+        {
+            let mut uniq: Vec<OpenParse> = Vec::with_capacity(open.len());
+            for o in open.drain(..) {
+                let dup = uniq.iter().any(|u| {
+                    u.item.sem() == o.item.sem()
+                        && u.holes.len() == o.holes.len()
+                        && u.holes.iter().zip(&o.holes).all(|(a, b)| {
+                            a.var == b.var && a.ty == b.ty && a.kind == b.kind && a.count == b.count
+                        })
+                });
+                if !dup {
+                    uniq.push(o);
+                }
+            }
+            open = uniq;
+        }
 
         // Ambiguity attribution (`chart::attribute`): which span, which rule, which senses drive this
         // unit's reading count. Runs HERE — after the felicity filter and dedup — so a sense site can
