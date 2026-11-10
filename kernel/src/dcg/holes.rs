@@ -79,6 +79,8 @@ pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
         Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
+        Exp::Id(t, a, b) => Exp::Id(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
+        Exp::Apart(t, a, b) => Exp::Apart(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
         // Constructor nodes carry subterms too, so the freshener must descend into
         // them (else the hole stays an unfreshened closed constant). An inductive
         // *type* application — `logic:And(P, Q)` — is an `App` spine since D76
@@ -216,6 +218,16 @@ pub(super) fn freshen_gate_holes(exp: &Exp) -> (Exp, Vec<GateHole>) {
             Exp::Ann(x, t) => Exp::Ann(
                 Box::new(walk(x, holes, memo)),
                 Box::new(walk(t, holes, memo)),
+            ),
+            Exp::Id(t, a, b) => Exp::Id(
+                Box::new(walk(t, holes, memo)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
+            ),
+            Exp::Apart(t, a, b) => Exp::Apart(
+                Box::new(walk(t, holes, memo)),
+                Box::new(walk(a, holes, memo)),
+                Box::new(walk(b, holes, memo)),
             ),
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),

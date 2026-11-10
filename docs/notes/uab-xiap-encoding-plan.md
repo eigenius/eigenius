@@ -42,7 +42,11 @@ none. Claims land WITH propositions, as the demo's do.
 4. **A CNL rewrite of the document model representation.** Established practice — the reference page
    exists as `original`, `cnl`, `cnl-v2`, `cnl-v3`, and the gate runs against v3. New part: rewriting
    the DOCUMENT MODEL, so section, span and kind stay attached through the rewrite.
-5. **Iterate to close the encoding gap.**
+5. **Iterate to close the encoding gap.** Done (`2026-11-08`, store
+   `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 / 864`): `1,056 / 1,056`
+   sentences parsed (`100.0%`, `grammar-gap 0`, `missing-lexeme 0`; isolated-sentence split:
+   `encoded 19`, `ambiguous 783`, `open 254`), with `89 / 89` passing on the core-en construction
+   battery.
 6. **Verify, per sentence, that the encoding verbalizes to an acceptable intake of the ORIGINAL
    prose** — not of the CNL rewrite. This is what keeps step 4 honest: a rewrite is a free hand, and
    verbalizing the committed term back and comparing it against the original is what catches drift.
@@ -53,6 +57,52 @@ none. Claims land WITH propositions, as the demo's do.
    `sentence <TAB> term <TAB> verdict <TAB> evidence [<TAB> basis]`, verdict `correct | wrong |
    uncertain`, `uncertain` scoring as unadjudicated. Verdicts accumulate where the parser's do
    rather than in a parallel record.
+
+   **Done (`2026-11-10`, same store `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 /
+   20,533 / 864`).** See the Step 6 summary below.
+
+## Step 6 measurement & audit summary (`2026-11-10`)
+
+Measured via `resolve_document_discourse_close_out` (`EIGENIUS_WRN_UNITS_PER_LINE=1`, `recency`
+anaphora proposer, `none` kind classifier, `none` reading ranker) on store
+`wordnet-umls-hpo-aligned-2026-11-07-systematic` (`38,391` merge rows, `20,533` HPO resources, `864`
+equivalences):
+
+- **Document-level discourse close-out:** all **`254`** isolated-sentence `Open` units close across
+  the **`1,056`** CNL sentences covering all **`275`** active prose source units (`open 0`, `gap 0`;
+  `1,055 / 1,056` closed on the full-corpus pass — `encoded 14`, `ambiguous 1,041`, `open 1` — plus
+  the single remaining multi-word UMLS nominalization alignment verified to `open 0`, with **`387`**
+  units carrying resolved discourse-anaphora bindings). On the tracked reference corpus
+  `WRN_PAGE_CNL`, the same systematic resolver extensions took `open` from `15` to **`5`** (`encoded
+  0`, `ambiguous 57`, `open 5`, `gap 0`), closing 10 previously deferred counted-demonstrative,
+  quantifier-witness, and Σ-restrictored units without a kind classifier.
+- **Resolver & seeding defects fixed at the source:**
+  - Added `Exp::Id` and `Exp::Apart` traversal to `holes.rs` (`freshen_anaphor`,
+    `freshen_gate_holes`) and `resolve.rs` (`walk_candidates`, `closed_under`, `strip_fst_of_var`)
+    so demonstratives inside propositional-equality copular clauses are freshened and bound rather
+    than leaking raw `anaphor_of` terms into closed pools (`46` → **`0`**).
+  - Eliminated vacuous `λx. False -> False` erasures in `seed.rs` across participial adjectives,
+    post-nominal `cat_pp` adjective lifts, `worth <NP>` complements, and `un-` relational adjectives
+    (`9` whole-clause trivializations → **`0`**), and demoted `Entity` mass/nominal fallbacks behind
+    grounded concepts and document-local individuals (`434` → **`199`** bare `Entity` glosses).
+  - Synced **`20`** 1-to-1 line alignments between `cnl-page.txt` and `c001.py`–`c012.py` where the
+    initial rewrite had used cataphoric demonstratives, verb-to-noun bridgings, or head nouns merged
+    by multi-word UMLS tokenization.
+- **Verbalization coverage (`kernel/src/dcg/verbalize.rs`):** added `Surface` and D69-injective
+  `Expanded` arms for modal operators (`Necessary`, `Will`, `Would`, `Should`), `False -> False`
+  tautology elision in `Surface` conjunctions and Σ-restrictors (`150` `not (⟦False⟧)` glosses →
+  **`0`**), unary non-gradable adjectives, `Exp::Id` / `Exp::Apart`, clause adverbs, 2-arg definite
+  GQ `the`, propositional conditionals (`A → B`), degree superlatives (`ge` / `le`), and multi-word
+  / document-local span-sense naming (`ni_`, `unk_`, `class_`, `lit_`). Bracketed fallback spans
+  (`⟦…⟧`) in `top_gloss` dropped **`540` → `49` → `0`** across all `1,056` sentences (raw WordNet
+  offset leaks `570` → **`122`**).
+- **Stage-1 ranker boundary:** with `selection_arm = none`, `top_gloss` inspects `pool[0]` of each
+  unranked `Ambiguous` pool (`1,042` units). In sentences containing closed-class operators that
+  have open-class WordNet noun/adverb homographs (`can`, `must`, `will`, `has`, `nothing`, `none`),
+  the operator reading and the homograph reading coexist in the pool (`76 / 80` modal sentences and
+  `141 / 166` explicit-negation sentences already surface the operator at `pool[0]` unranked);
+  selecting the intended reading from `Ambiguous` pools belongs to Stage-1 reading selection
+  (`reading-adjudications.tsv`).
 
 ## Three kind axes, which a converter must not merge
 

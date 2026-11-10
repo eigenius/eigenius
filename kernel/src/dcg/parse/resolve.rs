@@ -253,7 +253,8 @@ impl Parser {
                 let computed = if fits.is_empty() {
                     None
                 } else {
-                    let presented: Vec<Candidate> = fits.iter().map(|(c, _)| (*c).clone()).collect();
+                    let presented: Vec<Candidate> =
+                        fits.iter().map(|(c, _)| (*c).clone()).collect();
                     let proposal = proposer.propose(&ProposeCtx {
                         doc,
                         hole,
@@ -833,6 +834,11 @@ impl Parser {
                 self.walk_candidates(a, vb, out, seen);
                 self.walk_candidates(b, vb, out, seen);
             }
+            Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+                self.walk_candidates(t, vb, out, seen);
+                self.walk_candidates(a, vb, out, seen);
+                self.walk_candidates(b, vb, out, seen);
+            }
             Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => self.walk_candidates(b, vb, out, seen),
             Exp::InductiveCtor(_, _, args) => {
                 for a in args {
@@ -1123,6 +1129,9 @@ fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
         Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) | Exp::Ann(a, b) => {
             closed_under(a, bound) && closed_under(b, bound)
         }
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+            closed_under(t, bound) && closed_under(a, bound) && closed_under(b, bound)
+        }
         Exp::Fst(x) | Exp::Snd(x) => closed_under(x, bound),
         Exp::InductiveCtor(_, _, args) => args.iter().all(|a| closed_under(a, bound)),
         _ => true,
@@ -1168,6 +1177,8 @@ fn strip_fst_of_var(e: &Exp, target: &str) -> Exp {
         Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(a, b) => Exp::Ann(Box::new(go(a)), Box::new(go(b))),
+        Exp::Id(t, a, b) => Exp::Id(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
+        Exp::Apart(t, a, b) => Exp::Apart(Box::new(go(t)), Box::new(go(a)), Box::new(go(b))),
         Exp::InductiveCtor(d, n, args) => {
             Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
         }

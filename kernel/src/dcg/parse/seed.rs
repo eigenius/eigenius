@@ -452,9 +452,37 @@ impl Parser {
                 ) {
                     let ent_cls = Exp::EigonClass(ent_iri);
                     let mass = Exp::InductiveCtor(num_decl, "mass".into(), Vec::new());
+                    let mass_shifts: Vec<Item> = out
+                        .iter()
+                        .filter_map(|it| {
+                            if let Exp::InductiveCtor(decl, name, args) = it.cat() {
+                                if name == "cat_n" && args.len() == 2 && args[0] != ent_cls {
+                                    let mut c = it.cost();
+                                    c.sense_rank = c.sense_rank.saturating_add(2);
+                                    return Some(Item::from_parts(
+                                        Exp::InductiveCtor(
+                                            decl.clone(),
+                                            "cat_n".into(),
+                                            vec![args[0].clone(), mass.clone()],
+                                        ),
+                                        it.sem().clone(),
+                                        super::super::item::Combinator::Other,
+                                        c,
+                                    ));
+                                }
+                            }
+                            None
+                        })
+                        .collect();
+                    out.extend(mass_shifts);
                     let n_mass =
                         Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), mass]);
-                    out.push(Item::new(n_mass, ent_cls));
+                    out.push(Item::from_parts(
+                        n_mass,
+                        ent_cls,
+                        super::super::item::Combinator::Other,
+                        super::super::item::Cost::from_sense_rank(8),
+                    ));
                 }
             }
         }
@@ -1425,10 +1453,13 @@ impl Parser {
         }
         // Predicative adjective taking a gerund VP (`worth <V-ing>`) also takes a direct NP
         // complement (`worth a benchmark`, `worth the effort`): `(S[dcl,adj]\NP)/NP`.
-        if let (Some(cat_decl), Some(false_iri)) = (
+        // Ranked behind `worth_vp`/`worth_tv` so verbal gerunds (`worth stating`, `worth knowing`)
+        // win over homographic nominalizations, while genuine NP complements retain both arguments.
+        if let (Some(cat_decl), Ok(ent_iri)) = (
             inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
-            inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
+            Iri::parse("urn:eigenius:lexicon:Entity"),
         ) {
+            let ent_cls = Exp::EigonClass(ent_iri);
             let mut np_adj_comps = Vec::new();
             for it in out.iter() {
                 if let Some((m, res, arg)) = slash_parts(it.cat(), "fwd") {
@@ -1443,21 +1474,23 @@ impl Parser {
                                     "fwd".into(),
                                     vec![m.clone(), res.clone(), np_any.clone()],
                                 );
-                                let f_prop =
-                                    Exp::const_applied(false_iri.clone(), Vec::new(), Vec::new());
-                                let triv = Exp::arrow(f_prop.clone(), f_prop);
+                                let eq_xy = Exp::Id(
+                                    Box::new(ent_cls.clone()),
+                                    Box::new(Exp::Var("__adj_np_x".into())),
+                                    Box::new(Exp::Var("__adj_np_y".into())),
+                                );
                                 let sem = Exp::Lam(
                                     Patt::Var("__adj_np_y".into()),
                                     Box::new(Exp::Lam(
                                         Patt::Var("__adj_np_x".into()),
-                                        Box::new(triv),
+                                        Box::new(eq_xy),
                                     )),
                                 );
                                 np_adj_comps.push(Item::from_parts(
                                     new_cat,
                                     sem,
                                     it.prov(),
-                                    it.cost(),
+                                    Cost::from_sense_rank(6),
                                 ));
                             }
                         }
@@ -2020,14 +2053,70 @@ impl Parser {
                     predicative_adjective_cat(&self.grammar.layer),
                     inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
                 ) {
-                    let false_prop = Exp::Const(false_iri, Vec::new());
-                    let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
-                    let sem = Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term));
-                    let cost = if is_participle_adj || is_hyphen_modifier {
-                        Cost::ZERO
-                    } else {
-                        Cost::from_sense_rank(4)
+                    let is_ent_np = |c: &Exp| {
+                        matches!(
+                            is_ctor(c, "cat_np"),
+                            Some([Exp::EigonClass(i), _])
+                                if i.as_str() == "urn:eigenius:lexicon:Entity"
+                        )
                     };
+                    let part_sem = if is_participle_adj && has_imported_entry {
+                        out.iter().find_map(|it| {
+                            let ok_tys = slash_parts(it.cat(), "fwd")
+                                .and_then(|(_, vp, obj)| {
+                                    let (_, _, subj) = slash_parts(vp, "bwd")?;
+                                    Some(is_ent_np(obj) && is_ent_np(subj))
+                                })
+                                .or_else(|| {
+                                    slash_parts(it.cat(), "bwd").map(|(_, _, subj)| is_ent_np(subj))
+                                })
+                                .unwrap_or(false);
+                            if !ok_tys {
+                                return None;
+                            }
+                            super::super::rules::combinators::participial_restrictor(
+                                it.cat(),
+                                it.sem(),
+                            )
+                        })
+                    } else {
+                        None
+                    };
+                    let cls_sem = if part_sem.is_none() && is_productive_adj_suffix {
+                        Iri::parse("urn:eigenius:ontology:is_a")
+                            .ok()
+                            .and_then(|is_a_iri| {
+                                out.iter().find_map(|it| {
+                                    let [Exp::EigonClass(ci), _] = is_ctor(it.cat(), "cat_n")?
+                                    else {
+                                        return None;
+                                    };
+                                    if ci.as_str() == "urn:eigenius:lexicon:Entity"
+                                        || it.sem() != &Exp::EigonClass(ci.clone())
+                                    {
+                                        return None;
+                                    }
+                                    let x = "__dom_adj_x";
+                                    let app = Exp::App(
+                                        Box::new(Exp::App(
+                                            Box::new(Exp::EigonAxiom(is_a_iri.clone())),
+                                            Box::new(Exp::Var(x.into())),
+                                        )),
+                                        Box::new(Exp::EigonClass(ci.clone())),
+                                    );
+                                    Some(Exp::Lam(Patt::Var(x.into()), Box::new(app)))
+                                })
+                            })
+                    } else {
+                        None
+                    };
+                    let sem = part_sem.or(cls_sem).unwrap_or_else(|| {
+                        let false_prop = Exp::Const(false_iri, Vec::new());
+                        let true_term =
+                            Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                        Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term))
+                    });
+                    let cost = Cost::from_sense_rank(4);
                     out.push(Item::from_parts(adj_cat, sem, Combinator::Other, cost));
                 }
             }
@@ -2078,7 +2167,8 @@ impl Parser {
                 ) {
                     let stem_entries = self.lex.entries_for(stem);
                     let false_prop = Exp::Const(false_iri, Vec::new());
-                    let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                    let true_term =
+                        Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop.clone()));
                     let pp_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_pp".into(), Vec::new());
                     let mut un_rel = Vec::new();
                     for e in &stem_entries {
@@ -2086,25 +2176,44 @@ impl Parser {
                             if is_ctor(arg, "cat_pp_arg").is_some()
                                 && (is_ctor(res, "cat_measure").is_some() || is_adjective_cat(res))
                             {
+                                let body = if is_adjective_cat(res) {
+                                    let applied = Exp::App(
+                                        Box::new(Exp::App(
+                                            Box::new(e.item.sem().clone()),
+                                            Box::new(Exp::Var("__unr_y".into())),
+                                        )),
+                                        Box::new(Exp::Var("__unr_x".into())),
+                                    );
+                                    Exp::Arrow(Box::new(applied), Box::new(false_prop.clone()))
+                                } else {
+                                    true_term.clone()
+                                };
                                 let sem_rel = Exp::Lam(
                                     Patt::Var("__unr_y".into()),
-                                    Box::new(Exp::Lam(
-                                        Patt::Var("__unr_x".into()),
-                                        Box::new(true_term.clone()),
-                                    )),
+                                    Box::new(Exp::Lam(Patt::Var("__unr_x".into()), Box::new(body))),
                                 );
                                 let adj_to = Exp::InductiveCtor(
                                     cat_decl.clone(),
                                     "fwd".into(),
                                     vec![m_all.clone(), adj_cat.clone(), arg.clone()],
                                 );
-                                un_rel.push(Item::new(adj_to, sem_rel.clone()));
+                                un_rel.push(Item::from_parts(
+                                    adj_to,
+                                    sem_rel.clone(),
+                                    Combinator::Other,
+                                    Cost::from_sense_rank(4),
+                                ));
                                 let pp_rel = Exp::InductiveCtor(
                                     cat_decl.clone(),
                                     "fwd".into(),
                                     vec![m_all.clone(), pp_cat.clone(), arg.clone()],
                                 );
-                                un_rel.push(Item::new(pp_rel, sem_rel));
+                                un_rel.push(Item::from_parts(
+                                    pp_rel,
+                                    sem_rel,
+                                    Combinator::Other,
+                                    Cost::from_sense_rank(4),
+                                ));
                             }
                         }
                     }
@@ -2124,9 +2233,21 @@ impl Parser {
                 inductive_iri(&self.grammar.layer, "urn:eigenius:logic:False"),
             ) {
                 let pp_cat = Exp::InductiveCtor(cat_decl, "cat_pp".into(), Vec::new());
-                let false_prop = Exp::Const(false_iri, Vec::new());
-                let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
-                let sem = Exp::Lam(Patt::Var("__post_pp_x".into()), Box::new(true_term));
+                let adj_cat = predicative_adjective_cat(&self.grammar.layer);
+                let sem = adj_cat
+                    .as_ref()
+                    .and_then(|ac| {
+                        out.iter()
+                            .filter(|it| it.cat() == ac)
+                            .min_by_key(|it| it.cost())
+                            .map(|it| it.sem().clone())
+                    })
+                    .unwrap_or_else(|| {
+                        let false_prop = Exp::Const(false_iri, Vec::new());
+                        let true_term =
+                            Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                        Exp::Lam(Patt::Var("__post_pp_x".into()), Box::new(true_term))
+                    });
                 out.push(Item::from_parts(
                     pp_cat,
                     sem,
@@ -2404,6 +2525,23 @@ impl Parser {
                         && trimmed[..trimmed.len() - 1]
                             .chars()
                             .any(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+                    let base_entity_sem = if matches!(
+                        is_ctor(np_it.cat(), "cat_np"),
+                        Some([Exp::EigonClass(iri), _])
+                            if iri.as_str() == "urn:eigenius:lexicon:Entity"
+                    ) {
+                        np_it.sem().clone()
+                    } else if is_ctor(np_it.cat(), "cat_n").is_some() && np_it.sem() != &ent_cls {
+                        kind_of(np_it.sem().clone())
+                    } else {
+                        kind_of(ent_cls.clone())
+                    };
+                    let fallback_ent_cost = Cost::from_sense_rank(np_it.cost().sense_rank.max(8));
+                    let entity_sem_cost = if base_entity_sem == kind_of(ent_cls.clone()) {
+                        fallback_ent_cost
+                    } else {
+                        np_it.cost()
+                    };
                     if !out.iter().any(|it| {
                         matches!(
                             is_ctor(it.cat(), "cat_np"),
@@ -2418,9 +2556,9 @@ impl Parser {
                         );
                         out.push(Item::from_parts(
                             ent_np_cat,
-                            kind_of(ent_cls.clone()),
+                            base_entity_sem.clone(),
                             Combinator::Other,
-                            np_it.cost(),
+                            entity_sem_cost,
                         ));
                     }
                     if is_plural_acronym {
@@ -2431,9 +2569,9 @@ impl Parser {
                         );
                         out.push(Item::from_parts(
                             pl_np_cat,
-                            kind_of(ent_cls.clone()),
+                            base_entity_sem.clone(),
                             Combinator::Other,
-                            np_it.cost(),
+                            entity_sem_cost,
                         ));
                     }
                     if !out.iter().any(|it| is_ctor(it.cat(), "cat_n").is_some()) {
@@ -2446,7 +2584,7 @@ impl Parser {
                             n_cat,
                             ent_cls.clone(),
                             Combinator::Other,
-                            np_it.cost(),
+                            fallback_ent_cost,
                         ));
                         if is_plural_acronym {
                             let n_pl_cat = Exp::InductiveCtor(
@@ -2458,7 +2596,7 @@ impl Parser {
                                 n_pl_cat,
                                 ent_cls.clone(),
                                 Combinator::Other,
-                                np_it.cost(),
+                                fallback_ent_cost,
                             ));
                         }
                     }
@@ -2474,15 +2612,6 @@ impl Parser {
                             )
                         })
                     {
-                        let pname_sem = if matches!(
-                            is_ctor(np_it.cat(), "cat_np"),
-                            Some([Exp::EigonClass(iri), _])
-                                if iri.as_str() == "urn:eigenius:lexicon:Entity"
-                        ) {
-                            np_it.sem().clone()
-                        } else {
-                            kind_of(ent_cls)
-                        };
                         let pname_cat = Exp::InductiveCtor(
                             cat_decl,
                             "cat_np".into(),
@@ -2490,9 +2619,9 @@ impl Parser {
                         );
                         out.push(Item::from_parts(
                             pname_cat,
-                            pname_sem,
+                            base_entity_sem,
                             Combinator::Other,
-                            np_it.cost(),
+                            entity_sem_cost,
                         ));
                     }
                 }
@@ -3399,7 +3528,8 @@ impl Parser {
                         Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), sg]);
                     chart[i][i].push(Item::new(n_cat, ent_cls));
                     let false_prop = Exp::Const(false_iri, Vec::new());
-                    let true_term = Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                    let true_term =
+                        Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop.clone()));
                     let mod_sem = Exp::Lam(Patt::Var("__one_x".into()), Box::new(true_term));
                     chart[i][i].push(Item::new(
                         super::super::rules::combinators::cat_mod_cat(),

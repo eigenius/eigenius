@@ -43,8 +43,8 @@ rsync -av <this-machine>:~/src/eigenius/eigenius/experiments/uab/ \
 ## Branch state
 
 ```
-branch  uab-step5-document-model
-base    the cleaned root commit "Eigenius" (2026-10-18)
+branch  uab-step6-encoding-verification
+base    main (with uab-step5-document-model squash-merged)
 ```
 
 **The repository was REPLACED with a cleaned version on `2026-10-19`.** The old history — 345
@@ -73,11 +73,12 @@ It is outside the repo and therefore does not travel — copy it with the rest i
 matters to you. The local branch `pre-clean-history-2026-10-20` and tag `pre-clean-2026-10-20` point
 at the same thing while this working copy lives.
 
-**SUPERSEDED `2026-10-26`: the live store is `wordnet-umls-hpo-aligned-2026-10-26-basic`** (3.7 GB,
-seeded at `292dc5ab`, all three provenance counts reproduced). `wordnet-umls-hpo-aligned-2026-10-13-fa`
-and every other historical snapshot were DELETED that day to reclaim 456 GB; the raw reseed base
-`wordnet-umls-2026-10-26-basic` was kept so an alignment-only rebuild costs ~10 min instead of 53.
-Read the rest of this section as the record of why `-fa` died, not as instructions.
+**SUPERSEDED `2026-11-08`: the live store is `wordnet-umls-hpo-aligned-2026-11-07-systematic`**
+(reseeded via `scripts/reseed-chain.sh`, all three provenance counts reproduced and gated — `38,391`
+merge rows, `20,533` HPO resources, `864` equivalences). Earlier stores (`2026-10-26-basic`,
+`2026-10-13-fa`, and other historical snapshots) were superseded as bootstrap layers and WordNet verb
+frame / closed-class declarative entries evolved. Read the rest of this section as the record of why
+`-fa` died, not as instructions.
 
 The LLM-component removal edited four bootstrap ontologies (`core-ontology.json`,
 `program-ontology.json`, `program-traces.json`, `prov.esl`), and the repository cleaning moved them
@@ -128,17 +129,26 @@ them in the background.
 
 ## Where the six-step order stands
 
-The owner's order for survey §4 step 5. Steps 1–4 are done.
+The owner's order for survey §4 step 5. All six steps are done (`2026-11-10`).
 
 1. ~~Document model of the XIAP report~~ — done.
 2. ~~Close the OOV gaps~~ — done; `missing-lexeme` is **0** on both the page and all 427 claim spans.
 3. ~~Measure parse success and gaps~~ — done, and re-run per-kind over the 427 gold spans as the
    survey actually specifies.
-4. ~~Apply a CNL rewrite~~ — done. 325 units → **1,056 sentences**, and the result is **2×**:
-   source units fully covered go 19/298 (6.4%) → **37/275 (13.5%)**.
-5. **Iterate to close the encoding gap** — NEXT, and read the warning below before planning it.
-6. **Verify each encoding via `verbalize`** against the original prose. `cnl-map.tsv` maps every
-   source unit to its output line range; step 6 needs it, which is another reason not to lose it.
+4. ~~Apply a CNL rewrite~~ — done. 325 units → **1,056 sentences** (`275` active prose units).
+5. ~~Iterate to close the encoding gap~~ — done (`2026-11-08`, store
+   `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 / 864`). **1,056 / 1,056
+   sentences parsed (100.0%, `grammar-gap 0`, `missing-lexeme 0`)**, isolated-sentence split
+   `encoded 19`, `ambiguous 783`, `open 254`, and **89 / 89** on the core-en construction battery.
+6. ~~Verify each encoding via `verbalize` against the original prose~~ — done (`2026-11-10`, same
+   store). Document-level discourse resolution (`resolve_document_discourse_close_out` with
+   `EIGENIUS_WRN_UNITS_PER_LINE=1` and `EIGENIUS_VERBALIZE_OUT=<tsv>`) closes all **254** isolated
+   `Open` units across all **1,056** sentences (`open 0`, `gap 0`; `387` units with resolved
+   discourse bindings, `20` 1-to-1 line alignments synced back into `c001.py`–`c012.py`), and
+   `verbalize` (`Register::Surface`) renders all `1,056` top readings with **0** bracketed fallback
+   spans (`540 → 0`), **0** `not (⟦False⟧)` artifacts (`150 → 0`), and **0** unfreshened
+   `anaphor_of` terms (`46 → 0`). See [uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md) for the
+   full Step 6 summary and the Stage-1 reading-ranker boundary over `Ambiguous` pools.
 
 ## What step 5 should know before it starts
 

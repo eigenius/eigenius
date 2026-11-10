@@ -363,10 +363,7 @@ impl Parser {
                     u.item.sem() == o.item.sem()
                         && u.holes.len() == o.holes.len()
                         && u.holes.iter().zip(&o.holes).all(|(a, b)| {
-                            a.var == b.var
-                                && a.ty == b.ty
-                                && a.kind == b.kind
-                                && a.count == b.count
+                            a.var == b.var && a.ty == b.ty && a.kind == b.kind && a.count == b.count
                         })
                 });
                 if !dup {

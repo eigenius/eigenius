@@ -5456,23 +5456,43 @@ fn resolve_document_discourse_close_out() {
             let binds: Vec<String> = res
                 .bindings
                 .iter()
-                .map(|b| format!("{} -> {} «{}»", b.hole, b.antecedent.key(), b.antecedent.surface()))
+                .map(|b| {
+                    format!(
+                        "{} -> {} «{}»",
+                        b.hole,
+                        b.antecedent.key(),
+                        b.antecedent.surface()
+                    )
+                })
                 .collect();
             eprintln!("           resolved: {}", binds.join("; "));
         }
     }
     if let Ok(vb_path) = std::env::var("EIGENIUS_VERBALIZE_OUT") {
         use std::io::Write;
-        let mut f = std::fs::File::create(&vb_path)
-            .unwrap_or_else(|e| panic!("create {vb_path}: {e}"));
-        writeln!(f, "unit\tstatus\tpool_len\tcnl_sentence\ttop_gloss\ttop_sem\tbindings")
-            .expect("write header");
+        let mut f =
+            std::fs::File::create(&vb_path).unwrap_or_else(|e| panic!("create {vb_path}: {e}"));
+        writeln!(
+            f,
+            "unit\tstatus\tpool_len\tcnl_sentence\ttop_gloss\ttop_sem\tbindings"
+        )
+        .expect("write header");
+        let mut prior_names: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
         for (i, (s, r)) in sentences.iter().zip(&resolutions).enumerate() {
+            let mut vnames = unit_sense_names(s, &index, &lem, &head);
+            for (k, v) in &prior_names {
+                vnames.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            for (k, v) in unit_sense_names(s, &index, &lem, &head) {
+                prior_names.entry(k).or_insert(v);
+            }
+            let vb = Vb::surface(&vnames, &head);
             let (status, pool_len, top_gloss, top_sem) = match &r.outcome {
                 SentenceOutcome::Encoded(item) => (
                     "ENCODED",
                     1usize,
-                    index.reading_gloss(s, &lem, item),
+                    verbalize(item.sem(), &vb),
                     pretty_term(item.sem()),
                 ),
                 SentenceOutcome::Ambiguous(pool) => {
@@ -5480,14 +5500,14 @@ fn resolve_document_discourse_close_out() {
                     (
                         "AMBIGUOUS",
                         pool.len(),
-                        index.reading_gloss(s, &lem, first),
+                        verbalize(first.sem(), &vb),
                         pretty_term(first.sem()),
                     )
                 }
                 SentenceOutcome::Open(o) => (
                     "OPEN",
                     1usize,
-                    index.reading_gloss(s, &lem, &o.item),
+                    verbalize(o.item.sem(), &vb),
                     pretty_term(o.item.sem()),
                 ),
                 SentenceOutcome::Gap => ("GAP", 0usize, String::new(), String::new()),
@@ -5557,13 +5577,19 @@ fn resolve_document_discourse_close_out() {
         && selection_arm == "none"
     {
         // The deterministic floor (no kind classifier: unmarked claims land Assertion,
-        // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
-        // must HOLD exactly).
+        // unreferable — claim antecedents contribute nothing here).
+        // Re-baselined 2026-11-10 on store `wordnet-umls-hpo-aligned-2026-11-07-systematic`
+        // (38,391 / 20,533 / 864) from the 2026-08-11 `(12, 35, 15)` floor: systematic WordNet
+        // verb-frame and morphology expansion widened single-reading pools into Ambiguous under
+        // `selection_arm == "none"`, while counted-demonstrative, quantifier-witness, Σ-head
+        // subsumption, and propositional-equality (`Exp::Id`) resolution closed 10 of the 15
+        // documented deferrals (`open 15 -> 5`: only claim-referent units 19, 45, 60 and
+        // verb/adjective-to-noun bridgings 8, 23 remain Open without a kind classifier).
         assert_eq!(
             (enc, amb, open_n),
-            (12, 35, 15),
-            "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
-             ambiguous 35, open 15)"
+            (0, 57, 5),
+            "discourse close-out drifted from the pinned 2026-11-10 baseline (encoded 0, \
+             ambiguous 57, open 5)"
         );
     }
     if page_path == WRN_PAGE_CNL
