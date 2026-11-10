@@ -1469,21 +1469,37 @@ impl Parser {
         let cands = self.candidate_lemmas(surface, lemmatizer);
         let has_verb_item = |items: &[Item]| items.iter().any(|it| is_verbal_cat(it.cat()));
         // Productive British/American verbalization & denominal verb inflections:
-        // (a) If a British-normalized or inflected verb surface (`summarise`, `summarised`, `labelled`,
-        //     `labelling`, `matched`) had its verb senses crowded out by nominal/adjectival senses in
-        //     `apply_sense_cap`, recover the top verb sense from its candidate lemmas.
+        // (a) If a British-normalized, base-form, or inflected verb surface (`carry`, `summarise`,
+        //     `summarised`, `labelled`, `labelling`, `matched`) had its verb senses crowded out by
+        //     nominal/adjectival senses in `apply_sense_cap`, recover the top verb sense from its
+        //     candidate lemmas.
+        let surface_has_wn_verb = self
+            .lex
+            .entries_for(s_lc)
+            .iter()
+            .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "v"));
         if !has_verb_item(out)
-            && (super::british_to_american(s_lc).is_some()
+            && (surface_has_wn_verb
+                || super::british_to_american(s_lc).is_some()
                 || s_lc.ends_with("ed")
                 || s_lc.ends_with("ing"))
         {
             for c in &cands {
-                let mut verb_sense: Option<String> = None;
-                for e in self.scoped(self.lex.entries_for(c), scope) {
-                    if is_wordnet_sense_of_pos(e.sense.as_deref(), "v") {
-                        let s = e.sense.clone().unwrap_or_default();
-                        if verb_sense.as_deref().is_none_or(|vs| vs == s) {
-                            verb_sense = Some(s);
+                if crate::dcg::regular_plural_stem(s_lc).as_deref() == Some(c.as_str()) {
+                    continue;
+                }
+                let wn_verbs: Vec<LexEntry> = self
+                    .scoped(self.lex.entries_for(c), scope)
+                    .into_iter()
+                    .filter(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "v"))
+                    .collect();
+                if let Some(best_sense) = wn_verbs
+                    .iter()
+                    .min_by_key(|e| e.item.cost().sense_rank)
+                    .and_then(|e| e.sense.clone())
+                {
+                    for e in wn_verbs {
+                        if e.sense.as_deref() == Some(best_sense.as_str()) {
                             out.push(if s_lc.ends_with("ed") {
                                 with_past_verb_num(&e.item)
                             } else {

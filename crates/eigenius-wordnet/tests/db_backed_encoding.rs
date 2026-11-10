@@ -5461,6 +5461,68 @@ fn resolve_document_discourse_close_out() {
             eprintln!("           resolved: {}", binds.join("; "));
         }
     }
+    if let Ok(vb_path) = std::env::var("EIGENIUS_VERBALIZE_OUT") {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&vb_path)
+            .unwrap_or_else(|e| panic!("create {vb_path}: {e}"));
+        writeln!(f, "unit\tstatus\tpool_len\tcnl_sentence\ttop_gloss\ttop_sem\tbindings")
+            .expect("write header");
+        for (i, (s, r)) in sentences.iter().zip(&resolutions).enumerate() {
+            let (status, pool_len, top_gloss, top_sem) = match &r.outcome {
+                SentenceOutcome::Encoded(item) => (
+                    "ENCODED",
+                    1usize,
+                    index.reading_gloss(s, &lem, item),
+                    pretty_term(item.sem()),
+                ),
+                SentenceOutcome::Ambiguous(pool) => {
+                    let first = pool.first().expect("non-empty pool");
+                    (
+                        "AMBIGUOUS",
+                        pool.len(),
+                        index.reading_gloss(s, &lem, first),
+                        pretty_term(first.sem()),
+                    )
+                }
+                SentenceOutcome::Open(o) => (
+                    "OPEN",
+                    1usize,
+                    index.reading_gloss(s, &lem, &o.item),
+                    pretty_term(o.item.sem()),
+                ),
+                SentenceOutcome::Gap => ("GAP", 0usize, String::new(), String::new()),
+            };
+            let binds = r
+                .resolution
+                .as_ref()
+                .map(|res| {
+                    res.bindings
+                        .iter()
+                        .map(|b| {
+                            format!(
+                                "{} -> {} «{}»",
+                                b.hole,
+                                b.antecedent.key(),
+                                b.antecedent.surface()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .unwrap_or_default();
+            let clean = |txt: &str| txt.replace(['\t', '\n', '\r'], " ");
+            writeln!(
+                f,
+                "{i}\t{status}\t{pool_len}\t{}\t{}\t{}\t{}",
+                clean(s.trim()),
+                clean(&top_gloss),
+                clean(&top_sem),
+                clean(&binds)
+            )
+            .expect("write row");
+        }
+        eprintln!("verbalized {} unit(s) → {vb_path}", sentences.len());
+    }
     eprintln!(
         "=== DISCOURSE ({proposer_arm} proposer, {selection_arm} ranker, {:.0}s): encoded {enc}, ambiguous \
          {amb}, open {open_n}, gap {gap} over {} units ===",

@@ -224,7 +224,8 @@ impl Parser {
         let mut ranked: Vec<Vec<(Candidate, Ante)>> = Vec::with_capacity(open.holes.len());
         let mut audits: Vec<(Option<String>, Option<f64>)> = Vec::with_capacity(open.holes.len());
         for hole in &open.holes {
-            let ty_key = pretty_term(&hole.ty);
+            let (base_ty, _) = peel_sig_base(&hole.ty);
+            let ty_key = pretty_term(base_ty);
             let count_key = hole.count.as_ref().map(pretty_term);
             let sent_key = (hole.var.clone(), ty_key.clone(), count_key.clone());
             let entry = if let Some(cached) = sent_cache.get(&sent_key) {
@@ -241,7 +242,7 @@ impl Parser {
                             .entry(c_key.clone())
                             .or_insert_with(|| self.antecedent_ante(c))
                             .clone()?;
-                        let veto_key = (ty_key.clone(), count_key.clone(), c_key);
+                        let veto_key = (ty_key.clone(), count_key.clone(), ante_veto_key(c));
                         let accepts = *doc_cache
                             .veto
                             .entry(veto_key)
@@ -309,9 +310,10 @@ impl Parser {
         };
         if try_readback_val(0, &ty_val).is_err() {
             return false;
-        }
+        };
+        let base_ante = peel_ante_kind_base(ante);
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
-        check(&mut ctx, ante, &ty_val).is_ok()
+        check(&mut ctx, &base_ante, &ty_val).is_ok()
     }
 
     /// Depth-first search over per-hole ranked antecedents: assign one antecedent per hole, then
@@ -443,6 +445,22 @@ impl Parser {
         // synthesized join of `sentences` would be a different string than the recordings key
         // on, and every replay would MISS); `sentences` is its segmentation, in order.
         let mut candidates: Vec<Candidate> = Vec::new();
+        if sentences
+            .first()
+            .is_some_and(|first| first.trim().to_lowercase().starts_with("this document "))
+        {
+            let doc_entries = self.scoped(self.lex.entries_for("document"), scope);
+            if !doc_entries.is_empty() {
+                let empty = BTreeMap::new();
+                let vb = Vb::surface(&empty, &self.grammar.layer);
+                let mut seen = BTreeSet::new();
+                for e in doc_entries {
+                    if let Some([cls, _]) = super::super::category::is_ctor(e.item.cat(), "cat_n") {
+                        self.emit_kind_candidate(cls, &vb, &mut candidates, &mut seen);
+                    }
+                }
+            }
+        }
         let mut prior: Vec<PriorSelection> = Vec::new();
         // The same-kind claim run (D68 §5): consecutively-landed claims sharing a discourse-kind
         // class, offered as the plural SET antecedent. Any sentence that lands nothing (or a
@@ -516,7 +534,10 @@ impl Parser {
                         selection = Some(sel);
                         SentenceOutcome::Encoded(item)
                     }
-                    None => SentenceOutcome::Ambiguous(pool),
+                    None => {
+                        resolution = audits.into_iter().flatten().next();
+                        SentenceOutcome::Ambiguous(pool)
+                    }
                 }
             } else if let Some(o) = open.first() {
                 SentenceOutcome::Open(o.clone())
@@ -554,12 +575,28 @@ impl Parser {
                     run_kind = None;
                 }
             }
-            let harvest = match &outcome {
-                SentenceOutcome::Encoded(item) => Some(item.sem()),
-                SentenceOutcome::Ambiguous(items) => items.first().map(Item::sem),
-                _ => None,
+            let harvest: Vec<&Exp> = match &outcome {
+                SentenceOutcome::Encoded(item) => vec![item.sem()],
+                SentenceOutcome::Ambiguous(items) => items
+                    .iter()
+                    .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                    .map(Item::sem)
+                    .collect(),
+                SentenceOutcome::Open(_) => open
+                    .iter()
+                    .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                    .map(|o| peel_hole_lams(o.item.sem(), o.holes.len()))
+                    .collect(),
+                SentenceOutcome::Gap => Vec::new(),
             };
-            if let Some(sem) = harvest {
+            let hole_tys: Vec<(&Exp, Option<&Exp>)> = open
+                .iter()
+                .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                .flat_map(|o| &o.holes)
+                .filter(|h| h.kind == HoleKind::EntityRef && !is_entity_top(&h.ty))
+                .map(|h| (&h.ty, h.count.as_ref()))
+                .collect();
+            if !harvest.is_empty() || !hole_tys.is_empty() || landed.is_some() {
                 let mut fresh = Vec::new();
                 // This sentence's landed claim leads (it IS the sentence), then the grown
                 // same-kind set, then the sem's own referents.
@@ -583,7 +620,7 @@ impl Parser {
                         });
                     }
                 }
-                fresh.extend(self.discourse_candidates(s, lemmatizer, sem));
+                fresh.extend(self.discourse_candidates_many(s, lemmatizer, &harvest, &hole_tys));
                 // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
                 // front (recency is the salience signal); its older entry is dropped.
                 let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
@@ -600,27 +637,45 @@ impl Parser {
         out
     }
 
-    /// The discourse-antecedent candidates one resolved sem contributes (D64 §4, plan §2.3): every
-    /// `EigonResource` — a committed named entity — and every CLOSED `ontology:kind_of(…)` subterm
-    /// — a kind this sentence makes discourse-referent ("…genome-scale shRNA **libraries**" →
-    /// "These libraries…") — in first-mention order, deduplicated. Surfaces are READABLE: an
-    /// individual's layer label ([`resource_label`], falling back to the IRI local name), a kind's
-    /// verbalized gloss over this sentence's own sense names. A `kind_of` subterm mentioning a
-    /// variable bound outside it is skipped — it is not a self-standing referent (and could never
-    /// re-gate closed; the closedness walk is a pre-filter, the empty-Γ re-gate stays the
-    /// authority). Landed CLAIMS as antecedents ("These findings…") are pending Stage 3's
-    /// incremental landing — a unit whose referent is a prior claim stays honestly `Open`.
-    fn discourse_candidates(
+    /// The discourse-antecedent candidates a sentence's resolved/surviving sems contribute (D64 §4,
+    /// plan §2.3): every `EigonResource` — a committed named entity — and every CLOSED nominal kind
+    /// subterm in first-mention order, deduplicated across `sems` so the top-ranked reading's
+    /// referents lead while alternative WordNet senses from the ambiguous pool remain available.
+    fn discourse_candidates_many(
         &self,
         sentence: &str,
         lemmatizer: &dyn Lemmatizer,
-        sem: &Exp,
+        sems: &[&Exp],
+        hole_tys: &[(&Exp, Option<&Exp>)],
     ) -> Vec<Candidate> {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
         let vb = Vb::surface(&names, &self.grammar.layer);
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
-        self.walk_candidates(sem, &vb, &mut out, &mut seen);
+        for sem in sems {
+            self.walk_candidates(sem, &vb, &mut out, &mut seen);
+        }
+        for &(ty, count) in hole_tys {
+            if let Some(q) = count {
+                self.emit_counted_candidate(ty, q, &vb, &mut out, &mut seen);
+            } else {
+                self.emit_kind_candidate(ty, &vb, &mut out, &mut seen);
+            }
+            self.walk_candidates(ty, &vb, &mut out, &mut seen);
+        }
+        for tok in self.tokenize(sentence) {
+            for lemma in self.candidate_lemmas(tok.surface(), lemmatizer) {
+                for nom in derived_nominal_forms(&lemma) {
+                    for e in self.scoped(self.lex.entries_for(&nom), None) {
+                        if let Some([cls, _]) =
+                            super::super::category::is_ctor(e.item.cat(), "cat_n")
+                        {
+                            self.emit_kind_candidate(cls, &vb, &mut out, &mut seen);
+                        }
+                    }
+                }
+            }
+        }
         out
     }
 
@@ -631,27 +686,29 @@ impl Parser {
         out: &mut Vec<Candidate>,
         seen: &mut BTreeSet<String>,
     ) {
-        let target = if closed_under(k, &mut Vec::new()) {
-            k
-        } else {
-            let (base, depth) = peel_sig_base(k);
-            if depth > 0 && closed_under(base, &mut Vec::new()) {
-                base
-            } else {
+        let kind_of = Iri::parse("urn:eigenius:ontology:kind_of").expect("valid IRI");
+        let mut push_target = |target: &Exp| {
+            if !matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) || is_entity_top(target) {
                 return;
             }
+            let term = Exp::App(
+                Box::new(Exp::EigonAxiom(kind_of.clone())),
+                Box::new(target.clone()),
+            );
+            let key = format!("k:{}", pretty_term(&term));
+            if seen.insert(key) {
+                out.push(Candidate::Kind {
+                    surface: verbalize(&term, vb),
+                    term,
+                });
+            }
         };
-        if !matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) || is_entity_top(target) {
-            return;
+        if closed_under(k, &mut Vec::new()) {
+            push_target(k);
         }
-        let kind_of = Iri::parse("urn:eigenius:ontology:kind_of").expect("valid IRI");
-        let term = Exp::App(Box::new(Exp::EigonAxiom(kind_of)), Box::new(target.clone()));
-        let cand = Candidate::Kind {
-            surface: verbalize(&term, vb),
-            term,
-        };
-        if seen.insert(cand.key()) {
-            out.push(cand);
+        let (base, depth) = peel_sig_base(k);
+        if depth > 0 && closed_under(base, &mut Vec::new()) {
+            push_target(base);
         }
     }
 
@@ -664,31 +721,32 @@ impl Parser {
         seen: &mut BTreeSet<String>,
     ) {
         if closed_under(q, &mut Vec::new()) {
-            let target = if closed_under(k, &mut Vec::new()) {
-                Some(k)
-            } else {
-                let (base, depth) = peel_sig_base(k);
-                (depth > 0 && closed_under(base, &mut Vec::new())).then_some(base)
-            };
-            if let Some(target) = target {
-                if matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) && !is_entity_top(target) {
-                    let the_count =
-                        Iri::parse("urn:eigenius:ontology:the_count").expect("valid IRI");
-                    let term = Exp::App(
-                        Box::new(Exp::App(
-                            Box::new(Exp::EigonAxiom(the_count)),
-                            Box::new(target.clone()),
-                        )),
-                        Box::new(q.clone()),
-                    );
-                    let cand = Candidate::Kind {
+            let the_count = Iri::parse("urn:eigenius:ontology:the_count").expect("valid IRI");
+            let mut push_counted = |target: &Exp| {
+                if !matches!(target, Exp::Sig(..) | Exp::EigonClass(..)) || is_entity_top(target) {
+                    return;
+                }
+                let term = Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(Exp::EigonAxiom(the_count.clone())),
+                        Box::new(target.clone()),
+                    )),
+                    Box::new(q.clone()),
+                );
+                let key = format!("k:{}", pretty_term(&term));
+                if seen.insert(key) {
+                    out.push(Candidate::Kind {
                         surface: verbalize(&term, vb),
                         term,
-                    };
-                    if seen.insert(cand.key()) {
-                        out.push(cand);
-                    }
+                    });
                 }
+            };
+            if closed_under(k, &mut Vec::new()) {
+                push_counted(k);
+            }
+            let (base, depth) = peel_sig_base(k);
+            if depth > 0 && closed_under(base, &mut Vec::new()) {
+                push_counted(base);
             }
         }
         self.emit_kind_candidate(k, vb, out, seen);
@@ -726,7 +784,10 @@ impl Parser {
                 }
                 if matches!(
                     f0.as_ref(),
-                    Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:core:is_a"
+                    Exp::EigonAxiom(i)
+                        if i.as_str() == "urn:eigenius:ontology:is_a"
+                            || i.as_str() == "urn:eigenius:core:is_a"
+                            || i.as_str() == "urn:eigenius:ontology:compound_kind"
                 ) {
                     self.emit_kind_candidate(k, vb, out, seen);
                 }
@@ -1077,6 +1138,16 @@ fn peel_sig_base(mut ty: &Exp) -> (&Exp, usize) {
     (ty, depth)
 }
 
+fn peel_hole_lams(mut e: &Exp, count: usize) -> &Exp {
+    for _ in 0..count {
+        match e {
+            Exp::Lam(_, body) => e = body,
+            _ => break,
+        }
+    }
+    e
+}
+
 fn strip_fst_of_var(e: &Exp, target: &str) -> Exp {
     let go = |x: &Exp| strip_fst_of_var(x, target);
     match e {
@@ -1283,5 +1354,77 @@ impl<T: Proposer + ?Sized> Proposer for Box<T> {
 impl<T: Proposer + ?Sized> Proposer for std::sync::Arc<T> {
     fn propose(&self, ctx: &ProposeCtx) -> Proposal {
         (**self).propose(ctx)
+    }
+}
+
+fn derived_nominal_forms(lemma: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(stem) = lemma
+        .strip_suffix("ise")
+        .or_else(|| lemma.strip_suffix("ize"))
+    {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}isation"));
+            out.push(format!("{stem}ization"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ate") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ation"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ical") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ity"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("able") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ability"));
+        }
+    }
+    if let Some(stem) = lemma.strip_suffix("ible") {
+        if stem.len() >= 3 {
+            out.push(format!("{stem}ibility"));
+        }
+    }
+    out
+}
+
+fn peel_ante_kind_base(e: &Exp) -> Exp {
+    if let Exp::App(f, k) = e {
+        if matches!(
+            f.as_ref(),
+            Exp::EigonAxiom(i)
+                if i.as_str() == "urn:eigenius:ontology:kind_of"
+                    || i.as_str() == "urn:eigenius:ontology:the"
+        ) {
+            let (base, depth) = peel_sig_base(k);
+            if depth > 0 {
+                return Exp::App(f.clone(), Box::new(base.clone()));
+            }
+        }
+        if let Exp::App(f0, k0) = f.as_ref() {
+            if matches!(
+                f0.as_ref(),
+                Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:the_count"
+            ) {
+                let (base, depth) = peel_sig_base(k0);
+                if depth > 0 {
+                    return Exp::App(
+                        Box::new(Exp::App(f0.clone(), Box::new(base.clone()))),
+                        k.clone(),
+                    );
+                }
+            }
+        }
+    }
+    e.clone()
+}
+
+fn ante_veto_key(c: &Candidate) -> String {
+    match c {
+        Candidate::Kind { term, .. } => format!("k:{}", pretty_term(&peel_ante_kind_base(term))),
+        other => other.key(),
     }
 }
