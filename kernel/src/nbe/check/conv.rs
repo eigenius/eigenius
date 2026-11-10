@@ -19,7 +19,7 @@
 
 use super::{check_infer, CheckCtx, CheckError};
 use crate::nbe::env::gen_val;
-use crate::nbe::readback::readback_val;
+use crate::nbe::readback::try_readback_val;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
@@ -77,8 +77,8 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), CheckError> {
         }
         _ => {}
     }
-    let e1 = readback_val(level, v1);
-    let e2 = readback_val(level, v2);
+    let e1 = try_readback_val(level, v1)?;
+    let e2 = try_readback_val(level, v2)?;
     if e1 == e2 {
         Ok(())
     } else {
@@ -222,7 +222,7 @@ pub(super) fn infer_dependent_sort(
         other => {
             return Err(CheckError::ExpectedSort(format!(
                 "binder domain is not a sort: {:?}",
-                readback_val(ctx.rho.len(), &other)
+                try_readback_val(ctx.rho.len(), &other)?
             )));
         }
     };
@@ -235,7 +235,7 @@ pub(super) fn infer_dependent_sort(
         other => {
             return Err(CheckError::ExpectedSort(format!(
                 "binder codomain is not a sort: {:?}",
-                readback_val(inner.rho.len(), &other)
+                try_readback_val(inner.rho.len(), &other)?
             )));
         }
     };
@@ -264,7 +264,7 @@ pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<b
     if let Some(decided) = is_propositional_type_structural(typ) {
         return Ok(decided);
     }
-    let typ_exp = readback_val(ctx.rho.len(), typ);
+    let typ_exp = try_readback_val(ctx.rho.len(), typ)?;
     let typ_sort = check_infer(ctx, &typ_exp)?;
     Ok(matches!(&typ_sort, Val::Sort(l) if l.is_nat(0)))
 }

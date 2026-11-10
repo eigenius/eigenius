@@ -5113,7 +5113,7 @@ fn resolve_document_discourse_close_out() {
     };
     let lem = morphy();
     let aug = page_augmentation(&head, &page, &lem);
-    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let index = build_index_over(&head, Some(&aug)).with_document(page_units(&page), 0);
 
     // The recency proposer: every in-scope candidate, most-recent-first (the order
     // `resolve_document` assembles). The kernel's restrictor veto is the whole filter — this is
@@ -5315,7 +5315,7 @@ fn resolve_document_discourse_close_out() {
     // lands at EIGENIUS_SELECTIONS; the others at EIGENIUS_SELECTIONS_OUT.
     let selection_recorder = ranker.map(eigenius_kernel::dcg::RecordingReadingRanker::new);
 
-    let sentences: Vec<String> = segment_sentences(&page)
+    let sentences: Vec<String> = page_units(&page)
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect();
@@ -5417,7 +5417,7 @@ fn resolve_document_discourse_close_out() {
             SentenceOutcome::Encoded(item) => {
                 enc += 1;
                 eprintln!("[unit {i:>2}] ENCODED{mark} «{}»", s.trim());
-                if is_dem(s) {
+                if is_dem(s) || r.resolution.is_some() {
                     eprintln!("           sk={}", erase_senses(&pretty_term(item.sem())));
                 }
             }
@@ -5432,11 +5432,33 @@ fn resolve_document_discourse_close_out() {
                     o.holes.len(),
                     s.trim()
                 );
+                for h in &o.holes {
+                    let cnt = h
+                        .count
+                        .as_ref()
+                        .map(|q| format!(" [count={}]", pretty_term(q)))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "           hole {}: {:?} : {}{}",
+                        h.var,
+                        h.kind,
+                        pretty_term(&h.ty),
+                        cnt
+                    );
+                }
             }
             SentenceOutcome::Gap => {
                 gap += 1;
                 eprintln!("[unit {i:>2}] GAP{mark} «{}»", s.trim());
             }
+        }
+        if let Some(res) = &r.resolution {
+            let binds: Vec<String> = res
+                .bindings
+                .iter()
+                .map(|b| format!("{} -> {} «{}»", b.hole, b.antecedent.key(), b.antecedent.surface()))
+                .collect();
+            eprintln!("           resolved: {}", binds.join("; "));
         }
     }
     eprintln!(
@@ -5467,7 +5489,11 @@ fn resolve_document_discourse_close_out() {
     // in the loop the ambiguous pools collapse into Encoded by design, so the tuple necessarily
     // differs — asserting it there would be asserting the ranker's draw, which the sweep's
     // selection-accuracy gate is what measures.
-    if proposer_arm == "recency" && kinds_arm == "none" && selection_arm == "none" {
+    if page_path == WRN_PAGE_CNL
+        && proposer_arm == "recency"
+        && kinds_arm == "none"
+        && selection_arm == "none"
+    {
         // The deterministic floor (no kind classifier: unmarked claims land Assertion,
         // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
         // must HOLD exactly).
@@ -5478,7 +5504,11 @@ fn resolve_document_discourse_close_out() {
              ambiguous 35, open 15)"
         );
     }
-    if proposer_arm == "recency" && kinds_arm == "replay" && selection_arm == "none" {
+    if page_path == WRN_PAGE_CNL
+        && proposer_arm == "recency"
+        && kinds_arm == "replay"
+        && selection_arm == "none"
+    {
         // The D68 close-out baseline (2026-08-12, kinds draw
         // experiments/parsing/kinds/2026-08-12-reference.json): ALL FIVE claim-referent units
         // close — 19/20 «These findings show…», 45 «These classifications…», 49 «These
@@ -5675,7 +5705,7 @@ fn probe_claim_unit_restrictors() {
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
     let aug = page_augmentation(&head, &page, &lem);
-    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let index = build_index_over(&head, Some(&aug)).with_document(page_units(&page), 0);
     let needles = [
         "These findings show that WRN is a synthetic-lethal",
         "These findings show that WRN is a promising drug",
