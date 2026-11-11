@@ -50,7 +50,7 @@ pub struct DerivedClaimLander<'a> {
     classifier: &'a dyn KindClassifier,
     /// Constructor argument names for the D47 codec, read from the chain this lander's claims
     /// will be committed to (D85 §5 step 4). A claim's proposition is encoded here.
-    codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+    codec: std::cell::RefCell<eigenius_kernel::program::eigentt_type_mirror::CodecNames>,
     landed: std::cell::RefCell<Vec<GradedClaim>>,
 }
 
@@ -71,7 +71,7 @@ impl<'a> DerivedClaimLander<'a> {
             emission_ns: None,
             source_label: None,
             classifier,
-            codec,
+            codec: std::cell::RefCell::new(codec),
             landed: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -103,6 +103,12 @@ impl<'a> DerivedClaimLander<'a> {
         self
     }
 
+    /// Set the `prov:timestamp` carried by each landed claim's `DeclarationTrace`.
+    pub fn with_timestamp(mut self, timestamp: &str) -> Self {
+        self.timestamp = timestamp.to_string();
+        self
+    }
+
     /// The accumulated claim clusters, in landing order (drains the lander).
     pub fn take_landed(&self) -> Vec<GradedClaim> {
         self.landed.take()
@@ -110,6 +116,15 @@ impl<'a> DerivedClaimLander<'a> {
 }
 
 impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
+    fn set_layer(&self, layer: &std::sync::Arc<eigenius_kernel::layer::Layer>) {
+        let updated = self
+            .codec
+            .borrow()
+            .clone()
+            .with_typing_layer(std::sync::Arc::clone(layer));
+        *self.codec.borrow_mut() = updated;
+    }
+
     fn land(
         &self,
         ordinal: usize,
@@ -130,6 +145,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
             "eigenius-encoding lander: DCG parse (D63) of {}, sentence {ordinal} «{sentence}»",
             self.source_label.as_deref().unwrap_or(&self.doc_id)
         );
+        let codec_ref = self.codec.borrow();
         let claim = match &self.emission_ns {
             // The emitter's identity: `{ns}:claim_{n}` / `{ns}:trace_{n}`, 1-based. Built through
             // the SAME `cluster()` constructor the trait path uses, so the shape is identical and
@@ -143,7 +159,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     &self.declared_by,
                     &self.timestamp,
                     &kinds,
-                    &self.codec,
+                    &codec_ref,
                 )
                 .ok()?;
                 let claim_iri = claim.id().expect("cluster sets the claim id").clone();
@@ -163,7 +179,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                         provenance: &provenance,
                         kind_classes: &kinds,
                     },
-                    &self.codec,
+                    &codec_ref,
                 )
                 .ok()?, // un-gradable ⇒ nothing lands (fail closed, run breaks)
         };

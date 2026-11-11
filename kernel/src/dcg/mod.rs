@@ -87,9 +87,9 @@ pub use abbrev::{
 #[cfg(feature = "use-llm")]
 pub use augment::AnthropicCategoryProposer;
 pub use augment::{
-    augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer, ExpectedCat,
-    Gap, LexicalBinding, LexiconAugmentation, NominalCategoryProposer, Provenance,
-    ResolutionMethod,
+    augment_document_only, augment_full_glossary, augment_lexicon_backed, AugmentOptions,
+    CategoryProposer, ExpectedCat, Gap, LexicalBinding, LexiconAugmentation,
+    NominalCategoryProposer, Provenance, ResolutionMethod,
 };
 pub use category::{
     cat_subsumes, common_super, denote_cat, feat_meets, is_ctor, subst_cat, type_eq, unify_cat,
@@ -128,9 +128,9 @@ pub use proposer_record::{
 };
 pub use quantity::{ProseUnits, Quantity, UnitReading};
 pub use reading_ranker::{
-    decision_questions, DecisionQuestions, DecisionReadingRanker, DocumentContext,
-    LiveReadingRanker, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
-    ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+    decision_questions, CostFirstReadingRanker, DecisionQuestions, DecisionReadingRanker,
+    DocumentContext, LiveReadingRanker, PinReadingRanker, PriorSelection, ReadingCandidate,
+    ReadingRanker, ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
 };
 #[cfg(feature = "use-llm")]
 pub use reading_ranker::{

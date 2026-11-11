@@ -78,7 +78,23 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
     // did not encode (D67 §5).
     let mut parsed: Vec<ParsedSentence> = Vec::new();
     let mut cuts: Vec<CutSentence> = Vec::new();
-    let cut = |cuts: &mut Vec<CutSentence>, n: usize, se_text: &str, reason: CutReason| {
+    let mut search_from = 0usize;
+    let mut next_span = |se_text: &str| -> (usize, usize) {
+        if let Some(rel) = inputs.doc.get(search_from..).and_then(|tail| tail.find(se_text)) {
+            let start = search_from + rel;
+            let end = start + se_text.len();
+            search_from = end;
+            (start, end)
+        } else {
+            let start = inputs.doc.find(se_text).unwrap_or(0);
+            (start, start + se_text.len())
+        }
+    };
+    let cut = |cuts: &mut Vec<CutSentence>,
+               n: usize,
+               se_text: &str,
+               span: (usize, usize),
+               reason: CutReason| {
         let label = match &reason {
             CutReason::Ambiguous { readings } => format!("ambiguous ({readings} readings)"),
             CutReason::Unresolved { holes } => format!("unresolved ({holes} hole(s))"),
@@ -86,17 +102,17 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
             CutReason::NoParse { .. } => "no parse (grammar)".to_string(),
         };
         eprintln!("  [{n}] CUT — {label} — {}", se_text.trim());
-        let start = inputs.doc.find(se_text).unwrap_or(0);
         cuts.push(CutSentence {
             ordinal: n,
             text: se_text.to_string(),
-            span: (start, start + se_text.len()),
+            span,
             reason,
         });
     };
     for (i, se) in inputs.encoding.sentences.iter().enumerate() {
         let n = i + 1;
         let text = se.text.trim();
+        let span = next_span(&se.text);
         let item = match &se.outcome {
             SentenceOutcome::Encoded(item) => item,
             SentenceOutcome::Ambiguous(pool) => {
@@ -105,6 +121,7 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
                         &mut cuts,
                         n,
                         &se.text,
+                        span,
                         CutReason::Ambiguous {
                             readings: pool.len(),
                         },
@@ -147,6 +164,7 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
                         &mut cuts,
                         n,
                         &se.text,
+                        span,
                         CutReason::Unresolved {
                             holes: o.holes.len(),
                         },
@@ -171,7 +189,7 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
                         .map(|g| g.surface.clone())
                         .filter(|s| contains_word(&se.text, s))
                         .collect();
-                    cut(&mut cuts, n, &se.text, CutReason::NoParse { oov });
+                    cut(&mut cuts, n, &se.text, span, CutReason::NoParse { oov });
                     continue;
                 }
                 return Err(format!(
@@ -205,6 +223,25 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
             },
         };
         let candidates = se.selection.as_ref().map(|s| s.candidates).unwrap_or(1);
+        let cluster = inputs
+            .landed
+            .get(&format!("{}:claim_{n}", inputs.meta.ns))
+            .cloned();
+        if inputs.partial && cluster.is_none() {
+            if let Err(e) =
+                eigenius_kernel::program::eigentt_type_mirror::encode_type(item.sem(), inputs.codec)
+            {
+                eprintln!("  [{n}] WARN — D47 encode fallback ({e}) — {text}");
+                cut(
+                    &mut cuts,
+                    n,
+                    &se.text,
+                    span,
+                    CutReason::NoParse { oov: Vec::new() },
+                );
+                continue;
+            }
+        }
         eprintln!(
             "  [{n}] encoded (of {candidates} reading(s)){} — {text}",
             if se.resolution.is_some() {
@@ -213,11 +250,10 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
                 ""
             }
         );
-        let start = inputs.doc.find(se.text.as_str()).unwrap_or(0);
         parsed.push(ParsedSentence {
             ordinal: n,
             text: se.text.clone(),
-            span: (start, start + se.text.len()),
+            span,
             item,
             candidates,
             selection,
@@ -227,10 +263,7 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
                 .map(|r| r.bindings.clone())
                 .unwrap_or_default(),
             binding_authority: inputs.binding_authority,
-            cluster: inputs
-                .landed
-                .get(&format!("{}:claim_{n}", inputs.meta.ns))
-                .cloned(),
+            cluster,
         });
     }
 
@@ -441,8 +474,9 @@ impl DocumentFormalizer for EncodingFormalizer {
         };
 
         // ── the artifact — the SHARED emitter (slice 5a) ────────────────────────────────────
+        let typed_codec = codec.with_typing_layer(Arc::clone(&doc_layer));
         let artifact = emit_from_encoding(&EmissionInputs {
-            codec: &codec,
+            codec: &typed_codec,
             doc: &req.source_text,
             encoding: &encoding,
             landed: &landed,

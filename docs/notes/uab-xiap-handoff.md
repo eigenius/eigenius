@@ -22,6 +22,7 @@ regenerated.
 | **the CNL rewrite** `experiments/parsing/derived/step5/c0*.py` | local, gitignored | **NO** | **hand-authored; unrecoverable** |
 | the document model `.../step5/docmodel-page.txt`, `document-model.json`, `xiap-document-model.esl` | local, gitignored | **NO** | re-derivable from the source, with effort |
 | the claim-span corpus `.../step5/claim-spans*.{txt,tsv}` | local, gitignored | **NO** | re-derivable (script below) |
+| D71 claim-landing artifacts `experiments/parsing/encoded/xiap/` (`.esl`, `.eigon.json`, `selections.json`, `proposals.json`, `kinds.json`, `reading-adjudications.tsv`) | local, gitignored | **NO** | regenerable (~35 min via `prose-to-esl` on the snapshot) |
 | UAB source material `experiments/uab/` | local, gitignored | **NO** | re-obtain from the UAB Round 1 delivery |
 | the DB snapshot (3.8 GB) | `db-snapshot/`, outside the repo | **NO** | rebuildable, ~30 min + chain |
 | measurement logs (14 MB) | `reseed-logs/`, outside the repo | **NO** | only history; re-runs regenerate |
@@ -43,8 +44,8 @@ rsync -av <this-machine>:~/src/eigenius/eigenius/experiments/uab/ \
 ## Branch state
 
 ```
-branch  uab-step6-encoding-verification
-base    main (with uab-step5-document-model squash-merged)
+branch  uab-xiap-claim-landing
+base    main (with uab-step6-encoding-verification merged)
 ```
 
 **The repository was REPLACED with a cleaned version on `2026-10-19`.** The old history — 345
@@ -147,8 +148,14 @@ The owner's order for survey §4 step 5. All six steps are done (`2026-11-10`).
    discourse bindings, `20` 1-to-1 line alignments synced back into `c001.py`–`c012.py`), and
    `verbalize` (`Register::Surface`) renders all `1,056` top readings with **0** bracketed fallback
    spans (`540 → 0`), **0** `not (⟦False⟧)` artifacts (`150 → 0`), and **0** unfreshened
-   `anaphor_of` terms (`46 → 0`). See [uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md) for the
-   full Step 6 summary and the Stage-1 reading-ranker boundary over `Ambiguous` pools.
+   `anaphor_of` terms (`46 → 0`). End-to-end deterministic (`--no-llm`) D71 claim landing via
+   `prose-to-esl` (`CostFirstReadingRanker` + `RecencyProposer` + `DerivedClaimLander`) emits **`5,705`**
+   validated resources (`958 / 1,056` `enc:EncodedClaim`s, `396` `enc:AnaphorBinding`s, `98`
+   `enc:CutItem`s, `0` kernel `Validator` errors) into gitignored `experiments/parsing/encoded/xiap/`,
+   and a `50`-claim stratified semantic audit establishes that contextual `SenseRanker` + Stage-1
+   `ReadingRanker` reranking is required for faithful proposition selection (`16%` strict / `28%`
+   charitable fidelity under cap-only + minimum-cost selection). See
+   [uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md) for the full Step 6 and D71 landing summary.
 
 ## What step 5 should know before it starts
 

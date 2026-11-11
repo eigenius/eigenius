@@ -81,6 +81,20 @@ impl std::error::Error for EncodeError {}
 /// are encoded by App currying — `App(ConstRef(List), ConstRef(Nat))` —
 /// per D47 §3.1.
 pub fn encode_type(exp: &Exp, names: &CodecNames) -> Result<Value, EncodeError> {
+    if let Some(layer) = &names.typing_layer {
+        if exp_contains_lam(exp) {
+            let _global_memo = crate::nbe::env_global::GlobalMemoScope::entry_count()
+                .is_none()
+                .then(crate::nbe::env_global::GlobalMemoScope::new);
+            let mut ctx = crate::nbe::check::CheckCtx::with_layer(
+                crate::nbe::env::Rho::Nil,
+                Vec::new(),
+                std::sync::Arc::clone(layer),
+            );
+            let mut binder_vars: Vec<(String, String)> = Vec::new();
+            return encode_term_typed(exp, None, &mut ctx, &mut binder_vars, names);
+        }
+    }
     encode_term(exp, names)
 }
 
@@ -96,6 +110,11 @@ pub struct CodecNames {
     /// `<inductive>-<ctor>` → (inductive IRI, argument names in declaration order). Keyed by
     /// the CLASS, not the constructor's short name: two inductives may share one.
     by_class: BTreeMap<String, (String, Vec<String>)>,
+    /// Optional chain environment used to synthesize binder domains for `Exp::Lam` occurring
+    /// in check positions (`App(f, Lam(x, body))` or `Ann(Lam(x, body), Pi(x : A, B))`).
+    /// Left `None` by `from_layer` / `from_class_table` so bare `CodecNames` continues to
+    /// reject unannotated `Lam` (`WitnessKey` round-trip invariant).
+    typing_layer: Option<std::sync::Arc<Layer>>,
 }
 
 impl CodecNames {
@@ -127,7 +146,10 @@ impl CodecNames {
                 );
             }
         }
-        Self { by_class }
+        Self {
+            by_class,
+            typing_layer: None,
+        }
     }
 
     /// The argument names of `ctor` on a NAMED inductive, for a caller that knows which one
@@ -145,7 +167,18 @@ impl CodecNames {
                 Some((class.clone(), (ind.to_string(), args.clone())))
             })
             .collect();
-        Self { by_class }
+        Self {
+            by_class,
+            typing_layer: None,
+        }
+    }
+
+    /// Attach a chain environment so [`encode_type`] can infer binder domains for `Exp::Lam`
+    /// occurring in check positions (`App(f, Lam(...))`, `Ann(Lam(...), Pi(...))`), such as
+    /// DCG propositions passing predicate lambdas to `ontology:has_count` or `ontology:adv_*`.
+    pub fn with_typing_layer(mut self, layer: std::sync::Arc<Layer>) -> Self {
+        self.typing_layer = Some(layer);
+        self
     }
 
     /// Build a value of `inductive`'s constructor `ctor` from already-encoded arguments.
@@ -428,6 +461,347 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
         Exp::LitFloat(f) => term(names, "LitFloat", vec![Value::Float(*f)]),
         Exp::LitBool(b) => term(names, "LitBool", vec![Value::Boolean(*b)]),
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
+    }
+}
+
+fn exp_contains_lam(exp: &Exp) -> bool {
+    match exp {
+        Exp::Lam(_, _) => true,
+        Exp::App(h, a)
+        | Exp::Ann(h, a)
+        | Exp::Pi(_, h, a)
+        | Exp::Sig(_, h, a)
+        | Exp::Arrow(h, a)
+        | Exp::Times(h, a)
+        | Exp::Pair(h, a) => exp_contains_lam(h) || exp_contains_lam(a),
+        Exp::Record(fields) => fields.iter().any(|(_, _, ty)| exp_contains_lam(ty)),
+        Exp::Refine(carrier, _) | Exp::Refl(carrier) | Exp::PropAccess(carrier, _)
+        | Exp::Fst(carrier) | Exp::Snd(carrier) => exp_contains_lam(carrier),
+        Exp::Id(ty, x, y) | Exp::Apart(ty, x, y) => {
+            exp_contains_lam(ty) || exp_contains_lam(x) || exp_contains_lam(y)
+        }
+        Exp::IdJ(six) => six.iter().any(exp_contains_lam),
+        Exp::InductiveCtor(_, _, args) => args.iter().any(exp_contains_lam),
+        _ => false,
+    }
+}
+
+/// Replace encoder-scoped neutral placeholders (`ENC#k`) read back inside inferred binder domains
+/// with the outer AST binder variable names they stood in for.
+fn restore_binder_vars(exp: &Exp, binder_vars: &[(String, String)]) -> Exp {
+    if binder_vars.is_empty() {
+        return exp.clone();
+    }
+    let go = |e: &Exp| restore_binder_vars(e, binder_vars);
+    match exp {
+        Exp::Var(name) => {
+            if let Some((_, orig)) = binder_vars.iter().rev().find(|(enc, _)| enc == name) {
+                Exp::Var(orig.clone())
+            } else {
+                Exp::Var(name.clone())
+            }
+        }
+        Exp::App(h, a) => Exp::App(Box::new(go(h)), Box::new(go(a))),
+        Exp::Ann(e, ty) => Exp::Ann(Box::new(go(e)), Box::new(go(ty))),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
+        Exp::Pi(p, d, b) => Exp::Pi(p.clone(), Box::new(go(d)), Box::new(go(b))),
+        Exp::Sig(p, d, b) => Exp::Sig(p.clone(), Box::new(go(d)), Box::new(go(b))),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
+        Exp::Record(fields) => Exp::Record(
+            fields
+                .iter()
+                .map(|(iri, p, ty)| (iri.clone(), p.clone(), go(ty)))
+                .collect(),
+        ),
+        Exp::Refine(c, classes) => Exp::Refine(Box::new(go(c)), classes.clone()),
+        Exp::Id(ty, x, y) => Exp::Id(Box::new(go(ty)), Box::new(go(x)), Box::new(go(y))),
+        Exp::Refl(t) => Exp::Refl(Box::new(go(t))),
+        Exp::IdJ(six) => {
+            let [a, c, d, x, y, p] = six.as_ref();
+            Exp::IdJ(Box::new([go(a), go(c), go(d), go(x), go(y), go(p)]))
+        }
+        Exp::Apart(ty, x, y) => Exp::Apart(Box::new(go(ty)), Box::new(go(x)), Box::new(go(y))),
+        Exp::PropAccess(e, prop) => Exp::PropAccess(Box::new(go(e)), prop.clone()),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
+        Exp::Fst(p) => Exp::Fst(Box::new(go(p))),
+        Exp::Snd(p) => Exp::Snd(Box::new(go(p))),
+        Exp::InductiveCtor(iri, ctor, args) => {
+            Exp::InductiveCtor(iri.clone(), ctor.clone(), args.iter().map(go).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Bidirectional encoder invoked only when `exp` contains an `Exp::Lam` and `names.typing_layer`
+/// is attached. Synthesizes `Exp::Lam` binder domains from the surrounding `App` / `Ann` / `Pair`
+/// check context, while falling straight back to [`encode_term`] on every `Lam`-free subtree.
+fn encode_term_typed(
+    exp: &Exp,
+    expected: Option<&crate::nbe::val::Val>,
+    ctx: &mut crate::nbe::check::CheckCtx,
+    binder_vars: &mut Vec<(String, String)>,
+    names: &CodecNames,
+) -> Result<Value, EncodeError> {
+    use crate::nbe::val::{Neut, Val};
+
+    if !exp_contains_lam(exp) {
+        return encode_term(exp, names);
+    }
+
+    match exp {
+        Exp::Lam(patt, body) => {
+            let Some(Val::Pi(dom, cod)) = expected else {
+                return Err(EncodeError::LamWithoutAnnotation);
+            };
+            let raw_dom = crate::nbe::readback::try_readback_val(ctx.rho.len(), dom)
+                .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+            let dom_exp = restore_binder_vars(&raw_dom, binder_vars);
+            let dom_val = encode_term_typed(&dom_exp, None, ctx, binder_vars, names)?;
+
+            let lvl = ctx.rho.len();
+            let gen = Val::Nt(Neut::Gen(lvl, "ENC#".to_string()));
+            let mut inner_ctx = ctx
+                .extend(patt, dom, &gen)
+                .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+            let cod_val = ctx
+                .apply(cod, gen)
+                .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+            let pushed = if let Patt::Var(bname) = patt {
+                binder_vars.push((format!("ENC#{lvl}"), bname.clone()));
+                true
+            } else {
+                false
+            };
+            let body_res =
+                encode_term_typed(body, Some(&cod_val), &mut inner_ctx, binder_vars, names);
+            if pushed {
+                binder_vars.pop();
+            }
+            term(
+                names,
+                "Lam",
+                vec![Value::String(binder_name(patt)), dom_val, body_res?],
+            )
+        }
+        Exp::App(h, a) => {
+            let h_val = encode_term_typed(h, None, ctx, binder_vars, names)?;
+            let a_val = if exp_contains_lam(a) {
+                // Only pass `Some(dom)` when `h` itself synthesizes a `Val::Pi`. When `h` is a
+                // partially applied inductive type former (`App(Const(logic:And), P)`), `h` is
+                // not a `Pi` and `a` is a composite `Prop` subtree containing an inner `App`
+                // around the `Lam`, so passing `None` lets the inner `App` infer its own head's
+                // `Pi` while a bare `Lam` under a non-`Pi` head still fails closed.
+                let dom_opt = match crate::nbe::check::check_infer(ctx, h) {
+                    Ok(Val::Pi(dom, _)) => Some(*dom),
+                    _ => None,
+                };
+                encode_term_typed(a, dom_opt.as_ref(), ctx, binder_vars, names)?
+            } else {
+                encode_term(a, names)?
+            };
+            term(names, "App", vec![h_val, a_val])
+        }
+        Exp::Ann(e, ty) => {
+            let ty_val = encode_term_typed(ty, None, ctx, binder_vars, names)?;
+            let e_val = if exp_contains_lam(e) {
+                let ty_sem = ctx
+                    .eval(ty, &ctx.rho)
+                    .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                encode_term_typed(e, Some(&ty_sem), ctx, binder_vars, names)?
+            } else {
+                encode_term(e, names)?
+            };
+            term(names, "Ann", vec![e_val, ty_val])
+        }
+        Exp::Pi(p, dom, body) | Exp::Sig(p, dom, body) => {
+            let ctor = if matches!(exp, Exp::Pi(..)) {
+                "Pi"
+            } else {
+                "Sig"
+            };
+            let dom_enc = encode_term_typed(dom, None, ctx, binder_vars, names)?;
+            let body_enc = if exp_contains_lam(body) {
+                let dom_val = ctx
+                    .eval(dom, &ctx.rho)
+                    .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                let lvl = ctx.rho.len();
+                let gen = Val::Nt(Neut::Gen(lvl, "ENC#".to_string()));
+                let mut inner_ctx = ctx
+                    .extend(p, &dom_val, &gen)
+                    .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                let pushed = if let Patt::Var(bname) = p {
+                    binder_vars.push((format!("ENC#{lvl}"), bname.clone()));
+                    true
+                } else {
+                    false
+                };
+                let res = encode_term_typed(body, None, &mut inner_ctx, binder_vars, names);
+                if pushed {
+                    binder_vars.pop();
+                }
+                res?
+            } else {
+                encode_term(body, names)?
+            };
+            term(
+                names,
+                ctor,
+                vec![Value::String(binder_name(p)), dom_enc, body_enc],
+            )
+        }
+        Exp::Arrow(a, b) => encode_term_typed(
+            &Exp::Pi(Patt::Unit, a.clone(), b.clone()),
+            None,
+            ctx,
+            binder_vars,
+            names,
+        ),
+        Exp::Times(a, b) => encode_term_typed(
+            &Exp::Sig(Patt::Unit, a.clone(), b.clone()),
+            None,
+            ctx,
+            binder_vars,
+            names,
+        ),
+        Exp::Record(fields) => {
+            let mut items = Vec::with_capacity(fields.len());
+            let mut cur_ctx = ctx
+                .extend(&Patt::Unit, &Val::One, &Val::Unit)
+                .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+            let orig_len = binder_vars.len();
+            for (i, (iri, patt, ty)) in fields.iter().enumerate() {
+                let ty_enc = encode_term_typed(ty, None, &mut cur_ctx, binder_vars, names)?;
+                items.push(Value::Array(vec![
+                    Value::String(iri.as_str().to_string()),
+                    Value::String(binder_name(patt)),
+                    ty_enc,
+                ]));
+                if fields[i + 1..].iter().any(|(_, _, t)| exp_contains_lam(t)) {
+                    let ty_val = cur_ctx
+                        .eval(ty, &cur_ctx.rho)
+                        .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                    let lvl = cur_ctx.rho.len();
+                    let gen = Val::Nt(Neut::Gen(lvl, "ENC#".to_string()));
+                    cur_ctx = cur_ctx
+                        .extend(patt, &ty_val, &gen)
+                        .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                    if let Patt::Var(bname) = patt {
+                        binder_vars.push((format!("ENC#{lvl}"), bname.clone()));
+                    }
+                }
+            }
+            binder_vars.truncate(orig_len);
+            term(names, "Record", vec![Value::Array(items)])
+        }
+        Exp::Refine(carrier, classes) => term(
+            names,
+            "Refine",
+            vec![
+                encode_term_typed(carrier, None, ctx, binder_vars, names)?,
+                Value::Array(
+                    classes
+                        .iter()
+                        .map(|i| Value::String(i.as_str().to_string()))
+                        .collect(),
+                ),
+            ],
+        ),
+        Exp::Id(ty, x, y) => {
+            let ty_enc = encode_term_typed(ty, None, ctx, binder_vars, names)?;
+            let ty_sem = if exp_contains_lam(x) || exp_contains_lam(y) {
+                Some(
+                    ctx.eval(ty, &ctx.rho)
+                        .map_err(|_| EncodeError::LamWithoutAnnotation)?,
+                )
+            } else {
+                None
+            };
+            let x_enc = encode_term_typed(x, ty_sem.as_ref(), ctx, binder_vars, names)?;
+            let y_enc = encode_term_typed(y, ty_sem.as_ref(), ctx, binder_vars, names)?;
+            term(names, "Id", vec![ty_enc, x_enc, y_enc])
+        }
+        Exp::Refl(t) => term(
+            names,
+            "Refl",
+            vec![encode_term_typed(t, None, ctx, binder_vars, names)?],
+        ),
+        Exp::IdJ(six) => term(
+            names,
+            "IdJ",
+            six.iter()
+                .map(|e| encode_term_typed(e, None, ctx, binder_vars, names))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Exp::Apart(ty, x, y) => term(
+            names,
+            "Apart",
+            vec![
+                encode_term_typed(ty, None, ctx, binder_vars, names)?,
+                encode_term_typed(x, None, ctx, binder_vars, names)?,
+                encode_term_typed(y, None, ctx, binder_vars, names)?,
+            ],
+        ),
+        Exp::PropAccess(e, prop) => term(
+            names,
+            "PropAccess",
+            vec![
+                encode_term_typed(e, None, ctx, binder_vars, names)?,
+                Value::String(prop.as_str().to_string()),
+            ],
+        ),
+        Exp::Pair(a, b) => {
+            if let Some(Val::Sig(t, g)) = expected {
+                let a_enc = encode_term_typed(a, Some(t), ctx, binder_vars, names)?;
+                let b_enc = if exp_contains_lam(b) {
+                    let a_val = ctx
+                        .eval(a, &ctx.rho)
+                        .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                    let b_ty = ctx
+                        .apply(g, a_val)
+                        .map_err(|_| EncodeError::LamWithoutAnnotation)?;
+                    encode_term_typed(b, Some(&b_ty), ctx, binder_vars, names)?
+                } else {
+                    encode_term(b, names)?
+                };
+                term(names, "Pair", vec![a_enc, b_enc])
+            } else {
+                term(
+                    names,
+                    "Pair",
+                    vec![
+                        encode_term_typed(a, None, ctx, binder_vars, names)?,
+                        encode_term_typed(b, None, ctx, binder_vars, names)?,
+                    ],
+                )
+            }
+        }
+        Exp::Fst(p) => term(
+            names,
+            "Fst",
+            vec![encode_term_typed(p, None, ctx, binder_vars, names)?],
+        ),
+        Exp::Snd(p) => term(
+            names,
+            "Snd",
+            vec![encode_term_typed(p, None, ctx, binder_vars, names)?],
+        ),
+        Exp::InductiveCtor(iri, ctor_name, args) => {
+            let mut acc = term(
+                names,
+                "CtorApp",
+                vec![
+                    Value::String(iri.as_str().to_string()),
+                    Value::String(ctor_name.clone()),
+                ],
+            )?;
+            for arg in args {
+                let arg_enc = encode_term_typed(arg, None, ctx, binder_vars, names)?;
+                acc = term(names, "App", vec![acc, arg_enc])?;
+            }
+            Ok(acc)
+        }
+        other => encode_term(other, names),
     }
 }
 
@@ -2470,5 +2844,68 @@ mod record_codec {
             format!("{err:?}").contains("cycle"),
             "a cycle must not decode: {err:?}"
         );
+    }
+
+    #[test]
+    fn lam_in_check_position_encodes_with_typing_layer() {
+        let base = crate::testing::term_chain();
+        let src = r#"
+            namespace t = "urn:test:lam";
+            class t:Item {}
+            axiom t:pred : t:Item -> Prop;
+            axiom t:adv_for : forall (T : Set) => (T -> Prop) -> T -> Prop;
+            data t:Both (P : Prop, Q : Prop) : Prop {
+                conj : forall (P : Prop, Q : Prop) => P -> Q -> t:Both(P, Q)
+            }
+        "#;
+        let compiled = crate::esl::compile(src, base).expect("compile test ESL");
+        let mut b = crate::layer::LayerBuilder::new("lam-test", Some(std::sync::Arc::clone(base)));
+        for r in compiled {
+            b.add_resource(r).expect("add resource");
+        }
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let item_cls = Exp::EigonClass(iri("urn:test:lam:Item"));
+        let pred_ax = Exp::EigonAxiom(iri("urn:test:lam:pred"));
+        let adv_ax = Exp::EigonAxiom(iri("urn:test:lam:adv_for"));
+        let both_ind = Exp::Const(iri("urn:test:lam:Both"), Vec::new());
+        // exists s : t:Item => t:Both(t:pred(s), t:adv_for(t:Item, λG#0. t:pred(G#0), s))
+        let lam_arg = Exp::Lam(
+            Patt::Var("G#0".into()),
+            Box::new(Exp::App(
+                Box::new(pred_ax.clone()),
+                Box::new(Exp::Var("G#0".into())),
+            )),
+        );
+        let call = Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::App(Box::new(adv_ax), Box::new(item_cls.clone()))),
+                Box::new(lam_arg.clone()),
+            )),
+            Box::new(Exp::Var("s".into())),
+        );
+        let conj = Exp::App(
+            Box::new(Exp::App(
+                Box::new(both_ind),
+                Box::new(Exp::App(Box::new(pred_ax), Box::new(Exp::Var("s".into())))),
+            )),
+            Box::new(call),
+        );
+        let prop = Exp::Sig(Patt::Var("s".into()), Box::new(item_cls), Box::new(conj));
+
+        // Bare CodecNames continues to reject unannotated Lam.
+        let bare = CodecNames::from_layer(&layer);
+        assert_eq!(encode_type(&prop, &bare), Err(EncodeError::LamWithoutAnnotation));
+
+        // With typing_layer attached, check-position Lam encodes, prints to ESL, and round-trips
+        // back to the identical AST while bare top-level Lam still fails closed.
+        let typed = bare.with_typing_layer(std::sync::Arc::clone(&layer));
+        assert_eq!(
+            encode_type(&lam_arg, &typed),
+            Err(EncodeError::LamWithoutAnnotation)
+        );
+        let val = encode_type(&prop, &typed).expect("encode check-position Lam");
+        let decoded = decode_type(&val, &layer).expect("decode Lam-bearing term");
+        assert_eq!(decoded, prop);
     }
 }

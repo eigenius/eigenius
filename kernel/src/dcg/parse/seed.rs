@@ -147,6 +147,18 @@ impl Parser {
                 .skip(1)
                 .any(|c| c.is_ascii_uppercase())
             || surface.trim().chars().any(|c| c.is_ascii_digit());
+        let surface_is_closed_modal = !surface_all_caps
+            && self
+                .lex
+                .entries_for(&s_lc)
+                .iter()
+                .any(|e| is_closed_class_entry(e) && sem_mentions_modal_op(e.item.sem()));
+        let surface_is_closed_gq = !surface_all_caps
+            && self
+                .lex
+                .entries_for(&s_lc)
+                .iter()
+                .any(|e| is_closed_class_entry(e) && is_closed_subject_gq_cat(e.item.cat()));
         let surface_is_closed_non_nominal = !surface_all_caps
             && self.lex.entries_for(&s_lc).iter().any(|e| {
                 if !is_closed_class_entry(e) {
@@ -155,6 +167,9 @@ impl Parser {
                 if s_lc.contains(' ')
                     || crate::dcg::holes::is_bare_pronoun_sem(e.item.sem())
                     || is_ctor(e.item.cat(), "cat_forall").is_some()
+                    || is_closed_subject_gq_cat(e.item.cat())
+                    || is_closed_non_gerund_aux_cat(e.item.cat())
+                    || is_closed_verbal_negation(e.item.cat(), e.item.sem())
                 {
                     return true;
                 }
@@ -183,6 +198,16 @@ impl Parser {
             }
             if super::all_caps_symbol(surface.trim()) {
                 entries.retain(|e| e.sense.as_deref() != Some("unit:postmod"));
+            }
+            if surface_is_closed_modal {
+                entries.retain(|e| e.in_lexicon.is_none());
+            }
+            if surface_is_closed_gq {
+                entries.retain(|e| {
+                    e.in_lexicon.is_none()
+                        || (!is_adjective_cat(e.item.cat())
+                            && !is_wordnet_sense_of_pos(e.sense.as_deref(), "r"))
+                });
             }
             if surface_is_function || surface_is_closed_non_nominal {
                 entries.retain(|e| {
@@ -4587,6 +4612,97 @@ fn is_open_class_entry(e: &LexEntry) -> bool {
                             if iri.as_str() == "urn:eigenius:lexicon:Entity"
                     ))
         })
+}
+
+fn sem_mentions_modal_op(exp: &Exp) -> bool {
+    const MODALS: &[&str] = &[
+        "urn:eigenius:lexicon:Possible",
+        "urn:eigenius:lexicon:Necessary",
+        "urn:eigenius:lexicon:Will",
+        "urn:eigenius:lexicon:Would",
+        "urn:eigenius:lexicon:Should",
+    ];
+    match exp {
+        Exp::EigonClass(iri) | Exp::EigonAxiom(iri) | Exp::Const(iri, _) => {
+            MODALS.contains(&iri.as_str())
+        }
+        Exp::App(f, a)
+        | Exp::Arrow(f, a)
+        | Exp::Pair(f, a)
+        | Exp::Pi(_, f, a)
+        | Exp::Sig(_, f, a)
+        | Exp::Ann(f, a) => sem_mentions_modal_op(f) || sem_mentions_modal_op(a),
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => sem_mentions_modal_op(b),
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+            sem_mentions_modal_op(t) || sem_mentions_modal_op(a) || sem_mentions_modal_op(b)
+        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(sem_mentions_modal_op),
+        _ => false,
+    }
+}
+
+fn sem_mentions_false(exp: &Exp) -> bool {
+    match exp {
+        Exp::EigonClass(iri) | Exp::EigonAxiom(iri) | Exp::Const(iri, _) => {
+            iri.as_str() == "urn:eigenius:logic:False"
+        }
+        Exp::App(f, a)
+        | Exp::Arrow(f, a)
+        | Exp::Pair(f, a)
+        | Exp::Pi(_, f, a)
+        | Exp::Sig(_, f, a)
+        | Exp::Ann(f, a) => sem_mentions_false(f) || sem_mentions_false(a),
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => sem_mentions_false(b),
+        Exp::Id(t, a, b) | Exp::Apart(t, a, b) => {
+            sem_mentions_false(t) || sem_mentions_false(a) || sem_mentions_false(b)
+        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(sem_mentions_false),
+        _ => false,
+    }
+}
+
+fn is_closed_subject_gq_cat(cat: &Exp) -> bool {
+    let Some((_, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    if is_ctor(res, "cat_s").is_none() {
+        return false;
+    }
+    let Some((_, vp_res, vp_arg)) = slash_parts(arg, "bwd") else {
+        return false;
+    };
+    is_ctor(vp_res, "cat_s").is_some() && is_ctor(vp_arg, "cat_np").is_some()
+}
+
+fn is_closed_non_gerund_aux_cat(cat: &Exp) -> bool {
+    let Some((_, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    let Some((_, res_s, res_np)) = slash_parts(res, "bwd") else {
+        return false;
+    };
+    let Some((_, arg_s, arg_np)) = slash_parts(arg, "bwd") else {
+        return false;
+    };
+    if is_ctor(res_np, "cat_np").is_none() || is_ctor(arg_np, "cat_np").is_none() {
+        return false;
+    }
+    let out_ok = matches!(
+        is_ctor(res_s, "cat_s"),
+        Some([_, Exp::InductiveCtor(_, f, _)]) if matches!(f.as_str(), "fin" | "bse" | "pss" | "inf")
+    );
+    let in_ok = matches!(
+        is_ctor(arg_s, "cat_s"),
+        Some([_, Exp::InductiveCtor(_, f, _)]) if matches!(f.as_str(), "bse" | "pss" | "pass" | "ger" | "adj")
+    );
+    out_ok && in_ok
+}
+
+fn is_closed_verbal_negation(cat: &Exp, sem: &Exp) -> bool {
+    let Some((_, res, arg)) = slash_parts(cat, "bwd").or_else(|| slash_parts(cat, "fwd")) else {
+        return false;
+    };
+    res == arg && is_verbal_cat(res) && sem_mentions_false(sem)
 }
 
 fn is_verbal_cat(cat: &Exp) -> bool {

@@ -36,15 +36,15 @@ use crate::storage::PersistentBackend;
 
 use super::abbrev::AbbreviationProposer;
 use super::augment::{
-    augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer,
-    LexiconAugmentation, NominalCategoryProposer,
+    augment_document_only, augment_full_glossary, augment_lexicon_backed, AugmentOptions,
+    CategoryProposer, LexiconAugmentation, NominalCategoryProposer,
 };
 use super::lemmatizer::Lemmatizer;
 use super::parse::{
     ClaimLander, DiscourseRun, Parser, Proposer, SelectionOutcome, SentenceOutcome,
 };
 use super::reading_ranker::ReadingRanker;
-use super::segment::segment_sentences;
+use super::segment::{segment_given_lines, segment_sentences};
 
 /// The document→encoding pipeline: raw document text → typed propositions, one [`SentenceOutcome`] per
 /// body sentence. Fail-closed — an un-encodable sentence is `Open`/`Gap`, never a wrong closed parse.
@@ -129,6 +129,9 @@ pub struct InProcessPipeline<'a> {
     /// key. `None` is the whole chain, unscoped. Set from a formalization request's `scope` /
     /// `profile` (D71 §7.1); the single-sentence `ParseSentence` RPC has taken one since D65.
     scope: Option<Vec<Iri>>,
+    /// When `true`, treat each non-empty line of `document` as one pre-segmented unit
+    /// ([`segment_given_lines`]) rather than running [`segment_sentences`].
+    units_per_line: bool,
 }
 
 /// The default (deterministic) POS proposer — a `'static` ZST so [`InProcessPipeline::new`] can hand out
@@ -159,7 +162,15 @@ impl<'a> InProcessPipeline<'a> {
             claim_lander: None,
             parser_setup: None,
             scope: None,
+            units_per_line: false,
         }
+    }
+
+    /// Segment `document` one unit per non-empty line ([`segment_given_lines`]) instead of
+    /// inferring boundaries with [`segment_sentences`].
+    pub fn with_units_per_line(mut self, on: bool) -> Self {
+        self.units_per_line = on;
+        self
     }
 
     /// Set the parse scope (D65 §4): ordered `lexicon:Lexicon` IRIs, earlier ranking first. A
@@ -239,10 +250,27 @@ impl<'a> InProcessPipeline<'a> {
         // `kernel/src/{validation,layer,commit}` — its ten call sites are the importer binaries,
         // one CLI subcommand and tests. What filters a mis-extraction here is the proposer's own
         // fail-closed minting above, not a kernel gate.
-        let augmentation = match self.augment_options {
+        let bodies: Vec<String> = if self.units_per_line {
+            segment_given_lines(document)
+        } else {
+            segment_sentences(document)
+                .into_iter()
+                .filter(|s| !s.trim().is_empty())
+                .collect()
+        };
+        let augmentation = match &self.augment_options {
             AugmentOptions::LexiconBacked(_) => augment_lexicon_backed(
                 &self.base,
                 document,
+                self.abbreviation_proposer,
+                self.category_proposer,
+                self.lemmatizer,
+            ),
+            AugmentOptions::FullGlossary { source_document } => augment_full_glossary(
+                &self.base,
+                document,
+                bodies.clone(),
+                source_document.as_deref(),
                 self.abbreviation_proposer,
                 self.category_proposer,
                 self.lemmatizer,
@@ -290,14 +318,13 @@ impl<'a> InProcessPipeline<'a> {
 
         // Stage B + C — parse each body sentence over base + doc-glossary and resolve its referent holes
         // against the threaded discourse (the untrusted proposer suggests, the kernel re-gates).
+        if let Some(lander) = self.claim_lander {
+            lander.set_layer(&doc_layer);
+        }
         let mut index = Parser::build(Arc::clone(&doc_layer));
         if let Some(setup) = self.parser_setup {
             index = setup(index);
         }
-        let bodies: Vec<String> = segment_sentences(document)
-            .into_iter()
-            .filter(|s| !s.trim().is_empty())
-            .collect();
         let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
         let resolutions = index.resolve_document(&DiscourseRun {
             document,

@@ -920,6 +920,7 @@ impl Parser {
                     links: structure_links(it.sem(), &Vb::surface(&words, &self.grammar.layer)),
                     predication: predication(it.sem()).map(str::to_string),
                     senses_at,
+                    forest_rank: i,
                 }
             })
             .collect();
@@ -1293,6 +1294,11 @@ struct ResolveCache {
 /// (whose `is_a` carries the discourse-kind class) plus a display surface into the candidate
 /// set, and keys the same-kind run assembly off the resource's kind class.
 pub trait ClaimLander {
+    /// Attach the document layer (`base + Stage-A glossary`) before `resolve_document` runs so
+    /// D47 proposition encoders that infer binder domains on `Exp::Lam` can resolve doc-local
+    /// glossary classes and individuals.
+    fn set_layer(&self, _layer: &std::sync::Arc<crate::layer::Layer>) {}
+
     /// Land sentence `ordinal`'s encoded reading. `gloss` is the reading's verbalization (the
     /// same string threaded as the ranker/proposer prior context). `None` = nothing landed
     /// (the sentence contributes no claim antecedent, and any same-kind run BREAKS).

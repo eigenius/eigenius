@@ -378,11 +378,13 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
             Some(c) => c.to_string(),
             None => {
                 // Grounding miss → a fresh doc-local class rooted at Entity (Declared, ungrounded).
-                let fresh = format!("urn:eigenius:doc:class_{}", slug(&d.short_form));
+                let local = format!("class_{}", slug(&d.short_form));
+                let fresh = format!("urn:eigenius:doc:{local}");
                 if let Ok(ci) = Iri::parse(&fresh) {
                     let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
                     let mut cls = Resource::new(ci);
                     cls.set(p(wk::IS_A), Value::Array(vec![Value::iri(&p(wk::CLASS))]));
+                    cls.set(p(wk::SHORT_NAME), Value::String(local));
                     cls.set(
                         p(wk::PARENT_CLASSES),
                         Value::Array(vec![Value::String(

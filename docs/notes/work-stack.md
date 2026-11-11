@@ -14,9 +14,43 @@ any detour.
 > (`experiments/parsing/derived/step5/c0*.py`) is hand-authored and unrecoverable if not copied
 > out of band.
 >
-> **entry 7 (`2026-10-10`, updated `2026-11-10`, active). UAB survey step 5 & step 6 — document-level
-> discourse close-out and verbalization verification ([uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md)).
-> Branch `uab-step6-encoding-verification`.**
+> **entry 7 (`2026-10-10`, updated `2026-11-10`, active). UAB survey step 5, step 6 & D71 claim landing —
+> pool reduction, end-to-end claim emission, and deterministic-vs-reranking evaluation
+> ([uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md)). Branch `uab-xiap-claim-landing`.**
+>
+> **Deterministic pool reduction & D71 claim landing (`2026-11-10`, store
+> `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 / 864`):** Added category-driven
+> closed-class homograph pruning in `seed.rs` (`surface_is_closed_modal`, `surface_is_closed_gq`,
+> extended `surface_is_closed_non_nominal` — zero word-specific checks; `72 / 72` = `100.0%` modal
+> preservation, `141 / 163` = `86.5%` explicit-negation preservation across unique selected
+> propositions), `CostFirstReadingRanker` (`forest_rank == 0` under D69 `first_collision` injectivity),
+> `AugmentOptions::FullGlossary`, `Expanded` `compound-with-kind-entity` distinction in `verbalize.rs`,
+> required `core:short_name` on ungrounded doc-local `core:Class` resources in `glossary.rs`, opt-in
+> bidirectional `CodecNames::with_typing_layer` (`encode_term_typed` in `eigentt_type_mirror.rs`) for
+> check-position `Exp::Lam` binders in D47 term mirroring, and `--cost-first`, `--recency`,
+> `--land-in-loop`, `--full-glossary`, `--units-per-line`, `--also-json`, `--adjudications-out`, and
+> `--verify-load` in `eigenius-encoding`. Running `prose-to-esl` (`--no-llm`) across all **1,056** CNL
+> sentences lands **`958 / 1,056` (`90.7%`) `enc:EncodedClaim`s** (`16` sole + `942` cost-ranked; `396`
+> `enc:AnaphorBinding`s across `255` bound claims; `319` Stage-A glossary resources; `98` fail-closed
+> `enc:CutItem`s = `48` D69 `Expanded` collisions [`24` η-equivalent `adv_*` predicate pairs + `24`
+> residual tag omissions] + `22` post-selection D47 `LamWithoutAnnotation` cuts from higher-order GQs in
+> polymorphic `compound`/`prep_*` inside `Σ`-restrictors + `21` single-pass `SENSE_CAP=2, CELL_BEAM=64`
+> `no parse` cuts + `7` unresolved referent holes) — **`5,705` total resources** into gitignored
+> `experiments/parsing/encoded/xiap/`, passing `esl::compile` and kernel `Validator::validate()` with
+> **`0` errors** (`89 / 89` core-en battery and `WRN_PAGE_CNL` `(0, 57, 5)` unchanged).
+> **Deterministic vs. reranking verdict (`50`-claim systematic stratified audit across `1..958`):**
+> while the deterministic pipeline executes cleanly end-to-end, **only `8 / 50` (`16%`) landed claims
+> are strictly faithful (`14 / 50` = `28%` charitably)**; **`72%–84%`** suffer semantic corruption
+> concentrated at (1) **contextual `SenseRanker` (`40%` of claims)** — unranked `SENSE_CAP=2` seed order
+> admits cross-domain UMLS/HPO/WordNet short-form and acronym homographs into slots `0–1`, (2)
+> **semantic Stage-1 `ReadingRanker` (`44%` of claims)** — `512 / 964` (`53.1%`) pools have `31+`
+> skeletons, and minimum combinator cost (`forest_rank == 0`) favors collapsed spines (`64 / 974` =
+> `6.6%` duplicate-argument `v_t(X, X)` frames, subject-attached `as <Adj>` object predicatives,
+> polarity-inverting negation scope, and `22` GQ-in-`compound` shapes), and (3) **discourse `Proposer` +
+> `KindClassifier` (`12%` of all claims; `40%` of bound claims)** — explicit-head demonstratives succeed
+> (`9 / 10`), whereas bare pronouns and propositional demonstratives fail (`5 / 5`) under blind recency
+> and unmarked `enc:Assertion` landing. Reranking (`SenseRanker` + `ReadingRanker`, plus `KindClassifier`
+> / `Proposer` or CNL R2 tightening on bare pronouns) is required for faithful claim intake.
 >
 > **Step 6 (`2026-11-10`, store `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 /
 > 864`):** Wired `EIGENIUS_WRN_UNITS_PER_LINE` and `EIGENIUS_VERBALIZE_OUT` into

@@ -85,6 +85,10 @@ pub struct ReadingCandidate {
     /// The sense each word takes, in sentence order: its derivation's leaves that contribute a
     /// concept. Empty for a reading without one.
     pub senses_at: Vec<SenseAt>,
+    /// 0-based position in the parser's cost-sorted forest (`0` = lowest-cost surviving reading).
+    /// Carried in-memory for deterministic cost-ranked selection without disturbing the serialized
+    /// [`RecordedCandidate`] replay key.
+    pub forest_rank: usize,
 }
 
 /// The senses a reading gives the word (or multiword) at a span: the concepts its leaf contributes.
@@ -240,6 +244,42 @@ impl ReadingRanker for PinReadingRanker {
             }),
             _ => None, // no match, or ≥2 readings share the pinned skeleton — abstain
         }
+    }
+}
+
+/// Deterministic offline reading selector (`--no-llm`): selects the lowest-cost surviving reading
+/// (`forest_rank == 0`) while keeping the default [`ReadingRanker::tells_apart`] contract so D69 §3
+/// presentation injectivity is still enforced before any selection is accepted.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CostFirstReadingRanker;
+
+impl ReadingRanker for CostFirstReadingRanker {
+    fn model(&self) -> Option<String> {
+        Some("deterministic:cost-first".to_string())
+    }
+
+    fn select(
+        &self,
+        _ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        if candidates.is_empty() {
+            return None;
+        }
+        let mut by_rank: Vec<usize> = (0..candidates.len()).collect();
+        by_rank.sort_by_key(|&idx| (candidates[idx].forest_rank, idx));
+        let chosen = by_rank[0];
+        let runners_up = by_rank[1..].to_vec();
+        Some(ReadingSelection {
+            chosen,
+            rationale: format!(
+                "Deterministic cost-ranked selection (--no-llm): lowest-cost surviving reading \
+                 (forest rank {} of {}).",
+                candidates[chosen].forest_rank,
+                candidates.len()
+            ),
+            runners_up,
+        })
     }
 }
 
@@ -1500,6 +1540,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: i,
             })
             .collect()
     }
@@ -1617,6 +1658,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: 0,
             },
             ReadingCandidate {
                 skeleton: "see(§)(we, man_with(telescope))".to_string(),
@@ -1626,6 +1668,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: 1,
             },
         ];
         let ctx = DocumentContext {
@@ -1758,6 +1801,7 @@ mod d69b_tests {
             links: Vec::new(),
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -1840,6 +1884,7 @@ mod two_call_tests {
             links,
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -2003,6 +2048,7 @@ mod decision_ranker_tests {
             links: Vec::new(),
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -2099,6 +2145,32 @@ mod decision_ranker_tests {
         assert!(
             r.select(&ctx(), &c).is_none(),
             "an answer naming no option abstains"
+        );
+    }
+
+    #[test]
+    fn cost_first_ranker_picks_lowest_forest_rank_and_keeps_d69_injectivity() {
+        let mut c0 = cand("A_alphabetically_first", "gloss a");
+        c0.forest_rank = 2;
+        let mut c1 = cand("Z_lowest_cost", "gloss z");
+        c1.forest_rank = 0;
+        let mut c2 = cand("M_middle", "gloss m");
+        c2.forest_rank = 1;
+        let pool = [c0, c1, c2];
+        assert_eq!(first_collision(&pool, &CostFirstReadingRanker), None);
+        let sel = CostFirstReadingRanker.select(&ctx(), &pool).expect("chose");
+        assert_eq!(sel.chosen, 1, "picks forest_rank == 0 despite skeleton re-ordering");
+        assert_eq!(sel.runners_up, vec![2, 0]);
+        assert_eq!(
+            CostFirstReadingRanker.model().as_deref(),
+            Some("deterministic:cost-first")
+        );
+
+        let dup_pool = [cand("A", "identical gloss"), cand("A", "identical gloss")];
+        assert_eq!(
+            first_collision(&dup_pool, &CostFirstReadingRanker),
+            Some((0, 1)),
+            "D69 presentation collision still blocks CostFirstReadingRanker"
         );
     }
 }

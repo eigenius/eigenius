@@ -936,7 +936,12 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     verbalize(args[1], vb)
                 };
                 return if vb.register == Register::Expanded {
-                    format!("{subj} compound-with {m} (relation unspecified)")
+                    let rel = if local == "compound" && is_kind_of_app(args[1]) {
+                        "compound-with-kind-entity"
+                    } else {
+                        "compound-with"
+                    };
+                    format!("{subj} {rel} {m} (relation unspecified)")
                 } else if subj.is_empty() {
                     m
                 } else {
@@ -1539,10 +1544,14 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             // The whole point: a compound asserts that SOME relation holds between the head and
             // the modifier, and the parse does not say which. Surface hides that behind
             // juxtaposition — the reading it is competing with names one concept outright.
-            Some("compound_kind" | "compound") if a.len() == 2 => parts.push(format!(
-                "compound-with {} (relation unspecified)",
-                bare_np(a[1], vb)
-            )),
+            Some(op @ ("compound_kind" | "compound")) if a.len() == 2 => {
+                let rel = if op == "compound" && is_kind_of_app(a[1]) {
+                    "compound-with-kind-entity"
+                } else {
+                    "compound-with"
+                };
+                parts.push(format!("{rel} {} (relation unspecified)", bare_np(a[1], vb)));
+            }
             Some(p) if p.starts_with("prep_") => {
                 if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
                     parts.push(format!("{p} {obj}"));
@@ -1612,6 +1621,11 @@ fn counted_relation<'e>(pred: &'e Exp, vb: &Vb) -> Option<&'e str> {
         obj = x;
     }
     matches!(obj, Exp::Var(v) if v == y).then_some(p)
+}
+
+fn is_kind_of_app(e: &Exp) -> bool {
+    let (h, a) = app_spine(e);
+    axiom_local(h) == Some("kind_of") && a.len() == 1
 }
 
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
@@ -2790,6 +2804,33 @@ mod register_tests {
         assert_eq!(
             verbalize(&sup_deg, &surf),
             "WRN is at least as essential as model"
+        );
+
+        // 8. Expanded register tells `compound(x, kind_of(C))` apart from `compound_kind(x, C)`
+        let kind_mod = Exp::Sig(
+            Patt::Var("x".into()),
+            Box::new(cls("urn:eigenius:wn:n13780719")),
+            Box::new(app2(
+                "urn:eigenius:ontology:compound_kind",
+                Exp::Var("x".into()),
+                cls("urn:eigenius:umlscui:C0388246"),
+            )),
+        );
+        let kind_entity_mod = Exp::Sig(
+            Patt::Var("x".into()),
+            Box::new(cls("urn:eigenius:wn:n13780719")),
+            Box::new(app2(
+                "urn:eigenius:ontology:compound",
+                Exp::Var("x".into()),
+                app1(
+                    "urn:eigenius:ontology:kind_of",
+                    cls("urn:eigenius:umlscui:C0388246"),
+                ),
+            )),
+        );
+        assert_ne!(
+            verbalize(&kind_mod, &expd),
+            verbalize(&kind_entity_mod, &expd)
         );
     }
 }

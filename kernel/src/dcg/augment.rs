@@ -192,6 +192,13 @@ pub enum AugmentOptions {
     DocumentOnly,
     LexiconBacked(Iri),
     LlmBacked,
+    /// Full 10-source Stage-A glossary (`augment_lexicon_backed` + parser-gated `unknown_words`
+    /// over `SegmentedDocument` + apposition named entities, notations, recurrent OOV names,
+    /// code-span literals, productive derivations, hyphenated compounds, fallback entities, and
+    /// optional un-rewritten `source_document` abbreviation extraction).
+    FullGlossary {
+        source_document: Option<String>,
+    },
 }
 
 /// The **`DocumentOnly`** augmentation (Phase 1): from the document's own abbreviation definitions build
@@ -534,6 +541,92 @@ pub fn augment_lexicon_backed(
         });
     }
     aug.missing_oov = still_missing;
+    aug
+}
+
+/// The full 10-source Stage-A glossary over `document` and its pre-segmented `units`, mirroring
+/// the Stage-A assembly proven on full-report corpora (`augment_lexicon_backed`, apposition named
+/// entities, notations, recurrent OOV names, code spans, derivations, compounds, fallback OOV
+/// entities, and abbreviation extraction on `source_document` when supplied).
+///
+/// Deduplicates `added` and `supporting` by `@id` and excludes any resource whose `@id` already
+/// resolves on `base`, so committing the glossary layer onto `base` and emitting it into an
+/// artifact never redefines a chain-resident resource or emits duplicate definitions.
+pub fn augment_full_glossary(
+    base: &Arc<Layer>,
+    document: &str,
+    units: Vec<String>,
+    source_document: Option<&str>,
+    proposer: &dyn AbbreviationProposer,
+    category_proposer: &dyn CategoryProposer,
+    lemmatizer: &dyn Lemmatizer,
+) -> LexiconAugmentation {
+    use super::glossary::{
+        code_span_augmentation, compound_augmentation, derivation_augmentation,
+        fallback_augmentation, named_entity_augmentation, notation_augmentation,
+        oov_name_augmentation, SegmentedDocument,
+    };
+    use super::parse::Parser;
+
+    let mut aug = augment_lexicon_backed(base, document, proposer, category_proposer, lemmatizer);
+    let seg_doc = SegmentedDocument::new(document, units);
+    let oov: BTreeSet<String> = {
+        let probe = Parser::build(Arc::clone(base));
+        let mut set = BTreeSet::new();
+        for unit in seg_doc.units() {
+            for w in probe.unknown_words(unit, lemmatizer) {
+                set.insert(w.to_lowercase());
+                set.insert(w);
+            }
+        }
+        set
+    };
+
+    for next in [
+        named_entity_augmentation(base, &seg_doc),
+        notation_augmentation(base, &seg_doc, &oov),
+        oov_name_augmentation(base, &seg_doc, &oov),
+        code_span_augmentation(base, &seg_doc, &oov),
+        derivation_augmentation(base, &seg_doc, &oov),
+        compound_augmentation(base, &seg_doc, &oov),
+    ] {
+        aug.added.extend(next.added);
+        aug.supporting.extend(next.supporting);
+    }
+
+    let supplied_now: BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    let fb_aug = fallback_augmentation(base, &seg_doc, &oov, &supplied_now);
+    aug.added.extend(fb_aug.added);
+    aug.supporting.extend(fb_aug.supporting);
+
+    if let Some(src_text) = source_document {
+        let abbr_aug = augment_document_only(base, src_text, proposer, lemmatizer);
+        aug.added.extend(abbr_aug.added);
+        aug.supporting.extend(abbr_aug.supporting);
+    }
+
+    // Deduplicate `@id`s across sources and drop any accidental redefinition of a `base` resource.
+    let mut seen_ids: BTreeSet<Iri> = BTreeSet::new();
+    aug.added.retain(|b| match b.proposed.id() {
+        Some(id) => base.resolve(id).is_none() && seen_ids.insert(id.clone()),
+        None => false,
+    });
+    aug.supporting.retain(|r| match r.id() {
+        Some(id) => base.resolve(id).is_none() && seen_ids.insert(id.clone()),
+        None => false,
+    });
+
+    let supplied_lc: BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.to_lowercase())
+        .collect();
+    aug.missing_oov
+        .retain(|g| !supplied_lc.contains(&g.surface.to_lowercase()));
     aug
 }
 
