@@ -1123,6 +1123,9 @@ enum Guard {
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
     ProperName(&'static str),
+    /// The bound type-index metavar must be the dedicated designator-token class
+    /// `urn:eigenius:lexicon:ProperName` seeded for identifier/proper-name designators.
+    ProperNameExact(&'static str),
     /// The named operand must NOT be a **derived individual** (`Combinator::DerivedIndividual`) — a
     /// designator is a naming TOKEN, never a description, so `named(x, the(Σy. named(y, d)).1)` ("the
     /// gene named the gene named MSH2") is refused. Like [`Self::NotKindRaised`] this reads provenance:
@@ -1175,6 +1178,8 @@ enum Guard {
     IsAdverb(Operand),
     /// The operand is not a composition output (`LeftNotComposed`).
     NotComposed(Operand),
+    /// The operand was not built by forward application (e.g. a `[Det + N]` phrase).
+    NotForwardApp(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -1212,6 +1217,7 @@ impl Guard {
             Guard::NotKindRaised(_) => "NotKindRaised",
             Guard::NotPronoun(_) => "NotPronoun",
             Guard::ProperName(_) => "ProperName",
+            Guard::ProperNameExact(_) => "ProperNameExact",
             Guard::NotDerivedIndividual(_) => "NotDerivedIndividual",
             Guard::NotPlural(_) => "NotPlural",
             Guard::NotSuperlativeRefined(_) => "NotSuperlativeRefined",
@@ -1222,6 +1228,7 @@ impl Guard {
             Guard::NotVpArg(_) => "NotVpArg",
             Guard::IsAdverb(_) => "IsAdverb",
             Guard::NotComposed(_) => "NotComposed",
+            Guard::NotForwardApp(_) => "NotForwardApp",
         }
     }
 
@@ -1237,11 +1244,13 @@ impl Guard {
             | Guard::NotPpRefined(o)
             | Guard::NotParticipialPp(o)
             | Guard::IsAdverb(o)
-            | Guard::NotComposed(o) => match o {
+            | Guard::NotComposed(o)
+            | Guard::NotForwardApp(o) => match o {
                 Operand::Left => "L",
                 Operand::Right => "R",
             },
             Guard::ProperName(_)
+            | Guard::ProperNameExact(_)
             | Guard::NotPlural(_)
             | Guard::FinIsAdjOrPass(_)
             | Guard::FinIsFinOrBse(_)
@@ -1272,6 +1281,10 @@ impl Guard {
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
+            ),
+            Guard::ProperNameExact(meta) => matches!(
+                binds.get(*meta),
+                Some(Exp::EigonClass(iri)) if iri.as_str() == "urn:eigenius:lexicon:ProperName"
             ),
             Guard::NotPlural(meta) => !matches!(
                 binds.get(*meta),
@@ -1311,6 +1324,7 @@ impl Guard {
                     | Combinator::BackwardComp
                     | Combinator::BackwardApp
             ),
+            Guard::NotForwardApp(op) => op.pick(left, right).prov != Combinator::ForwardApp,
             // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
             // postmodifier cannot sit between a modifier and its head), so it does not care whether the
             // modifier is a bare noun or a full NP. Inspecting only `cat_n` made this silently inert on
@@ -2579,6 +2593,25 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 ],
                 build: build_name,
             },
+            // Qualified proper/identifier designator (`[cat_np] [cat_np(ProperName, sg)]`):
+            // builds `the(Σx:Entity. And(named(x, ⟦right⟧), compound(x, ⟦left⟧))).1` at `Cost::ZERO`
+            // so both the qualifier NP and the identifier token are preserved in the proposition.
+            CatRule {
+                name: "qualified_name",
+                left_pat: Ctor("cat_np", vec![Var("qual_ty"), Var("qual_num")]),
+                right_pat: Ctor("cat_np", vec![Var("namety"), Ctor("sg", vec![])]),
+                guards: &[
+                    Guard::ProperNameExact("namety"),
+                    Guard::NotKindRaised(Operand::Left),
+                    Guard::NotKindRaised(Operand::Right),
+                    Guard::NotForwardApp(Operand::Left),
+                    Guard::NotPronoun(Operand::Left),
+                    Guard::NotDerivedIndividual(Operand::Right),
+                    Guard::NotPlural("qual_num"),
+                    Guard::NotPpRefined(Operand::Left),
+                ],
+                build: build_qualified_name,
+            },
             // GQ-as-prep-object, PpMod: `[cat_pp/NP] [raised-GQ]` → a post-nominal `cat_pp` modifier.
             CatRule {
                 name: "gq_prep_ppmod",
@@ -3028,6 +3061,33 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
     };
     let cat = Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), num]);
     Item::from_parts(cat, sigma, Combinator::Compound, Cost::ZERO)
+}
+
+/// Qualified designator `[cat_np(_, sg)] [cat_np(ProperName, sg)]` →
+/// `the(Σx:Entity. And(named(x, ⟦right⟧), compound(x, ⟦left⟧))).1` at `cat_np(Entity, sg)`.
+fn build_qualified_name(_binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, sg) = match right.cat() {
+        Exp::InductiveCtor(d, _, rargs) if rargs.len() == 2 => (d.clone(), rargs[1].clone()),
+        _ => unreachable!("qualified_name requires a cat_np right operand"),
+    };
+    let ent_cls = Exp::EigonClass(
+        crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity").expect("static Entity IRI"),
+    );
+    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![ent_cls.clone(), sg]);
+    let x = COMPOUND_X;
+    let named_p = app2("urn:eigenius:ontology:named", x, right.sem().clone());
+    let comp_p = app2("urn:eigenius:ontology:compound", x, left.sem().clone());
+    let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")
+        .unwrap_or_else(|| {
+            crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").expect("static And IRI")
+        });
+    let restr = Exp::const_applied(and, Vec::new(), vec![named_p, comp_p]);
+    let sigma = Exp::Sig(Patt::Var(x.into()), Box::new(ent_cls), Box::new(restr));
+    let the = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the").expect("static the IRI"),
+    );
+    let sem = Exp::Fst(Box::new(Exp::App(Box::new(the), Box::new(sigma))));
+    Item::from_parts(cat, sem, Combinator::DerivedIndividual, Cost::ZERO)
 }
 
 /// The result category of a GQ-as-prep-object raise: the preposition functor's own result

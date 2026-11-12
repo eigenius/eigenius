@@ -592,6 +592,16 @@ pub fn augment_full_glossary(
     let mut seen_supporting: BTreeMap<Iri, PropertyMapSig> = BTreeMap::new();
     let mut seen_triples: BTreeSet<(String, String, String)> = BTreeSet::new();
 
+    if let Some(src_text) = source_document {
+        merge_augmentation_batch(
+            &mut aug,
+            augment_document_only(base, src_text, proposer, lemmatizer),
+            base,
+            &mut seen_ids,
+            &mut seen_supporting,
+            &mut seen_triples,
+        );
+    }
     merge_augmentation_batch(
         &mut aug,
         first,
@@ -631,17 +641,6 @@ pub fn augment_full_glossary(
         &mut seen_supporting,
         &mut seen_triples,
     );
-
-    if let Some(src_text) = source_document {
-        merge_augmentation_batch(
-            &mut aug,
-            augment_document_only(base, src_text, proposer, lemmatizer),
-            base,
-            &mut seen_ids,
-            &mut seen_supporting,
-            &mut seen_triples,
-        );
-    }
 
     let supplied_lc: BTreeSet<String> = aug
         .added

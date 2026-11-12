@@ -563,6 +563,9 @@ impl Parser {
                     }
                 }
             } else if let Some(o) = open.first() {
+                if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
+                    eprintln!("  !! UNRESOLVED [{ordinal}] holes={:?}", o.holes);
+                }
                 SentenceOutcome::Open(o.clone())
             } else {
                 SentenceOutcome::Gap
@@ -699,6 +702,71 @@ impl Parser {
                 }
             }
         }
+        // Sibling `cat_n` synset completion for already-committed nominal classes: when a prior
+        // sentence committed one WordNet/UMLS `cat_n` sense of a noun (`request` -> UMLS,
+        // `position` -> sense 1) and a subsequent sentence's definite/demonstrative anaphor selects
+        // a sibling `cat_n` sense of that same lemma, emit the sibling `cat_n` classes after the
+        // exact candidates so exact synset matches retain priority while cross-sentence synset
+        // drift does not trigger `cut_unresolved`.
+        let mut committed_classes: BTreeSet<Iri> = BTreeSet::new();
+        for cand in &out {
+            if let Candidate::Kind { term, .. } = cand {
+                let target = match term {
+                    Exp::App(f, k) => match f.as_ref() {
+                        Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of" => {
+                            Some(k.as_ref())
+                        }
+                        Exp::App(f0, k0)
+                            if matches!(
+                                f0.as_ref(),
+                                Exp::EigonAxiom(i)
+                                    if i.as_str() == "urn:eigenius:ontology:the_count"
+                            ) =>
+                        {
+                            Some(k0.as_ref())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(t) = target {
+                    if let Exp::EigonClass(iri) = t {
+                        committed_classes.insert(iri.clone());
+                    }
+                    let (base, depth) = peel_sig_base(t);
+                    if depth > 0 {
+                        if let Exp::EigonClass(iri) = base {
+                            committed_classes.insert(iri.clone());
+                        }
+                    }
+                }
+            }
+        }
+        if !committed_classes.is_empty() {
+            for tok in self.tokenize(sentence) {
+                for lemma in self.candidate_lemmas(tok.surface(), lemmatizer) {
+                    let entries = self.scoped(self.lex.entries_for(&lemma), None);
+                    let lemma_committed = entries.iter().any(|e| {
+                        let Some([cls, _]) = super::super::category::is_ctor(e.item.cat(), "cat_n")
+                        else {
+                            return false;
+                        };
+                        let (base, _) = peel_sig_base(cls);
+                        matches!(cls, Exp::EigonClass(i) if committed_classes.contains(i))
+                            || matches!(base, Exp::EigonClass(i) if committed_classes.contains(i))
+                    });
+                    if lemma_committed {
+                        for e in entries {
+                            if let Some([cls, _]) =
+                                super::super::category::is_ctor(e.item.cat(), "cat_n")
+                            {
+                                self.emit_kind_candidate(cls, &vb, &mut out, &mut seen);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         out
     }
 
@@ -812,6 +880,13 @@ impl Parser {
                             || i.as_str() == "urn:eigenius:core:is_a"
                             || i.as_str() == "urn:eigenius:ontology:compound_kind"
                 ) {
+                    self.emit_kind_candidate(k, vb, out, seen);
+                }
+                if matches!(
+                    f0.as_ref(),
+                    Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:subclass_of"
+                ) {
+                    self.emit_kind_candidate(arg0, vb, out, seen);
                     self.emit_kind_candidate(k, vb, out, seen);
                 }
                 if let Exp::App(f00, k0) = f0.as_ref() {

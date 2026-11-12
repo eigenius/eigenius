@@ -56,7 +56,7 @@ use crate::dcg::verbalize::ConceptNote;
 /// complete, since a half-shown structure would make the sense table lie. Dropping is logged and
 /// stated in the prompt; a silent cap would let the model pick "the best of what it saw" and report it
 /// as the best reading (the D62 no-silent-caps rule).
-const MAX_STRUCTURES_SHOWN: usize = 12;
+const MAX_STRUCTURES_SHOWN: usize = 20;
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
 /// skeleton for legibility (the caller orders them), but the choice — and its evaluation — are
@@ -403,8 +403,9 @@ impl<R: ReadingRanker> RecordingReadingRanker<R> {
         if !path.exists() {
             return Ok(0);
         }
-        let records: Vec<SelectionRecord> = serde_json::from_str(&std::fs::read_to_string(path)?)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let records: Vec<SelectionRecord> =
+            serde_json::from_str(&std::fs::read_to_string(path)?)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut log = self.log.lock().expect("selection log");
         for r in records {
             log.insert(record_key(&r), r);
@@ -988,8 +989,9 @@ fn context_parts(ctx: &DocumentContext) -> Vec<(String, String)> {
         match doc_trimmed.find(needle) {
             Some(pos) => {
                 let start = doc_trimmed.floor_char_boundary(pos.saturating_sub(DOC_HALF_WINDOW));
-                let end = doc_trimmed
-                    .ceil_char_boundary((pos + needle.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()));
+                let end = doc_trimmed.ceil_char_boundary(
+                    (pos + needle.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()),
+                );
                 doc_trimmed[start..end].trim().to_string()
             }
             None => {
@@ -2236,7 +2238,10 @@ mod decision_ranker_tests {
         let pool = [c0, c1, c2];
         assert_eq!(first_collision(&pool, &CostFirstReadingRanker), None);
         let sel = CostFirstReadingRanker.select(&ctx(), &pool).expect("chose");
-        assert_eq!(sel.chosen, 1, "picks forest_rank == 0 despite skeleton re-ordering");
+        assert_eq!(
+            sel.chosen, 1,
+            "picks forest_rank == 0 despite skeleton re-ordering"
+        );
         assert_eq!(sel.runners_up, vec![2, 0]);
         assert_eq!(
             CostFirstReadingRanker.model().as_deref(),

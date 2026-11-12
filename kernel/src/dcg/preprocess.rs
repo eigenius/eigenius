@@ -81,6 +81,7 @@ pub struct Token {
     surface: String,
     span: Range<usize>,
     kind: TokenKind,
+    code_literal: bool,
 }
 
 /// A range's endpoints, each a [`Quantity`] read in the unit written after the pair.
@@ -152,6 +153,12 @@ impl Token {
     pub fn is_comma(&self) -> bool {
         self.kind == TokenKind::Comma
     }
+
+    /// True iff this token constitutes an entire inline backtick code span in the source text,
+    /// marking it as a mentioned string literal rather than a used word.
+    pub fn is_code_literal(&self) -> bool {
+        self.code_literal
+    }
 }
 
 /// The surfaces of `tokens`, joined by single spaces — the key a multiword lexical form is stored
@@ -205,6 +212,7 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme], units: &ProseUnits) -> Vec<Tok
                 surface: ",".to_string(),
                 span: lexeme.span.clone(),
                 kind: TokenKind::Comma,
+                code_literal: false,
             });
         } else {
             run.push(lexeme);
@@ -223,7 +231,32 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme], units: &ProseUnits) -> Vec<Tok
     }
     tokens.dedup_by(|a, b| a.is_comma() && b.is_comma());
     let tokens = join_scientific(text, tokens);
-    recognise_quantities(text, tokens, units)
+    let mut tokens = recognise_quantities(text, tokens, units);
+    let mut backtick_spans: Vec<Range<usize>> = Vec::new();
+    let mut open_bt: Option<usize> = None;
+    for (idx, b) in text.bytes().enumerate() {
+        if b == b'`' {
+            if let Some(s) = open_bt.take() {
+                backtick_spans.push((s + 1)..idx);
+            } else {
+                open_bt = Some(idx);
+            }
+        }
+    }
+    if !backtick_spans.is_empty() {
+        for t in &mut tokens {
+            if t.is_word()
+                && backtick_spans.iter().any(|sp| {
+                    sp.start <= t.span.start
+                        && t.span.end <= sp.end
+                        && text[sp.clone()].trim() == t.surface
+                })
+            {
+                t.code_literal = true;
+            }
+        }
+    }
+    tokens
 }
 
 /// Decision 7: scientific notation is one numeral — a mantissa, `×` or `x`, and a power of ten, or a
@@ -245,6 +278,7 @@ fn join_scientific(text: &str, tokens: Vec<Token>) -> Vec<Token> {
                     surface: text[span.clone()].to_string(),
                     span,
                     kind: TokenKind::Numeral(value),
+                    code_literal: false,
                 });
                 i += 3;
                 continue;
@@ -343,6 +377,7 @@ fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> V
                     surface: text[start..end].to_string(),
                     span: start..end,
                     kind: TokenKind::Range(range),
+                    code_literal: false,
                 });
                 i = j;
                 continue;
@@ -359,6 +394,7 @@ fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> V
                     surface: text[start..end].to_string(),
                     span: start..end,
                     kind: TokenKind::QuantityList(list),
+                    code_literal: false,
                 });
                 i = j;
                 continue;
@@ -375,6 +411,7 @@ fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> V
                     surface: text[start..end].to_string(),
                     span: start..end,
                     kind: TokenKind::Quantity(quantity),
+                    code_literal: false,
                 });
                 i = j;
                 continue;
@@ -700,6 +737,7 @@ fn symbol(text: &str, l: &Lexeme) -> Token {
         surface: l.text(text).to_string(),
         span: l.span.clone(),
         kind: TokenKind::NonProse,
+        code_literal: false,
     }
 }
 
@@ -747,6 +785,7 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
             span,
             surface,
             kind,
+            code_literal: false,
         });
     }
     for l in run[last + 1..].iter().filter(|l| is_operator(l.text(text))) {
@@ -779,11 +818,13 @@ fn split_solid_negation(surface: &str, span: &std::ops::Range<usize>) -> Option<
             span: span.start..span.start + 3,
             surface: can.to_string(),
             kind: TokenKind::Word,
+            code_literal: false,
         },
         Token {
             span: span.start + 3..span.end,
             surface: not.to_string(),
             kind: TokenKind::Word,
+            code_literal: false,
         },
     ])
 }
@@ -819,11 +860,13 @@ fn split_possessive_clitic(surface: &str, span: &std::ops::Range<usize>) -> Opti
             span: span.start..split_at,
             surface: stem.to_string(),
             kind: TokenKind::Word,
+            code_literal: false,
         },
         Token {
             span: split_at..span.end,
             surface: "'s".to_string(),
             kind: TokenKind::Word,
+            code_literal: false,
         },
     ])
 }
@@ -951,6 +994,27 @@ mod tests {
         assert!(tokenize("cannotation is a word")
             .iter()
             .any(|x| x.surface() == "cannotation"));
+    }
+
+    #[test]
+    fn single_token_code_span_marks_code_literal() {
+        let t = tokenize("A `GET` request reads `a.b` from the `CAT` motif.");
+        let get = t.iter().find(|x| x.surface() == "GET").unwrap();
+        let ab = t.iter().find(|x| x.surface() == "a.b").unwrap();
+        let cat = t.iter().find(|x| x.surface() == "CAT").unwrap();
+        let req = t.iter().find(|x| x.surface() == "request").unwrap();
+        assert!(get.is_code_literal());
+        assert!(ab.is_code_literal());
+        assert!(cat.is_code_literal());
+        assert!(!req.is_code_literal());
+
+        let multi = tokenize("The query `gene(gene_symbol: \"BRAF\")` runs.");
+        for tok in &multi {
+            assert!(
+                !tok.is_code_literal(),
+                "multi-token code span must not mark sub-tokens as standalone literals: {tok:?}"
+            );
+        }
     }
 
     /// Decision 7: scientific notation is one numeral; a power of ten alone needs a superscript or a

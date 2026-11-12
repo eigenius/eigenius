@@ -1188,6 +1188,25 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
+                if j > i && tokens[i..=j].iter().any(Token::is_code_literal) {
+                    continue;
+                }
+                if i == j
+                    && tokens[i].is_code_literal()
+                    && self
+                        .lex
+                        .entries_for(&tokens[i].surface().trim().to_lowercase())
+                        .iter()
+                        .any(|e| match e.item.sem() {
+                            Exp::EigonResource(r) => r.id().is_some_and(|iri| {
+                                iri.as_str().starts_with("urn:eigenius:doc:lit_")
+                            }),
+                            Exp::Const(iri, _) => iri.as_str().starts_with("urn:eigenius:doc:lit_"),
+                            _ => false,
+                        })
+                {
+                    continue;
+                }
                 let surface = join_surfaces(&tokens[i..=j]);
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();

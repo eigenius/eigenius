@@ -80,7 +80,11 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
     let mut cuts: Vec<CutSentence> = Vec::new();
     let mut search_from = 0usize;
     let mut next_span = |se_text: &str| -> (usize, usize) {
-        if let Some(rel) = inputs.doc.get(search_from..).and_then(|tail| tail.find(se_text)) {
+        if let Some(rel) = inputs
+            .doc
+            .get(search_from..)
+            .and_then(|tail| tail.find(se_text))
+        {
             let start = search_from + rel;
             let end = start + se_text.len();
             search_from = end;

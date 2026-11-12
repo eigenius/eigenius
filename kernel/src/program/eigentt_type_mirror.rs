@@ -475,8 +475,11 @@ fn exp_contains_lam(exp: &Exp) -> bool {
         | Exp::Times(h, a)
         | Exp::Pair(h, a) => exp_contains_lam(h) || exp_contains_lam(a),
         Exp::Record(fields) => fields.iter().any(|(_, _, ty)| exp_contains_lam(ty)),
-        Exp::Refine(carrier, _) | Exp::Refl(carrier) | Exp::PropAccess(carrier, _)
-        | Exp::Fst(carrier) | Exp::Snd(carrier) => exp_contains_lam(carrier),
+        Exp::Refine(carrier, _)
+        | Exp::Refl(carrier)
+        | Exp::PropAccess(carrier, _)
+        | Exp::Fst(carrier)
+        | Exp::Snd(carrier) => exp_contains_lam(carrier),
         Exp::Id(ty, x, y) | Exp::Apart(ty, x, y) => {
             exp_contains_lam(ty) || exp_contains_lam(x) || exp_contains_lam(y)
         }
@@ -2895,7 +2898,10 @@ mod record_codec {
 
         // Bare CodecNames continues to reject unannotated Lam.
         let bare = CodecNames::from_layer(&layer);
-        assert_eq!(encode_type(&prop, &bare), Err(EncodeError::LamWithoutAnnotation));
+        assert_eq!(
+            encode_type(&prop, &bare),
+            Err(EncodeError::LamWithoutAnnotation)
+        );
 
         // With typing_layer attached, check-position Lam encodes, prints to ESL, and round-trips
         // back to the identical AST while bare top-level Lam still fails closed.

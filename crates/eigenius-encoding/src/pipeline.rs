@@ -528,50 +528,48 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // antecedent to a later demonstrative. The kinds arm mirrors every other recorded stage
     // (exists → replay, absent + live → record); `--land-in-loop` without `--kinds` installs the
     // deterministic floor (`NoKindClassifier`: `frame_kind` + `enc:Assertion`).
-    let kind_classifier: Option<Box<dyn crate::KindClassifier>> = match (
-        &args.kinds,
-        args.land_in_loop,
-    ) {
-        (Some(p), _) if p.exists() => {
-            let r = crate::ReplayKindClassifier::load(p)
-                .map_err(|e| format!("read {}: {e}", p.display()))?;
-            eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
-            Some(Box::new(r))
-        }
-        (Some(p), _) => {
-            #[cfg(feature = "use-llm")]
-            {
-                let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
-                    return Err(format!(
+    let kind_classifier: Option<Box<dyn crate::KindClassifier>> =
+        match (&args.kinds, args.land_in_loop) {
+            (Some(p), _) if p.exists() => {
+                let r = crate::ReplayKindClassifier::load(p)
+                    .map_err(|e| format!("read {}: {e}", p.display()))?;
+                eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
+                Some(Box::new(r))
+            }
+            (Some(p), _) => {
+                #[cfg(feature = "use-llm")]
+                {
+                    let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
+                        return Err(format!(
                         "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
                         p.display()
                     ));
-                };
-                eprintln!(
-                    "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
-                    p.display()
-                );
-                Some(Box::new(c) as Box<dyn crate::KindClassifier>)
-            }
-            #[cfg(not(feature = "use-llm"))]
-            return Err(format!(
-                "--kinds {} does not exist, and this binary has no live classifier (built \
+                    };
+                    eprintln!(
+                        "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
+                        p.display()
+                    );
+                    Some(Box::new(c) as Box<dyn crate::KindClassifier>)
+                }
+                #[cfg(not(feature = "use-llm"))]
+                return Err(format!(
+                    "--kinds {} does not exist, and this binary has no live classifier (built \
                      without --features use-llm)",
-                p.display()
-            ));
-        }
-        (None, true) => {
-            eprintln!(
-                "kinds:      NoKindClassifier (deterministic frame_kind + Assertion){}",
-                args.kinds_out
-                    .as_ref()
-                    .map(|p| format!(" — RECORDING to {}", p.display()))
-                    .unwrap_or_default()
-            );
-            Some(Box::new(crate::NoKindClassifier))
-        }
-        (None, false) => None,
-    };
+                    p.display()
+                ));
+            }
+            (None, true) => {
+                eprintln!(
+                    "kinds:      NoKindClassifier (deterministic frame_kind + Assertion){}",
+                    args.kinds_out
+                        .as_ref()
+                        .map(|p| format!(" — RECORDING to {}", p.display()))
+                        .unwrap_or_default()
+                );
+                Some(Box::new(crate::NoKindClassifier))
+            }
+            (None, false) => None,
+        };
     let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
     // The codec's constructor argument names, from the chain this run emits against.
     let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head);
