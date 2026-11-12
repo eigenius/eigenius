@@ -58,9 +58,7 @@ use std::path::{Path, PathBuf};
 
 use crate::emit::DocumentMeta;
 use crate::select::load_pins;
-use crate::snapshot::{
-    build_sense_ranker_with_model, open_head_and_backend, CELL_BEAM, SENSE_CAP,
-};
+use crate::snapshot::{build_sense_ranker_with_model, open_head_and_backend, CELL_BEAM, SENSE_CAP};
 use clap::Parser as ClapParser;
 use eigenius_kernel::dcg::{
     AugmentOptions, CostFirstReadingRanker, InProcessPipeline, NoAbbreviationProposer, Parser,
@@ -118,6 +116,10 @@ pub struct Args {
     /// `claude-sonnet-4-6`); defaults to `EIGENIUS_SENSE_MODEL` else `DEFAULT_MODEL`.
     #[arg(long)]
     sense_model: Option<String>,
+    /// Optional model id override for live `--selections` RECORD mode (e.g. `jev-latest` or
+    /// `claude-sonnet-4-6`); defaults to `EIGENIUS_SELECT_MODEL` else `DEFAULT_READING_MODEL`.
+    #[arg(long)]
+    select_model: Option<String>,
     /// Resume an interrupted live recording: preload existing `--ranks` and `--selections`
     /// checkpoint files, replaying hits and invoking the live model only on remaining sentences.
     #[arg(long)]
@@ -159,6 +161,10 @@ pub struct Args {
     /// `--full-glossary` (e.g. `docmodel-page.txt` when `--source` is pre-rewritten CNL).
     #[arg(long)]
     glossary_source: Option<PathBuf>,
+    /// Optional full CNL corpus document for Stage-A recurrence harvesting under `--full-glossary`
+    /// when `--source` is a benchmark slice (prevents recurrence drift between slice and full doc).
+    #[arg(long)]
+    glossary_corpus: Option<PathBuf>,
     /// Treat each non-empty line of `--source` as one pre-segmented discourse unit.
     #[arg(long)]
     units_per_line: bool,
@@ -260,26 +266,25 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
 
     // Exactly one selection authority per run — an emission with a mixed or defaulted authority
     // would be unauditable. The pins double as the emission's byte-stable `Pinned` records.
-    let pins =
-        match (&args.pins, &args.selections, args.cost_first) {
-            (Some(p), None, false) => {
-                let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
-                eprintln!("pins:   {} entries", pins.len());
-                Some(pins)
-            }
-            (None, Some(_), false) | (None, None, true) => None,
-            (None, None, false) if args.partial => {
-                // NO authority — only sole-survivor readings encode; the rest are cuts.
-                eprintln!("selection: NONE (--partial) — sole-survivor readings only");
-                None
-            }
-            _ => return Err(
-                "exactly one of --pins (declared arm) / --selections (computed arm) / --cost-first \
+    let pins = match (&args.pins, &args.selections, args.cost_first) {
+        (Some(p), None, false) => {
+            let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("pins:   {} entries", pins.len());
+            Some(pins)
+        }
+        (None, Some(_), false) | (None, None, true) => None,
+        (None, None, false) if args.partial => {
+            // NO authority — only sole-survivor readings encode; the rest are cuts.
+            eprintln!("selection: NONE (--partial) — sole-survivor readings only");
+            None
+        }
+        _ => return Err(
+            "exactly one of --pins (declared arm) / --selections (computed arm) / --cost-first \
                  (deterministic offline arm) is required (or --partial with none: sole-survivor \
                  readings only)"
-                    .to_string(),
-            ),
-        };
+                .to_string(),
+        ),
+    };
     #[cfg(feature = "use-llm")]
     let mut selection_recording: Option<(
         std::sync::Arc<RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>>,
@@ -320,7 +325,20 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             // RECORD (or RESUME) mode — the live ranker answers and the draw is written after generation.
             #[cfg(feature = "use-llm")]
             {
-                let Some(live) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
+                let live_opt = match args.select_model.as_deref() {
+                    Some(m) if !m.trim().is_empty() => {
+                        use eigenius_kernel::dcg::model_config::{
+                            ModelConfig, DEFAULT_READING_MODEL,
+                        };
+                        eigenius_kernel::dcg::live_reading_ranker(ModelConfig::requested(
+                            m,
+                            DEFAULT_READING_MODEL,
+                            0,
+                        ))
+                    }
+                    _ => eigenius_kernel::dcg::live_reading_ranker_from_env(),
+                };
+                let Some(live) = live_opt else {
                     return Err(format!(
                         "--selections {} does not exist (RECORD mode) but the model's API key \
                          is unset",
@@ -510,48 +528,50 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // antecedent to a later demonstrative. The kinds arm mirrors every other recorded stage
     // (exists → replay, absent + live → record); `--land-in-loop` without `--kinds` installs the
     // deterministic floor (`NoKindClassifier`: `frame_kind` + `enc:Assertion`).
-    let kind_classifier: Option<Box<dyn crate::KindClassifier>> =
-        match (&args.kinds, args.land_in_loop) {
-            (Some(p), _) if p.exists() => {
-                let r = crate::ReplayKindClassifier::load(p)
-                    .map_err(|e| format!("read {}: {e}", p.display()))?;
-                eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
-                Some(Box::new(r))
-            }
-            (Some(p), _) => {
-                #[cfg(feature = "use-llm")]
-                {
-                    let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
-                        return Err(format!(
-                            "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
-                            p.display()
-                        ));
-                    };
-                    eprintln!(
-                        "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
+    let kind_classifier: Option<Box<dyn crate::KindClassifier>> = match (
+        &args.kinds,
+        args.land_in_loop,
+    ) {
+        (Some(p), _) if p.exists() => {
+            let r = crate::ReplayKindClassifier::load(p)
+                .map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
+            Some(Box::new(r))
+        }
+        (Some(p), _) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
+                    return Err(format!(
+                        "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
                         p.display()
-                    );
-                    Some(Box::new(c) as Box<dyn crate::KindClassifier>)
-                }
-                #[cfg(not(feature = "use-llm"))]
-                return Err(format!(
-                    "--kinds {} does not exist, and this binary has no live classifier (built \
-                     without --features use-llm)",
-                    p.display()
-                ));
-            }
-            (None, true) => {
+                    ));
+                };
                 eprintln!(
-                    "kinds:      NoKindClassifier (deterministic frame_kind + Assertion){}",
-                    args.kinds_out
-                        .as_ref()
-                        .map(|p| format!(" — RECORDING to {}", p.display()))
-                        .unwrap_or_default()
+                    "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
+                    p.display()
                 );
-                Some(Box::new(crate::NoKindClassifier))
+                Some(Box::new(c) as Box<dyn crate::KindClassifier>)
             }
-            (None, false) => None,
-        };
+            #[cfg(not(feature = "use-llm"))]
+            return Err(format!(
+                "--kinds {} does not exist, and this binary has no live classifier (built \
+                     without --features use-llm)",
+                p.display()
+            ));
+        }
+        (None, true) => {
+            eprintln!(
+                "kinds:      NoKindClassifier (deterministic frame_kind + Assertion){}",
+                args.kinds_out
+                    .as_ref()
+                    .map(|p| format!(" — RECORDING to {}", p.display()))
+                    .unwrap_or_default()
+            );
+            Some(Box::new(crate::NoKindClassifier))
+        }
+        (None, false) => None,
+    };
     let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
     // The codec's constructor argument names, from the chain this run emits against.
     let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head);
@@ -572,6 +592,13 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         ),
         None => None,
     };
+    let glossary_corpus_text = match &args.glossary_corpus {
+        Some(p) => Some(
+            std::fs::read_to_string(p)
+                .map_err(|e| format!("read glossary corpus {}: {e}", p.display()))?,
+        ),
+        None => None,
+    };
     let verify_backend = std::sync::Arc::clone(&backend);
     let mut pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)
         .with_parser_setup(&setup)
@@ -580,6 +607,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     if args.full_glossary {
         pipeline = pipeline.with_augment_options(AugmentOptions::FullGlossary {
             source_document: glossary_source_text,
+            corpus_document: glossary_corpus_text,
         });
     }
     if let Some(r) = &ranker {
@@ -756,10 +784,9 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         let verify_layer = std::sync::Arc::new(b.build(
             eigenius_kernel::layer::LayerStorage::with_persistent(verify_backend),
         ));
-        let errors = eigenius_kernel::validation::Validator::new(std::sync::Arc::clone(
-            &verify_layer,
-        ))
-        .validate();
+        let errors =
+            eigenius_kernel::validation::Validator::new(std::sync::Arc::clone(&verify_layer))
+                .validate();
         if !errors.is_empty() {
             let preview: Vec<String> = errors
                 .iter()
@@ -828,7 +855,9 @@ fn write_adjudications_tsv(
             let list: Vec<String> = units.iter().map(usize::to_string).collect();
             format!("units {}", list.join(","))
         };
-        out.push_str(&format!("{sentence}\t{sem}\tuncertain\t{unit_label} | {note}\n"));
+        out.push_str(&format!(
+            "{sentence}\t{sem}\tuncertain\t{unit_label} | {note}\n"
+        ));
     }
     write_doc(path, out.as_bytes())?;
     Ok(rows.len())

@@ -900,10 +900,20 @@ impl Parser {
             .map(|t| t.surface().to_string())
             .collect();
         let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
-        // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
-        // group), so structural alternatives sit side by side for the ranker.
+        // Present GROUPED BY SKELETON, ordered by each skeleton group's lowest-cost parse
+        // (`first_seen` index in cost-sorted `closed`) rather than ASCII byte order of `skeleton_of`
+        // (where `'A'`/`'E'`/`'F'` otherwise sort ahead of `'§'` and evict lowest-cost readings from
+        // `MAX_STRUCTURES_SHOWN`).
+        let mut first_seen: BTreeMap<&str, usize> = BTreeMap::new();
+        for (idx, sk) in skels.iter().enumerate() {
+            first_seen.entry(sk.as_str()).or_insert(idx);
+        }
         let mut order: Vec<usize> = (0..closed.len()).collect();
-        order.sort_by(|&a, &b| skels[a].cmp(&skels[b]));
+        order.sort_by(|&a, &b| {
+            first_seen[skels[a].as_str()]
+                .cmp(&first_seen[skels[b].as_str()])
+                .then_with(|| a.cmp(&b))
+        });
         let cands: Vec<ReadingCandidate> = order
             .iter()
             .map(|&i| {
@@ -1144,9 +1154,11 @@ fn eta_norm_exp(e: &Exp) -> Exp {
             Box::new(eta_norm_exp(a)),
             Box::new(eta_norm_exp(b)),
         ),
-        Exp::InductiveCtor(d, n, args) => {
-            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(eta_norm_exp).collect())
-        }
+        Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+            d.clone(),
+            n.clone(),
+            args.iter().map(eta_norm_exp).collect(),
+        ),
         other => other.clone(),
     }
 }

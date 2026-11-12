@@ -114,24 +114,49 @@ impl Proposer for AnthropicProposer {
         if ctx.candidates.is_empty() {
             return Proposal::default();
         }
+        const MAX_DOC_PROMPT_BYTES: usize = 12_000;
+        const DOC_HALF_WINDOW: usize = 2_500;
+        const MAX_PRIOR_PROMPT: usize = 40;
+        const MAX_CANDIDATES_PROMPT: usize = 60;
+
         let candidate_list = ctx
             .candidates
             .iter()
             .enumerate()
+            .take(MAX_CANDIDATES_PROMPT)
             .map(|(i, c)| format!("[{i}] {}", c.surface()))
             .collect::<Vec<_>>()
             .join("\n");
         // Prior selections — the discourse the referent must be consistent with (same block the
         // reading ranker presents).
+        let prior_slice = if ctx.doc.prior_selections.len() > MAX_PRIOR_PROMPT {
+            &ctx.doc.prior_selections[ctx.doc.prior_selections.len() - MAX_PRIOR_PROMPT..]
+        } else {
+            ctx.doc.prior_selections
+        };
         let mut prior_block = String::new();
-        if !ctx.doc.prior_selections.is_empty() {
+        if !prior_slice.is_empty() {
             prior_block
                 .push_str("Readings already selected for earlier sentences (the discourse):\n");
-            for p in ctx.doc.prior_selections {
+            for p in prior_slice {
                 prior_block.push_str(&format!("  sentence {}: \"{}\"\n", p.ordinal, p.gloss));
             }
             prior_block.push('\n');
         }
+        let doc_trimmed = ctx.doc.document.trim();
+        let sent_trimmed = ctx.doc.sentence.trim();
+        let doc_window = if doc_trimmed.len() <= MAX_DOC_PROMPT_BYTES {
+            doc_trimmed
+        } else if let Some(pos) = doc_trimmed.find(sent_trimmed) {
+            let start = doc_trimmed.floor_char_boundary(pos.saturating_sub(DOC_HALF_WINDOW));
+            let end = doc_trimmed.ceil_char_boundary(
+                (pos + sent_trimmed.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()),
+            );
+            doc_trimmed[start..end].trim()
+        } else {
+            let end = doc_trimmed.floor_char_boundary(DOC_HALF_WINDOW * 2);
+            doc_trimmed[..end].trim()
+        };
         let instructions = format!(
             "A parser is resolving an anaphor (a pronoun, possessor, or demonstrative like \
              \"these X\") to its antecedent in the document below.\n\n\
@@ -141,8 +166,8 @@ impl Proposer for AnthropicProposer {
              that type — earlier discourse referents, most recent first):\n{}\n\n\
              Return `ranked_candidate_indices` (most-likely antecedent first; empty if none is \
              the referent), `rationale` (one sentence), and `confidence` in the top pick (0-1).",
-            ctx.doc.document.trim(),
-            ctx.doc.sentence.trim(),
+            doc_window,
+            sent_trimmed,
             pretty_term(&ctx.hole.ty),
             candidate_list,
         );

@@ -580,6 +580,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                         .map(|p| quant_clause_pred(xb, p, vb))
                         .filter(|x| !x.is_empty())
                         .collect();
+                    let is_unrestricted_entity = matches!(
+                        a.as_ref(),
+                        Exp::EigonClass(iri) if iri.as_str() == "urn:eigenius:lexicon:Entity"
+                    );
+                    if is_unrestricted_entity {
+                        return if preds.is_empty() {
+                            "something".to_string()
+                        } else {
+                            format!("something, {}", preds.join(" and "))
+                        };
+                    }
                     let np = bare_np(a, vb);
                     return if preds.is_empty() {
                         format!("some {np}")
@@ -750,7 +761,11 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 } else {
                     "less than"
                 };
-                return format!("{} is {cmp} {}", verbalize(args[0], vb), verbalize(args[1], vb));
+                return format!(
+                    "{} is {cmp} {}",
+                    verbalize(args[0], vb),
+                    verbalize(args[1], vb)
+                );
             }
             ("ge" | "le", 2) => {
                 let (h0, a0) = app_spine(args[0]);
@@ -1664,7 +1679,10 @@ fn noun_phrase_expanded(binder: &Patt, base: &Exp, restr: &Exp, vb: &Vb) -> Stri
                 } else {
                     "compound-with"
                 };
-                parts.push(format!("{rel} {} (relation unspecified)", bare_np(a[1], vb)));
+                parts.push(format!(
+                    "{rel} {} (relation unspecified)",
+                    bare_np(a[1], vb)
+                ));
             }
             Some(p) if p.starts_with("prep_") => {
                 if let Some((p, subj, obj)) = prep_parts(p, &a, vb) {
@@ -1992,12 +2010,9 @@ fn adjunct_of<'e>(
         (Some(p), [unit, quantity, _pred, subject_exp]) => {
             (p, quantity_text(quantity, unit), None, *subject_exp)
         }
-        (None, [obj, _pred, subject_exp]) => (
-            raw_p,
-            head_word(obj, vb, env),
-            Some(*obj),
-            *subject_exp,
-        ),
+        (None, [obj, _pred, subject_exp]) => {
+            (raw_p, head_word(obj, vb, env), Some(*obj), *subject_exp)
+        }
         _ => return None,
     };
     let subject = pretty_term(subject_exp);
@@ -2023,7 +2038,12 @@ fn adjunct_of<'e>(
     if !verbs.is_empty() {
         Some((Function::Adverbial(p), dependent, walk_obj, verbs))
     } else if !adjectives.is_empty() {
-        Some((Function::PredicateAdverbial(p), dependent, walk_obj, adjectives))
+        Some((
+            Function::PredicateAdverbial(p),
+            dependent,
+            walk_obj,
+            adjectives,
+        ))
     } else if copula {
         Some((
             Function::SecondPredicate(p),

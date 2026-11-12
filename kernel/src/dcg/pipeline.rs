@@ -266,15 +266,34 @@ impl<'a> InProcessPipeline<'a> {
                 self.category_proposer,
                 self.lemmatizer,
             ),
-            AugmentOptions::FullGlossary { source_document } => augment_full_glossary(
-                &self.base,
-                document,
-                bodies.clone(),
-                source_document.as_deref(),
-                self.abbreviation_proposer,
-                self.category_proposer,
-                self.lemmatizer,
-            ),
+            AugmentOptions::FullGlossary {
+                source_document,
+                corpus_document,
+            } => {
+                let (aug_doc, aug_bodies) = match corpus_document.as_deref() {
+                    Some(full_doc) => {
+                        let full_bodies: Vec<String> = if self.units_per_line {
+                            segment_given_lines(full_doc)
+                        } else {
+                            segment_sentences(full_doc)
+                                .into_iter()
+                                .filter(|s| !s.trim().is_empty())
+                                .collect()
+                        };
+                        (full_doc, full_bodies)
+                    }
+                    None => (document, bodies.clone()),
+                };
+                augment_full_glossary(
+                    &self.base,
+                    aug_doc,
+                    aug_bodies,
+                    source_document.as_deref(),
+                    self.abbreviation_proposer,
+                    self.category_proposer,
+                    self.lemmatizer,
+                )
+            }
             // `DocumentOnly` and (until Phase 3) `LlmBacked` use the deterministic document-only harvest.
             _ => augment_document_only(
                 &self.base,

@@ -318,6 +318,22 @@ mod anthropic {
 
     impl KindClassifier for AnthropicKindClassifier {
         fn classify(&self, _ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
+            const MAX_DOC_PROMPT_BYTES: usize = 12_000;
+            const DOC_HALF_WINDOW: usize = 2_500;
+            let doc_trimmed = self.document.trim();
+            let sent_trimmed = sentence.trim();
+            let doc_window = if doc_trimmed.len() <= MAX_DOC_PROMPT_BYTES {
+                doc_trimmed
+            } else if let Some(pos) = doc_trimmed.find(sent_trimmed) {
+                let start = doc_trimmed.floor_char_boundary(pos.saturating_sub(DOC_HALF_WINDOW));
+                let end = doc_trimmed.ceil_char_boundary(
+                    (pos + sent_trimmed.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()),
+                );
+                doc_trimmed[start..end].trim()
+            } else {
+                let end = doc_trimmed.floor_char_boundary(DOC_HALF_WINDOW * 2);
+                doc_trimmed[..end].trim()
+            };
             let prompt = format!(
                 "A scientific document is being encoded claim by claim. Classify what the \
                  sentence below IS, in the document's own discourse terms — the kind a later \
@@ -330,9 +346,7 @@ mod anthropic {
                  assertion). A finding is an established result of the document's own \
                  investigation; an observation is something observed/measured; a classification \
                  assigns items to categories. Return `rationale`: one sentence why.",
-                self.document.trim(),
-                sentence.trim(),
-                gloss,
+                doc_window, sent_trimmed, gloss,
             );
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()

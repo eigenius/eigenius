@@ -198,6 +198,7 @@ pub enum AugmentOptions {
     /// optional un-rewritten `source_document` abbreviation extraction).
     FullGlossary {
         source_document: Option<String>,
+        corpus_document: Option<String>,
     },
 }
 

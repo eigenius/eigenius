@@ -187,6 +187,24 @@ impl Parser {
             .entries_for(&s_lc)
             .iter()
             .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "v"));
+        let candidates_have_wn_verb = surface_has_wn_verb
+            || candidates.iter().any(|c| {
+                self.lex
+                    .entries_for(c)
+                    .iter()
+                    .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "v"))
+            });
+        let candidates_have_wn_noun = candidates.iter().any(|c| {
+            self.lex
+                .entries_for(c)
+                .iter()
+                .any(|e| is_wordnet_noun_sense(e.sense.as_deref()))
+        });
+        // Cross-POS UMLS clinical-status nominal prune on pure verb surfaces (`excluded` -> UMLS
+        // `C2828389` "Exclusion", where WordNet has `exclude.v` and NO WordNet noun sense on any
+        // candidate lemma): mirrors `surface_is_governed_relational` below.
+        let surface_is_verb_without_wn_noun =
+            !surface_all_caps && candidates_have_wn_verb && !candidates_have_wn_noun;
         let has_imported_entry = !has_closed(&s_lc)
             && candidates
                 .iter()
@@ -220,7 +238,7 @@ impl Parser {
             if surface_is_determiner {
                 entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
             }
-            if surface_is_governed_relational {
+            if surface_is_governed_relational || surface_is_verb_without_wn_noun {
                 // Keyed PER ENTRY, not per surface (eigenius#61-adjacent, `2026-10-08`). The prune
                 // above asks "does ANY entry for this surface govern a preposition?" and then drops
                 // EVERY nominal, which deletes the common-noun reading of any word that is also a
@@ -500,15 +518,21 @@ impl Parser {
                             None
                         })
                         .collect();
+                    let had_grounded_mass = !mass_shifts.is_empty();
                     out.extend(mass_shifts);
-                    let n_mass =
-                        Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), mass]);
-                    out.push(Item::from_parts(
-                        n_mass,
-                        ent_cls,
-                        super::super::item::Combinator::Other,
-                        super::super::item::Cost::from_sense_rank(8),
-                    ));
+                    if !had_grounded_mass {
+                        let n_mass = Exp::InductiveCtor(
+                            cat_decl,
+                            "cat_n".into(),
+                            vec![ent_cls.clone(), mass],
+                        );
+                        out.push(Item::from_parts(
+                            n_mass,
+                            ent_cls,
+                            super::super::item::Combinator::Other,
+                            super::super::item::Cost::from_sense_rank(8),
+                        ));
+                    }
                 }
             }
         }
@@ -1450,33 +1474,6 @@ impl Parser {
                 out.extend(bare_n_preps);
             }
         }
-        // Elliptical plural nominal after numeral/percentage (`38.8 expected`, `10.5% observed`):
-        // any imported `-ed` participle receives a fallback `cat_n(Entity, pl)` reading.
-        if has_imported_entry
-            && s_lc.ends_with("ed")
-            && !out.iter().any(|it| {
-                matches!(
-                    is_ctor(it.cat(), "cat_n"),
-                    Some([_, Exp::InductiveCtor(_, n, _)]) if n == "pl"
-                )
-            })
-        {
-            if let (Some(cat_decl), Some(num_decl), Ok(ent_iri)) = (
-                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
-                inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
-                Iri::parse("urn:eigenius:lexicon:Entity"),
-            ) {
-                let ent_cls = Exp::EigonClass(ent_iri);
-                let pl = Exp::InductiveCtor(num_decl, "pl".into(), Vec::new());
-                let n_pl = Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), pl]);
-                out.push(Item::from_parts(
-                    n_pl,
-                    ent_cls,
-                    Combinator::Other,
-                    Cost::from_sense_rank(4),
-                ));
-            }
-        }
         // Predicative adjective taking a gerund VP (`worth <V-ing>`) also takes a direct NP
         // complement (`worth a benchmark`, `worth the effort`): `(S[dcl,adj]\NP)/NP`.
         // Ranked behind `worth_vp`/`worth_tv` so verbal gerunds (`worth stating`, `worth knowing`)
@@ -1906,7 +1903,11 @@ impl Parser {
                             Box::new(Exp::Var(s_var.into())),
                         );
                         let sem = Exp::Lam(Patt::Var(s_var.into()), Box::new(body));
-                        intrans.push(Item::from_parts(vp_cat.clone(), sem, it.prov(), it.cost()));
+                        let mut c = it.cost();
+                        if !s_lc.starts_with("self-") {
+                            c.sense_rank = c.sense_rank.saturating_add(12);
+                        }
+                        intrans.push(Item::from_parts(vp_cat.clone(), sem, it.prov(), c));
                     }
                 }
             }
@@ -2136,13 +2137,18 @@ impl Parser {
                     } else {
                         None
                     };
-                    let sem = part_sem.or(cls_sem).unwrap_or_else(|| {
-                        let false_prop = Exp::Const(false_iri, Vec::new());
-                        let true_term =
-                            Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
-                        Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term))
-                    });
-                    let cost = Cost::from_sense_rank(4);
+                    let (sem, cost) = match part_sem.or(cls_sem) {
+                        Some(s) => (s, Cost::from_sense_rank(4)),
+                        None => {
+                            let false_prop = Exp::Const(false_iri, Vec::new());
+                            let true_term =
+                                Exp::Arrow(Box::new(false_prop.clone()), Box::new(false_prop));
+                            (
+                                Exp::Lam(Patt::Var("__dom_adj_x".into()), Box::new(true_term)),
+                                Cost::from_sense_rank(16),
+                            )
+                        }
+                    };
                     out.push(Item::from_parts(adj_cat, sem, Combinator::Other, cost));
                 }
             }
@@ -2178,7 +2184,12 @@ impl Parser {
                 let ent_cls = Exp::EigonClass(ent_iri);
                 let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
                 let n_cat = Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), sg]);
-                out.push(Item::new(n_cat, ent_cls));
+                out.push(Item::from_parts(
+                    n_cat,
+                    ent_cls,
+                    Combinator::Other,
+                    Cost::from_sense_rank(10),
+                ));
             }
         }
         // Productive `un-` prefix on relational and plain adjectives (`unrelated`, `unrelated to`
@@ -2562,7 +2573,7 @@ impl Parser {
                     } else {
                         kind_of(ent_cls.clone())
                     };
-                    let fallback_ent_cost = Cost::from_sense_rank(np_it.cost().sense_rank.max(8));
+                    let fallback_ent_cost = Cost::from_sense_rank(np_it.cost().sense_rank.max(14));
                     let entity_sem_cost = if base_entity_sem == kind_of(ent_cls.clone()) {
                         fallback_ent_cost
                     } else {
@@ -3303,6 +3314,49 @@ impl Parser {
         for i in 0..n {
             let items = self.superlative_functor_items(tokens[i].surface());
             chart[i][i].extend(items);
+        }
+
+        // Elliptical plural nominal after numeral/percentage/determiner (`38.8 expected`, `10.5% observed`):
+        // gated to positions immediately preceded by a numeral, measure phrase, or determiner so copular
+        // passives (`are corrected`, `were excluded`) never turn `-ed` participles into `Entity` nouns.
+        for i in 1..n {
+            let s_lc = tokens[i].surface().trim().to_ascii_lowercase();
+            let prev_is_num_or_det = tokens[i - 1].surface().ends_with('%')
+                || chart[i - 1][i - 1].iter().any(|it| {
+                    is_ctor(it.cat(), "cat_num").is_some()
+                        || is_ctor(it.cat(), "cat_mp").is_some()
+                        || is_ctor(it.cat(), "cat_forall").is_some()
+                });
+            if s_lc.ends_with("ed")
+                && prev_is_num_or_det
+                && !chart[i][i].is_empty()
+                && !chart[i][i].iter().any(|it| {
+                    matches!(
+                        is_ctor(it.cat(), "cat_n"),
+                        Some([_, Exp::InductiveCtor(_, nm, _)]) if nm == "pl"
+                    )
+                })
+            {
+                if let (Some(cat_decl), Some(num_decl), Ok(ent_iri)) = (
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Cat"),
+                    inductive_iri(&self.grammar.layer, "urn:eigenius:lexicon:Num"),
+                    Iri::parse("urn:eigenius:lexicon:Entity"),
+                ) {
+                    let ent_cls = Exp::EigonClass(ent_iri);
+                    let pl = Exp::InductiveCtor(num_decl, "pl".into(), Vec::new());
+                    let n_pl =
+                        Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![ent_cls.clone(), pl]);
+                    let item = Item::from_parts(
+                        n_pl,
+                        ent_cls,
+                        super::super::item::Combinator::Other,
+                        super::super::item::Cost::from_sense_rank(8),
+                    );
+                    let shifts = self.grammar.bare_nominal_shifts(&item);
+                    chart[i][i].push(item);
+                    chart[i][i].extend(shifts);
+                }
+            }
         }
 
         // Partitive superlative (`most <adj> of`, §7b) — the same second pass over a 3-token span.
