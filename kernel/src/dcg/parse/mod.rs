@@ -57,7 +57,7 @@ pub use resolve::{
 use super::category::{is_adjective_cat, is_vp_adjunct_prep};
 use super::holes::{freshen_anaphor, hole_base};
 use felicity::{is_finite_clause, FelicitousOutcome};
-use seed::is_lexicalized_adverb;
+use seed::{is_approximator_adverb, is_lexicalized_adverb};
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
@@ -507,6 +507,7 @@ impl Parser {
         // parseable — *known*, not a missing lexeme.
         self.is_derived_adverb(&s_lc)
             || is_lexicalized_adverb(&s_lc)
+            || is_approximator_adverb(&s_lc)
             || self.is_derived_adjective(&s_lc)
     }
 

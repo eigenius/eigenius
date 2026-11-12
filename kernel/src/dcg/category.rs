@@ -873,6 +873,66 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     Some(out)
 }
 
+/// Transparent pre-modifier categories on generalized quantifiers for closed-class approximator
+/// adverbs (`almost`, `nearly`, `virtually`, `practically` — CGEL Ch. 5 §7.2):
+/// 1. Subject / PP-object GQ pre-modifier `(S/(S\NP[T, n])) / (S/(S\NP[T, n]))`
+/// 2. Direct-object GQ pre-modifier `((VP\TV) / (VP\TV))`
+pub fn approximator_quantifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
+    let num = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
+    let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let m_all = mode_value(layer, MODE_ALL)?;
+    let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
+    let fin_c = Exp::InductiveCtor(fin.clone(), "fin".to_string(), vec![]);
+    let fin_any = Exp::InductiveCtor(fin, "fin_any".to_string(), vec![]);
+    let num_any = Exp::InductiveCtor(num, "num_any".to_string(), vec![]);
+    let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
+
+    let tvar = Exp::Var("APP#T".to_string());
+    let nvar = Exp::Var("APP#num".to_string());
+    let fvar = Exp::Var("APP#fin".to_string());
+
+    let subj_gq = ctor(
+        "fwd",
+        vec![
+            m_all.clone(),
+            ctor("cat_s", vec![dcl.clone(), fin_any]),
+            ctor(
+                "bwd",
+                vec![
+                    m_all.clone(),
+                    ctor("cat_s", vec![dcl.clone(), fin_c]),
+                    ctor("cat_np", vec![tvar.clone(), nvar.clone()]),
+                ],
+            ),
+        ],
+    );
+    let subj_mod = ctor("fwd", vec![m_all.clone(), subj_gq.clone(), subj_gq]);
+
+    let vp = ctor(
+        "bwd",
+        vec![
+            m_all.clone(),
+            ctor("cat_s", vec![dcl, fvar]),
+            ctor("cat_np", vec![entity, nvar]),
+        ],
+    );
+    let tv = ctor(
+        "fwd",
+        vec![
+            m_all.clone(),
+            vp.clone(),
+            ctor("cat_np", vec![tvar, num_any]),
+        ],
+    );
+    let obj_gq = ctor("bwd", vec![m_all.clone(), vp, tv]);
+    let obj_mod = ctor("fwd", vec![m_all, obj_gq.clone(), obj_gq]);
+
+    Some(vec![subj_mod, obj_mod])
+}
+
 /// If `cat` is a finite backward or forward VP-modifier category
 /// `bwd|fwd(m, bwd(m_v, cat_s(dcl, fin), NP), bwd(m_v, cat_s(dcl, fin), NP))`
 /// (the shape imported WordNet adverbs carry in `data.adv`), return its five non-finite verbal

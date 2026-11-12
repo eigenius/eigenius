@@ -379,6 +379,7 @@ fn recorded_candidates(candidates: &[ReadingCandidate]) -> Vec<RecordedCandidate
 pub struct RecordingReadingRanker<R: ReadingRanker> {
     inner: R,
     log: Mutex<BTreeMap<String, SelectionRecord>>,
+    checkpoint_path: Option<std::path::PathBuf>,
 }
 
 impl<R: ReadingRanker> RecordingReadingRanker<R> {
@@ -386,7 +387,29 @@ impl<R: ReadingRanker> RecordingReadingRanker<R> {
         Self {
             inner,
             log: Mutex::new(BTreeMap::new()),
+            checkpoint_path: None,
         }
+    }
+
+    /// Periodically flush recorded selections to `path` every 25 new sentences.
+    pub fn with_checkpoint(mut self, path: std::path::PathBuf) -> Self {
+        self.checkpoint_path = Some(path);
+        self
+    }
+
+    /// Seed the recorder with entries from an existing checkpoint file so an interrupted run
+    /// replays already-recorded selections and calls the live inner ranker only on new questions.
+    pub fn load_checkpoint(&self, path: &Path) -> std::io::Result<usize> {
+        if !path.exists() {
+            return Ok(0);
+        }
+        let records: Vec<SelectionRecord> = serde_json::from_str(&std::fs::read_to_string(path)?)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut log = self.log.lock().expect("selection log");
+        for r in records {
+            log.insert(record_key(&r), r);
+        }
+        Ok(log.len())
     }
 
     /// The recorded selections as JSON (sorted by key — deterministic bytes).
@@ -427,11 +450,22 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
         ctx: &DocumentContext,
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection> {
-        let selection = self.inner.select(ctx, candidates);
-        let model = self.inner.model().unwrap_or_default();
         let recorded = recorded_candidates(candidates);
         let sha = document_sha(ctx.document);
         let key = selection_key(ctx.sentence, &sha, ctx.prior_selections, &recorded);
+        if let Some(existing) = self.log.lock().expect("selection log").get(&key) {
+            return if existing.abstained {
+                None
+            } else {
+                Some(ReadingSelection {
+                    chosen: existing.chosen,
+                    rationale: existing.rationale.clone(),
+                    runners_up: existing.runners_up.clone(),
+                })
+            };
+        }
+        let selection = self.inner.select(ctx, candidates);
+        let model = self.inner.model().unwrap_or_default();
         let record = match &selection {
             Some(s) => SelectionRecord {
                 sentence: ctx.sentence.to_string(),
@@ -456,7 +490,20 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
                 model,
             },
         };
-        self.log.lock().expect("selection log").insert(key, record);
+        let n = {
+            let mut log = self.log.lock().expect("selection log");
+            log.insert(key, record);
+            log.len()
+        };
+        if n % 25 == 0 {
+            if let Some(p) = &self.checkpoint_path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = self.write(p);
+                eprintln!("  [checkpoint] selections: {n} recorded → {}", p.display());
+            }
+        }
         selection
     }
 
@@ -924,15 +971,45 @@ impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
 }
 
 /// What every decision of a sentence is about: the document, the readings already selected for
-/// earlier sentences, and the sentence — named as the questions refer to them.
+/// earlier sentences, and the sentence — named as the questions refer to them. For multi-hundred-
+/// sentence reports (`> 12 KB` or `> 40` prior selections), bounds the rendered prompt window
+/// around the target sentence and the 40 most recent selections so per-sentence prompt size stays
+/// O(1) while [`SelectionRecord`] replay keys remain exact.
 fn context_parts(ctx: &DocumentContext) -> Vec<(String, String)> {
-    let prior: Vec<String> = ctx
-        .prior_selections
+    const MAX_DOC_PROMPT_BYTES: usize = 12_000;
+    const DOC_HALF_WINDOW: usize = 2_500;
+    const MAX_PRIOR_PROMPT: usize = 40;
+
+    let doc_trimmed = ctx.document.trim();
+    let doc_text = if doc_trimmed.len() <= MAX_DOC_PROMPT_BYTES {
+        doc_trimmed.to_string()
+    } else {
+        let needle = ctx.sentence.trim();
+        match doc_trimmed.find(needle) {
+            Some(pos) => {
+                let start = doc_trimmed.floor_char_boundary(pos.saturating_sub(DOC_HALF_WINDOW));
+                let end = doc_trimmed
+                    .ceil_char_boundary((pos + needle.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()));
+                doc_trimmed[start..end].trim().to_string()
+            }
+            None => {
+                let end = doc_trimmed.floor_char_boundary(DOC_HALF_WINDOW * 2);
+                doc_trimmed[..end].trim().to_string()
+            }
+        }
+    };
+
+    let prior_slice = if ctx.prior_selections.len() > MAX_PRIOR_PROMPT {
+        &ctx.prior_selections[ctx.prior_selections.len() - MAX_PRIOR_PROMPT..]
+    } else {
+        ctx.prior_selections
+    };
+    let prior: Vec<String> = prior_slice
         .iter()
         .map(|p| format!("sentence {}: \"{}\"", p.ordinal, p.gloss))
         .collect();
     vec![
-        (DOCUMENT.into(), ctx.document.trim().to_string()),
+        (DOCUMENT.into(), doc_text),
         (EARLIER.into(), prior.join("\n")),
         (SENTENCE.into(), ctx.sentence.trim().to_string()),
     ]

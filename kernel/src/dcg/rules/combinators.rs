@@ -840,6 +840,13 @@ pub(crate) fn is_modal_functor(cat: &Exp) -> bool {
 fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     match recipe {
         SemRecipe::DetRefine { cat, t } => {
+            if is_ctor(&cat, "cat_np").is_some() {
+                let sem = Exp::Fst(Box::new(Exp::App(
+                    Box::new(left.sem().clone()),
+                    Box::new(t),
+                )));
+                return Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO);
+            }
             let (v, z) = ("__refine_v", "__refine_z");
             let inner = Exp::App(
                 Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(t))),
@@ -5645,9 +5652,8 @@ mod dispatch_tests {
 
     #[test]
     fn dependent_determiner_refined_noun_fst_projects() {
-        // `cat_forall(λT. cat_np(T)) · cat_n(Σx:Gene. φ)` → DetRefine: bind `T := Gene` (component)
-        // and Fst-project the witness in the sem.
-        let forall = ct(
+        // Plain NP determiner `cat_forall(λT. cat_np(T)) · cat_n(Σx:Gene. φ)` → `Fst(det(Σ))`.
+        let forall_np = ct(
             "cat_forall",
             vec![
                 ct("num_any", vec![]),
@@ -5660,18 +5666,39 @@ mod dispatch_tests {
             Box::new(comp.clone()),
             Box::new(Exp::sort(0)),
         );
-        let l = mk_item(forall, ax("urn:eigenius:lexicon:det"));
+        let l_np = mk_item(forall_np, ax("urn:eigenius:lexicon:det"));
         let r = mk_item(n(sigma.clone()), ax("urn:eigenius:lexicon:noun"));
-        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
-            .expect("cat_forall · refined cat_n → DetRefine");
+        let got_np = apply(&l_np, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("plain cat_forall · refined cat_n → DetRefine");
         assert_eq!(
-            got.cat(),
-            &np(comp),
+            got_np.cat(),
+            &np(comp.clone()),
             "T bound to the component type Gene (not the whole Σ)"
         );
-        // λv. det(Σ)(λz. v(Fst z))
+        let expected_np = Exp::Fst(Box::new(Exp::App(
+            Box::new(ax("urn:eigenius:lexicon:det")),
+            Box::new(sigma.clone()),
+        )));
+        assert_eq!(got_np.sem(), &expected_np);
+        assert_eq!(got_np.prov(), Combinator::ForwardApp);
+
+        // Raised GQ determiner `cat_forall(λT. S/(S\NP(T))) · cat_n(Σx:Gene. φ)` → `λv. det(Σ)(λz. v(Fst z))`.
+        let gq_body = ct(
+            "fwd",
+            vec![s_fin(), ct("bwd", vec![s_fin(), np(Exp::Var("T".into()))])],
+        );
+        let forall_gq = ct(
+            "cat_forall",
+            vec![
+                ct("num_any", vec![]),
+                Exp::Lam(Patt::Var("T".into()), Box::new(gq_body)),
+            ],
+        );
+        let l_gq = mk_item(forall_gq, ax("urn:eigenius:lexicon:det"));
+        let got_gq = apply(&l_gq, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("GQ cat_forall · refined cat_n → DetRefine");
         let (v, z) = ("__refine_v", "__refine_z");
-        let expected = Exp::Lam(
+        let expected_gq = Exp::Lam(
             Patt::Var(v.into()),
             Box::new(Exp::App(
                 Box::new(Exp::App(
@@ -5687,7 +5714,7 @@ mod dispatch_tests {
                 )),
             )),
         );
-        assert_eq!(got.sem(), &expected);
-        assert_eq!(got.prov(), Combinator::ForwardApp);
+        assert_eq!(got_gq.sem(), &expected_gq);
+        assert_eq!(got_gq.prov(), Combinator::ForwardApp);
     }
 }

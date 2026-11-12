@@ -58,7 +58,9 @@ use std::path::{Path, PathBuf};
 
 use crate::emit::DocumentMeta;
 use crate::select::load_pins;
-use crate::snapshot::{build_sense_ranker, open_head_and_backend, CELL_BEAM, SENSE_CAP};
+use crate::snapshot::{
+    build_sense_ranker_with_model, open_head_and_backend, CELL_BEAM, SENSE_CAP,
+};
 use clap::Parser as ClapParser;
 use eigenius_kernel::dcg::{
     AugmentOptions, CostFirstReadingRanker, InProcessPipeline, NoAbbreviationProposer, Parser,
@@ -112,6 +114,14 @@ pub struct Args {
     /// experiment: sense elimination is off, so the pins may not match).
     #[arg(long)]
     ranks: Option<PathBuf>,
+    /// Optional model id override for live `--ranks` RECORD mode (e.g. `jev-latest` or
+    /// `claude-sonnet-4-6`); defaults to `EIGENIUS_SENSE_MODEL` else `DEFAULT_MODEL`.
+    #[arg(long)]
+    sense_model: Option<String>,
+    /// Resume an interrupted live recording: preload existing `--ranks` and `--selections`
+    /// checkpoint files, replaying hits and invoking the live model only on remaining sentences.
+    #[arg(long)]
+    resume: bool,
     /// An anaphora-proposal draw (`proposals.json`) — D64/D67 §3, resolves referent holes
     /// through the discourse loop. **Exists → REPLAY** (deterministic, no LLM); **absent →
     /// RECORD** a live draw into it (needs `use-llm` + a key). Omit ⇒ no anaphora resolves (open
@@ -299,7 +309,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             }
             Some(Box::new(rec))
         }
-        (None, Some(s), false) if s.exists() => {
+        (None, Some(s), false) if s.exists() && !args.resume => {
             let r =
                 ReplayReadingRanker::load(s).map_err(|e| format!("read {}: {e}", s.display()))?;
             eprintln!("selections: REPLAY {} (deterministic, no LLM)", s.display());
@@ -307,7 +317,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
         (None, None, false) => None,
         (None, Some(s), false) => {
-            // RECORD mode — the live ranker answers and the draw is written after generation.
+            // RECORD (or RESUME) mode — the live ranker answers and the draw is written after generation.
             #[cfg(feature = "use-llm")]
             {
                 let Some(live) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
@@ -317,12 +327,26 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                         s.display()
                     ));
                 };
-                eprintln!(
-                    "selections: live reading ranker, {} — RECORDING to {}",
-                    live.model().unwrap_or_default(),
-                    s.display()
+                let model_name = live.model().unwrap_or_default();
+                let rec = std::sync::Arc::new(
+                    RecordingReadingRanker::new(live).with_checkpoint(s.clone()),
                 );
-                let rec = std::sync::Arc::new(RecordingReadingRanker::new(live));
+                let seeded = if args.resume && s.exists() {
+                    rec.load_checkpoint(s)
+                        .map_err(|e| format!("resume --selections {}: {e}", s.display()))?
+                } else {
+                    0
+                };
+                eprintln!(
+                    "selections: live reading ranker, {model_name} — {} to {}{}",
+                    if seeded > 0 { "RESUMING" } else { "RECORDING" },
+                    s.display(),
+                    if seeded > 0 {
+                        format!(" ({seeded} checkpointed selections preloaded)")
+                    } else {
+                        String::new()
+                    }
+                );
                 selection_recording = Some((std::sync::Arc::clone(&rec), s.clone()));
                 Some(Box::new(rec))
             }
@@ -470,7 +494,8 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // The sense-rank arm, installed through the pipeline's parser hook (the pipeline builds its
     // own parser over the doc layer). Built HERE so its errors surface before any parse and the
     // RECORD arm's artifact can be flushed after.
-    let (sense_ranker, recording) = build_sense_ranker(&args.ranks)?;
+    let (sense_ranker, recording) =
+        build_sense_ranker_with_model(&args.ranks, args.sense_model.as_deref(), args.resume)?;
     let ranker_slot = RefCell::new(sense_ranker);
     let setup = move |p: Parser| {
         let p = p.with_sense_cap(SENSE_CAP).with_cell_beam(CELL_BEAM);

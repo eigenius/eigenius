@@ -29,8 +29,8 @@
 //! and the flat beamed chart both build their leaf cells from.
 
 use super::super::category::{
-    governs_named_preposition, inductive_iri, is_adjective_cat, is_binary_relation_cat, is_ctor,
-    is_vp_adjunct_prep, kind_of, slash_parts, MODE_ALL,
+    approximator_quantifier_cats, governs_named_preposition, inductive_iri, is_adjective_cat,
+    is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of, slash_parts, MODE_ALL,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::derivation::Derivation;
@@ -160,27 +160,28 @@ impl Parser {
                 .iter()
                 .any(|e| is_closed_class_entry(e) && is_closed_subject_gq_cat(e.item.cat()));
         let surface_is_closed_non_nominal = !surface_all_caps
-            && self.lex.entries_for(&s_lc).iter().any(|e| {
-                if !is_closed_class_entry(e) {
-                    return false;
-                }
-                if s_lc.contains(' ')
-                    || crate::dcg::holes::is_bare_pronoun_sem(e.item.sem())
-                    || is_ctor(e.item.cat(), "cat_forall").is_some()
-                    || is_closed_subject_gq_cat(e.item.cat())
-                    || is_closed_non_gerund_aux_cat(e.item.cat())
-                    || is_closed_verbal_negation(e.item.cat(), e.item.sem())
-                {
-                    return true;
-                }
-                slash_parts(e.item.cat(), "fwd").is_some_and(|(_, res, arg)| {
-                    is_ctor(res, "cat_cp").is_some()
-                        || (is_ctor(res, "cat_np").is_some()
-                            && is_ctor(arg, "cat_n").is_none()
-                            && is_ctor(arg, "cat_np").is_none())
-                        || (is_ctor(res, "cat_pp").is_some() && is_ctor(arg, "cat_s").is_some())
-                })
-            });
+            && (is_approximator_adverb(&s_lc)
+                || self.lex.entries_for(&s_lc).iter().any(|e| {
+                    if !is_closed_class_entry(e) {
+                        return false;
+                    }
+                    if s_lc.contains(' ')
+                        || crate::dcg::holes::is_bare_pronoun_sem(e.item.sem())
+                        || is_ctor(e.item.cat(), "cat_forall").is_some()
+                        || is_closed_subject_gq_cat(e.item.cat())
+                        || is_closed_non_gerund_aux_cat(e.item.cat())
+                        || is_closed_verbal_negation(e.item.cat(), e.item.sem())
+                    {
+                        return true;
+                    }
+                    slash_parts(e.item.cat(), "fwd").is_some_and(|(_, res, arg)| {
+                        is_ctor(res, "cat_cp").is_some()
+                            || (is_ctor(res, "cat_np").is_some()
+                                && is_ctor(arg, "cat_n").is_none()
+                                && is_ctor(arg, "cat_np").is_none())
+                            || (is_ctor(res, "cat_pp").is_some() && is_ctor(arg, "cat_s").is_some())
+                    })
+                }));
         let surface_has_wn_verb = self
             .lex
             .entries_for(&s_lc)
@@ -2730,7 +2731,8 @@ impl Parser {
     fn adverb_items(&self, surface: &str) -> Vec<Item> {
         let s = surface.trim().to_lowercase();
         let lexicalized = is_lexicalized_adverb(&s);
-        if !lexicalized && !self.is_derived_adverb(&s) {
+        let approximator = is_approximator_adverb(&s);
+        if !lexicalized && !approximator && !self.is_derived_adverb(&s) {
             return Vec::new();
         }
         // An IMPORTED adverb sense already seeds the MANNER positions, with Luo & Shi's `ADV`
@@ -2754,6 +2756,9 @@ impl Parser {
         }
         if lexicalized {
             cats.extend(sentence_modifier_cats(&self.grammar.layer).unwrap_or_default());
+        }
+        if approximator {
+            cats.extend(approximator_quantifier_cats(&self.grammar.layer).unwrap_or_default());
         }
         if cats.is_empty() {
             return Vec::new();
@@ -4358,6 +4363,12 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
         "already",
     ];
     LEXICALIZED_ADVERBS.contains(&surface)
+}
+
+/// Closed-class approximator adverbs (CGEL Ch. 5 §7.2): pre-modify universal/negative generalized
+/// quantifiers (`almost nothing`, `almost every X`, `nearly all Y`) as well as adjectives/VPs.
+pub(super) fn is_approximator_adverb(surface: &str) -> bool {
+    matches!(surface, "almost" | "nearly" | "virtually" | "practically")
 }
 
 /// The relation a measured value predicates of an entity (`ontology.esl`), which a quantity's

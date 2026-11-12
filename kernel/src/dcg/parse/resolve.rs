@@ -477,13 +477,38 @@ impl Parser {
             // passed `None` unconditionally until D71 §7.1 put the same two fields on the
             // formalization request, at which point ignoring them would have been a lie.
             let (closed, open) = self.parse_scoped_open(s, lemmatizer, scope);
-            // Pool = closed ∪ resolved-open, deduplicated by sem: two open parses resolving to
-            // the same closed proposition (or duplicating a closed reading) are ONE reading.
-            let mut pool = closed;
+            // Pool = closed ∪ resolved-open, deduplicated modulo η-conversion: two open parses
+            // resolving to the same closed proposition (or an η-expanded `λG#0. f(G#0)` beside
+            // `f`) are ONE reading, preferring the η-normal term when both appear.
+            let mut pool: Vec<Item> = Vec::new();
             // Per-pool-member binding audits, index-aligned with `pool` (closed readings have
             // none; resolved-open readings carry theirs to emission when chosen).
-            let mut audits: Vec<Option<ResolutionOutcome>> = vec![None; pool.len()];
-            let mut seen: BTreeSet<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
+            let mut audits: Vec<Option<ResolutionOutcome>> = Vec::new();
+            let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+            let push_pool = |pool: &mut Vec<Item>,
+                             audits: &mut Vec<Option<ResolutionOutcome>>,
+                             seen: &mut BTreeMap<String, usize>,
+                             item: Item,
+                             audit: Option<ResolutionOutcome>| {
+                let key = alpha_eta_key(item.sem());
+                let is_eta_normal = alpha_key(item.sem()) == key;
+                match seen.get(&key).copied() {
+                    None => {
+                        seen.insert(key, pool.len());
+                        pool.push(item);
+                        audits.push(audit);
+                    }
+                    Some(idx) => {
+                        if is_eta_normal && alpha_key(pool[idx].sem()) != key {
+                            pool[idx] = item;
+                            audits[idx] = audit;
+                        }
+                    }
+                }
+            };
+            for it in closed {
+                push_pool(&mut pool, &mut audits, &mut seen, it, None);
+            }
             {
                 // The proposer gets the SAME document context as the reading ranker (§2.4):
                 // surrounding text + prior selections. Scoped: it borrows `prior`, which the
@@ -513,10 +538,7 @@ impl Parser {
                         &mut sent_cache,
                     ) {
                         resolved_open += 1;
-                        if seen.insert(pretty_term(item.sem())) {
-                            pool.push(item);
-                            audits.push(Some(res));
-                        }
+                        push_pool(&mut pool, &mut audits, &mut seen, item, Some(res));
                     }
                 }
             }
@@ -986,6 +1008,146 @@ impl Parser {
     ) -> String {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
         verbalize(item.sem(), &Vb::surface(&names, &self.grammar.layer))
+    }
+}
+
+fn alpha_key(e: &Exp) -> String {
+    pretty_term(&alpha_norm_exp(e, &BTreeMap::new(), 0))
+}
+
+fn alpha_eta_key(e: &Exp) -> String {
+    pretty_term(&alpha_norm_exp(&eta_norm_exp(e), &BTreeMap::new(), 0))
+}
+
+fn alpha_bind_patt(p: &Patt, env: &mut BTreeMap<String, String>, depth: &mut usize) -> Patt {
+    match p {
+        Patt::Unit => Patt::Unit,
+        Patt::Var(x) => {
+            let fresh = format!("G#{}", *depth);
+            *depth += 1;
+            env.insert(x.clone(), fresh.clone());
+            Patt::Var(fresh)
+        }
+        Patt::Pair(a, b) => {
+            let a2 = alpha_bind_patt(a, env, depth);
+            let b2 = alpha_bind_patt(b, env, depth);
+            Patt::Pair(Box::new(a2), Box::new(b2))
+        }
+    }
+}
+
+fn alpha_norm_exp(e: &Exp, env: &BTreeMap<String, String>, depth: usize) -> Exp {
+    match e {
+        Exp::Var(x) => match env.get(x) {
+            Some(y) => Exp::Var(y.clone()),
+            None => Exp::Var(x.clone()),
+        },
+        Exp::Lam(p, body) => {
+            let mut env2 = env.clone();
+            let mut d2 = depth;
+            let p2 = alpha_bind_patt(p, &mut env2, &mut d2);
+            Exp::Lam(p2, Box::new(alpha_norm_exp(body, &env2, d2)))
+        }
+        Exp::Pi(p, dom, cod) => {
+            let dom2 = alpha_norm_exp(dom, env, depth);
+            let mut env2 = env.clone();
+            let mut d2 = depth;
+            let p2 = alpha_bind_patt(p, &mut env2, &mut d2);
+            Exp::Pi(p2, Box::new(dom2), Box::new(alpha_norm_exp(cod, &env2, d2)))
+        }
+        Exp::Sig(p, dom, cod) => {
+            let dom2 = alpha_norm_exp(dom, env, depth);
+            let mut env2 = env.clone();
+            let mut d2 = depth;
+            let p2 = alpha_bind_patt(p, &mut env2, &mut d2);
+            Exp::Sig(p2, Box::new(dom2), Box::new(alpha_norm_exp(cod, &env2, d2)))
+        }
+        Exp::App(f, a) => Exp::App(
+            Box::new(alpha_norm_exp(f, env, depth)),
+            Box::new(alpha_norm_exp(a, env, depth)),
+        ),
+        Exp::Arrow(a, b) => Exp::Arrow(
+            Box::new(alpha_norm_exp(a, env, depth)),
+            Box::new(alpha_norm_exp(b, env, depth)),
+        ),
+        Exp::Times(a, b) => Exp::Times(
+            Box::new(alpha_norm_exp(a, env, depth)),
+            Box::new(alpha_norm_exp(b, env, depth)),
+        ),
+        Exp::Pair(a, b) => Exp::Pair(
+            Box::new(alpha_norm_exp(a, env, depth)),
+            Box::new(alpha_norm_exp(b, env, depth)),
+        ),
+        Exp::Ann(x, t) => Exp::Ann(
+            Box::new(alpha_norm_exp(x, env, depth)),
+            Box::new(alpha_norm_exp(t, env, depth)),
+        ),
+        Exp::Fst(x) => Exp::Fst(Box::new(alpha_norm_exp(x, env, depth))),
+        Exp::Snd(x) => Exp::Snd(Box::new(alpha_norm_exp(x, env, depth))),
+        Exp::Id(t, a, b) => Exp::Id(
+            Box::new(alpha_norm_exp(t, env, depth)),
+            Box::new(alpha_norm_exp(a, env, depth)),
+            Box::new(alpha_norm_exp(b, env, depth)),
+        ),
+        Exp::Apart(t, a, b) => Exp::Apart(
+            Box::new(alpha_norm_exp(t, env, depth)),
+            Box::new(alpha_norm_exp(a, env, depth)),
+            Box::new(alpha_norm_exp(b, env, depth)),
+        ),
+        Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+            d.clone(),
+            n.clone(),
+            args.iter().map(|x| alpha_norm_exp(x, env, depth)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn eta_norm_exp(e: &Exp) -> Exp {
+    match e {
+        Exp::Lam(Patt::Var(x), body) => {
+            let b = eta_norm_exp(body);
+            if let Exp::App(f, arg) = &b {
+                if matches!(arg.as_ref(), Exp::Var(y) if y == x)
+                    && !crate::nbe::check::exp_mentions_var(f, x)
+                {
+                    return (**f).clone();
+                }
+            }
+            Exp::Lam(Patt::Var(x.clone()), Box::new(b))
+        }
+        Exp::Lam(p, body) => Exp::Lam(p.clone(), Box::new(eta_norm_exp(body))),
+        Exp::App(f, a) => Exp::App(Box::new(eta_norm_exp(f)), Box::new(eta_norm_exp(a))),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(eta_norm_exp(a)), Box::new(eta_norm_exp(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(eta_norm_exp(a)), Box::new(eta_norm_exp(b))),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(eta_norm_exp(a)), Box::new(eta_norm_exp(b))),
+        Exp::Pi(p, d, c) => Exp::Pi(
+            p.clone(),
+            Box::new(eta_norm_exp(d)),
+            Box::new(eta_norm_exp(c)),
+        ),
+        Exp::Sig(p, d, c) => Exp::Sig(
+            p.clone(),
+            Box::new(eta_norm_exp(d)),
+            Box::new(eta_norm_exp(c)),
+        ),
+        Exp::Ann(x, t) => Exp::Ann(Box::new(eta_norm_exp(x)), Box::new(eta_norm_exp(t))),
+        Exp::Fst(x) => Exp::Fst(Box::new(eta_norm_exp(x))),
+        Exp::Snd(x) => Exp::Snd(Box::new(eta_norm_exp(x))),
+        Exp::Id(t, a, b) => Exp::Id(
+            Box::new(eta_norm_exp(t)),
+            Box::new(eta_norm_exp(a)),
+            Box::new(eta_norm_exp(b)),
+        ),
+        Exp::Apart(t, a, b) => Exp::Apart(
+            Box::new(eta_norm_exp(t)),
+            Box::new(eta_norm_exp(a)),
+            Box::new(eta_norm_exp(b)),
+        ),
+        Exp::InductiveCtor(d, n, args) => {
+            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(eta_norm_exp).collect())
+        }
+        other => other.clone(),
     }
 }
 

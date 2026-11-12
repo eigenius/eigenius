@@ -22,7 +22,7 @@ regenerated.
 | **the CNL rewrite** `experiments/parsing/derived/step5/c0*.py` | local, gitignored | **NO** | **hand-authored; unrecoverable** |
 | the document model `.../step5/docmodel-page.txt`, `document-model.json`, `xiap-document-model.esl` | local, gitignored | **NO** | re-derivable from the source, with effort |
 | the claim-span corpus `.../step5/claim-spans*.{txt,tsv}` | local, gitignored | **NO** | re-derivable (script below) |
-| D71 claim-landing artifacts `experiments/parsing/encoded/xiap/` (`.esl`, `.eigon.json`, `selections.json`, `proposals.json`, `kinds.json`, `reading-adjudications.tsv`) | local, gitignored | **NO** | regenerable (~35 min via `prose-to-esl` on the snapshot) |
+| D71 claim-landing artifacts `experiments/parsing/encoded/{xiap-deterministic,xiap-deterministic-clean,xiap}/` (`.esl`, `.eigon.json`, `ranks.json`, `selections.json`, `proposals.json`, `kinds.json`, `reading-adjudications.tsv`) | local, gitignored | **NO** | `ranks.json` + `selections.json` record the live `jev-latest` draws (copy them out of band to replay offline in ~4 min via `prose-to-esl`; regenerating live takes ~45 min) |
 | UAB source material `experiments/uab/` | local, gitignored | **NO** | re-obtain from the UAB Round 1 delivery |
 | the DB snapshot (3.8 GB) | `db-snapshot/`, outside the repo | **NO** | rebuildable, ~30 min + chain |
 | measurement logs (14 MB) | `reseed-logs/`, outside the repo | **NO** | only history; re-runs regenerate |
@@ -148,14 +148,21 @@ The owner's order for survey §4 step 5. All six steps are done (`2026-11-10`).
    discourse bindings, `20` 1-to-1 line alignments synced back into `c001.py`–`c012.py`), and
    `verbalize` (`Register::Surface`) renders all `1,056` top readings with **0** bracketed fallback
    spans (`540 → 0`), **0** `not (⟦False⟧)` artifacts (`150 → 0`), and **0** unfreshened
-   `anaphor_of` terms (`46 → 0`). End-to-end deterministic (`--no-llm`) D71 claim landing via
-   `prose-to-esl` (`CostFirstReadingRanker` + `RecencyProposer` + `DerivedClaimLander`) emits **`5,705`**
-   validated resources (`958 / 1,056` `enc:EncodedClaim`s, `396` `enc:AnaphorBinding`s, `98`
-   `enc:CutItem`s, `0` kernel `Validator` errors) into gitignored `experiments/parsing/encoded/xiap/`,
-   and a `50`-claim stratified semantic audit establishes that contextual `SenseRanker` + Stage-1
-   `ReadingRanker` reranking is required for faithful proposition selection (`16%` strict / `28%`
-   charitable fidelity under cap-only + minimum-cost selection). See
-   [uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md) for the full Step 6 and D71 landing summary.
+   `anaphor_of` terms (`46 → 0`). End-to-end D71 claim landing (`2026-11-11`, same store) was
+   evaluated head-to-head across three controlled arms in gitignored `experiments/parsing/encoded/`:
+   (A) baseline `--cost-first` (`958 / 1,056` `enc:EncodedClaim`s, `98` `enc:CutItem`s, `5,705`
+   resources, `0` `Validator` errors; `16.0%` strict / `28.0%` charitable on the `50`-claim sample),
+   (B) post-cleanup `--cost-first` eliminating all `48` D69 `Expanded` collisions, all `22` D47
+   `DetRefine` cuts, and `20 / 21` single-pass `no parse` cuts (`1,048 / 1,056` = **`99.2%`**
+   `EncodedClaim`s, `8` `CutItem`s, `6,081` resources, `0` `Validator` errors; `18.0%` strict /
+   `28.0%` charitable — proving deterministic cleanups solve mechanical coverage without solving
+   semantic selection), and (C) live `jev-latest` `SenseRanker` + Stage-1 `ReadingRanker` (`914 /
+   1,056` = **`86.6%`** `EncodedClaim`s, `142` `CutItem`s including `128` fail-closed `NONE FAITHFUL`
+   abstentions, `5,692` resources, `0` `Validator` errors, 100% deterministic offline replay;
+   **`26.7%` strict / `37.8%` charitable emitted precision** [`24.0%` / `34.0%` recall], cutting
+   corrupted emitted claims from `36` to `28` while isolating the remaining semantic composition,
+   ungrounded `Entity` competition, `MAX_ANALYSES = 12` truncation, and discourse proposer bottlenecks).
+   See [uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md) for the full 3-way A/B/C summary.
 
 ## What step 5 should know before it starts
 

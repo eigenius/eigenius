@@ -230,6 +230,7 @@ pub(crate) fn record_key(r: &RankRecord) -> String {
 pub struct RecordingSenseRanker<R: SenseRanker> {
     inner: R,
     log: std::sync::Mutex<std::collections::BTreeMap<String, RankRecord>>,
+    checkpoint_path: Option<std::path::PathBuf>,
 }
 
 impl<R: SenseRanker> RecordingSenseRanker<R> {
@@ -237,7 +238,29 @@ impl<R: SenseRanker> RecordingSenseRanker<R> {
         Self {
             inner,
             log: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            checkpoint_path: None,
         }
+    }
+
+    /// Periodically flush recorded rankings to `path` every 25 new sentences.
+    pub fn with_checkpoint(mut self, path: std::path::PathBuf) -> Self {
+        self.checkpoint_path = Some(path);
+        self
+    }
+
+    /// Seed the recorder with entries from an existing checkpoint file so an interrupted run
+    /// replays already-recorded rankings and calls the live inner ranker only on new questions.
+    pub fn load_checkpoint(&self, path: &std::path::Path) -> std::io::Result<usize> {
+        if !path.exists() {
+            return Ok(0);
+        }
+        let records: Vec<RankRecord> = serde_json::from_str(&std::fs::read_to_string(path)?)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut log = self.log.lock().expect("rank log");
+        for r in records {
+            log.insert(record_key(&r), r);
+        }
+        Ok(log.len())
     }
 
     /// The recorded decisions as JSON (sorted by key — deterministic bytes).
@@ -283,6 +306,19 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
         context: &str,
         words: &[WordSenses],
     ) -> Option<Vec<WordRanking>> {
+        let key = rank_key(sentence, context, words);
+        if let Some(existing) = self.log.lock().expect("rank log").get(&key) {
+            return Some(
+                existing
+                    .words
+                    .iter()
+                    .map(|w| WordRanking {
+                        order: w.order.clone(),
+                        weights: w.weights.clone(),
+                    })
+                    .collect(),
+            );
+        }
         // A NON-ANSWER IS NEVER RECORDED. Writing the fallback would freeze a failed call into the
         // artifact, where it replays as "keep every sense" and reports a HIT — the 2026-07-29 crab
         // bug. Nothing recorded ⇒ the next run asks again.
@@ -320,10 +356,20 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
                 .collect(),
             model: self.inner.model().unwrap_or_default(),
         };
-        self.log
-            .lock()
-            .expect("rank log")
-            .insert(rank_key(sentence, context, words), rec);
+        let n = {
+            let mut log = self.log.lock().expect("rank log");
+            log.insert(rank_key(sentence, context, words), rec);
+            log.len()
+        };
+        if n % 25 == 0 {
+            if let Some(p) = &self.checkpoint_path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = self.write(p);
+                eprintln!("  [checkpoint] sense-ranks: {n} recorded → {}", p.display());
+            }
+        }
         Some(order)
     }
 }

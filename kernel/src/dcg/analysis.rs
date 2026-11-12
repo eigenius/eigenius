@@ -185,6 +185,15 @@ pub fn function_line(l: &Link) -> String {
         Function::AdjectiveComplement(p) => {
             format!("«{p} {d}» is the complement of the adjective «{h}»")
         }
+        Function::ClausalComplement => {
+            format!("«that {d}» is the clausal complement of «{h}»")
+        }
+        Function::InfinitivalComplement => {
+            format!("«to {d}» is the infinitival complement of «{h}»")
+        }
+        Function::PredicativeComplement => {
+            format!("«{d}» is the predicative complement of «{h}»")
+        }
     }
 }
 

@@ -104,65 +104,87 @@ equivalences):
   selecting the intended reading from `Ambiguous` pools belongs to Stage-1 reading selection
   (`reading-adjudications.tsv`).
 
-## Deterministic pool reduction & D71 claim landing (`2026-11-10`)
+## Pool reduction, D71 claim landing & 3-way A/B/C evaluation (`2026-11-11`)
 
-Executed end-to-end via `prose-to-esl` (`--no-llm --cost-first --recency --land-in-loop
+Executed end-to-end across three controlled arms via `prose-to-esl` (`--recency --land-in-loop
 --full-glossary --units-per-line --partial --also-json --verify-load`) on store
 `wordnet-umls-hpo-aligned-2026-11-07-systematic` (`38,391` merge rows, `20,533` HPO resources, `864`
-equivalences), writing replayable `selections.json`, `proposals.json`, `kinds.json`,
-`reading-adjudications.tsv`, `.esl`, and `.eigon.json` artifacts into gitignored
-`experiments/parsing/encoded/xiap/`:
+equivalences), writing replayable draw ledgers (`ranks.json`, `selections.json`, `proposals.json`,
+`kinds.json`), `reading-adjudications.tsv`, `.esl`, and `.eigon.json` into gitignored
+`experiments/parsing/encoded/{xiap-deterministic,xiap-deterministic-clean,xiap}/`:
 
-- **Mechanical end-to-end landing & validation:** **`958 / 1,056` (`90.7%`)** CNL sentences land as
-  `enc:EncodedClaim` resources (`16` sole 1-reading + `942` selected by `CostFirstReadingRanker`;
-  `957` `enc:Assertion`, `1` `enc:Suggestion`), accompanied by `1,056` `enc:DiscourseUnit`s, `958`
-  `enc:ScopedUnit`s, `958` `prov:DeclarationTrace`s, `958` `enc:DecisionPoint`s, **`396`
-  `enc:AnaphorBinding`s** (across `255` bound claims), `319` Stage-A glossary resources (`196`
-  `lexicon:LexicalEntry`, `115` `lexicon:Entity`, `3` `core:Class`, `5` grounded individuals), and
-  `98` fail-closed `enc:CutItem`s — **`5,705` total resources** passing `esl::compile` and kernel
-  `Validator::validate()` with **`0` errors**.
-- **Decomposition of the `98` `enc:CutItem`s:**
-  - **`48` `cut_ambiguous` (D69 `first_collision` abstentions):** `24` arise from η-equivalent
-    predicate arguments (`f` vs `λx. f(x)` inside `adv_*` modifiers) rendering identically in
-    `Register::Expanded`, and `24` from residual `Expanded` tag omissions (`card`, relational
-    adjectives, verb-frame suffixes, unary non-gradable adjectives).
-  - **`43` `cut_grammar`:** `21` cap/beam-bound `no parse` units (`InProcessPipeline` runs a single
-    pass at `SENSE_CAP = 2, CELL_BEAM = 64` without the multi-step `WIDEN` retry loop), plus `22`
-    post-selection D47 `LamWithoutAnnotation` fallback cuts where minimum-cost selection picked a
-    higher-order generalized quantifier passed as the polymorphic second argument of `compound` or
-    `prep_*` inside a `Σ`-restrictor.
-  - **`7` `cut_unresolved`:** referent holes whose discourse antecedents sat in cut units or landed
-    as unreferable `enc:Assertion`s under `NoKindClassifier`.
-- **Kernel & encoder infrastructure added for landing:** category-driven closed-class homograph
-  pruning in `seed.rs` (`surface_is_closed_modal`, `surface_is_closed_gq`, extended
-  `surface_is_closed_non_nominal` — `72 / 72` = `100.0%` modal operator preservation and `141 / 163`
-  = `86.5%` explicit-negation preservation across unique selected propositions),
-  `CostFirstReadingRanker` (`forest_rank == 0` under D69 injectivity), `AugmentOptions::FullGlossary`,
-  opt-in bidirectional `CodecNames::with_typing_layer` (`encode_term_typed`) for check-position
-  `Exp::Lam` binders in D47 term mirroring, and monotonic span-cursor / `--verify-load` /
-  `--adjudications-out` support in `eigenius-encoding`.
-- **Empirical verdict — deterministic (`--no-llm`) vs. reranking:**
-  A `50`-claim systematic stratified audit (`1` in every `19` landed claims across the full report)
-  establishes that **deterministic cap-only sense seeding + minimum-cost reading selection does NOT
-  achieve acceptable semantic fidelity (`16%` strictly faithful, `28%` charitably acceptable,
-  `72%–84%` corrupted)**, and pinpoints why reranking is required at two primary seams and one
-  secondary seam:
-  1. **Contextual `SenseRanker` (pre-parse, `40%` of landed claims affected):** at `SENSE_CAP = 2`
-     without contextual sense ranking, UMLS/HPO/WordNet short-form and acronym homographs enter slots
-     `0–1` ahead of intended domain senses (and `183 / 974` = `18.8%` of unique selected propositions
-     still mention bare `lexicon:Entity`). Syntax alone cannot disambiguate cross-domain homographs.
-  2. **Semantic Stage-1 `ReadingRanker` (post-parse, `44%` of landed claims affected):** `512 / 964`
-     (`53.1%`) ranker pools contain `31+` distinct skeletons. Minimum combinator cost (`forest_rank
-     == 0`) systematically favors collapsed spines — duplicate-argument transitive frames `v_t(X, X)`
-     (`64 / 974` = `6.6%` corpus-wide), object-predicative `as <Adj>` misattached to the subject,
-     PP/infinitive scope floated outside negation (inverting polarity), and GQ-in-`compound` shapes
-     (`22` D47 cuts). Blocking higher-order GQ arguments to `compound`/`prep_*` and η-normalizing
-     `adv_*` predicates deterministically shrinks the candidate space, after which a semantic
-     `ReadingRanker` over `Register::Expanded` is needed to pick the intended attachment.
-  3. **Discourse `Proposer` + `KindClassifier` (`12%` of all claims; `40%` of anaphor-bound claims):**
-     explicit-head demonstrative NPs resolve reliably under type-guided `RecencyProposer` (`9 / 10`
-     in the stratified sample), whereas bare pronouns and bare propositional demonstratives fail (`5 /
-     5`) without rhetorical kind classification (`KindClassifier`) and salience-aware proposal ranking.
+| metric (`1,056` CNL units) | Arm A: baseline `--cost-first` | Arm B: cleaned `--cost-first` | Arm C: reranked (`jev-latest`) |
+|---|---:|---:|---:|
+| `enc:EncodedClaim`s landed | `958` (`90.7%`) | `1,048` (`99.2%`) | `914` (`86.6%`) |
+| `enc:CutItem`s (fail-closed) | `98` | `8` | `142` |
+| — `cut_ambiguous` (D69 collision / ranker abstention) | `48` (`48 / 0`) | `0` (`0 / 0`) | `131` (`3 / 128`) |
+| — `cut_grammar` (D47 fallback / cap-beam `no parse`) | `43` (`22 / 21`) | `1` (`0 / 1`) | `1` (`0 / 1`) |
+| — `cut_unresolved` (discourse referent holes) | `7` | `7` | `10` |
+| `enc:AnaphorBinding`s (bound units) | `396` (`255`) | `445` (`280`) | `458` (`289`) |
+| Stage-A `lexicon:LexicalEntry`s (total Stage-A) | `196` (`319`) | `253` (`376`) | `253` (`376`) |
+| Total emitted resources (`Validator` errors) | `5,705` (`0`) | `6,081` (`0`) | `5,692` (`0`) |
+| Duplicate transitive args `v_t(X, X)` (unique rows) | `64 / 974` (`6.6%`) | `69 / 1,043` (`6.6%`) | `55 / 908` (`6.1%`) |
+| Bare `lexicon:Entity` mentions (unique rows) | `183 / 974` (`18.8%`) | `196 / 1,043` (`18.8%`) | `270 / 908` (`29.7%`) |
+| Modal operator preserved | `72 / 72` (`100.0%`) | `78 / 79` (`98.7%`) | `75 / 75` (`100.0%`) |
+| Explicit negation preserved | `141 / 163` (`86.5%`) | `151 / 176` (`85.8%`) | `149 / 164` (`90.9%`) |
+| **`50`-claim sample — emitted / fail-closed cuts** | **`50` / `0`** | **`50` / `0`** | **`45` / `5`** |
+| **`50`-claim sample — strictly faithful (recall / emitted prec.)** | **`8/50` (`16.0%` / `16.0%`)** | **`9/50` (`18.0%` / `18.0%`)** | **`12/50` (`24.0%` / `26.7%`)** |
+| **`50`-claim sample — charitably acceptable (recall / emitted prec.)** | **`14/50` (`28.0%` / `28.0%`)** | **`14/50` (`28.0%` / `28.0%`)** | **`17/50` (`34.0%` / `37.8%`)** |
+| **`50`-claim sample — corrupted emitted claims** | **`36` (`72.0%` of emitted)** | **`36` (`72.0%` of emitted)** | **`28` (`62.2%` of emitted; `56.0%` of sample)** |
+
+- **Deterministic cleanups (Arm A → Arm B):**
+  - Fixed `SemRecipe::DetRefine` in `combinators.rs` to project `.1` (`Exp::Fst`) when `cat_np`
+    combines with a Σ-refined noun (`the_plain_np`, `all_the_plain_np`, `both_the_plain_np`,
+    `this_plain_np`), eliminating all **`22 / 22`** post-selection D47 `LamWithoutAnnotation` cuts.
+  - Added `@id` collision disambiguation (`_2`, `_3`, …) with `supporting` IRI remapping and
+    `(form, cat, sem)` deduplication in `augment_full_glossary` (`augment.rs`), plus closed-class
+    CGEL approximator adverbs (`almost`, `nearly`, `virtually`, `practically`) in `category.rs`,
+    `parse/mod.rs`, and `seed.rs`, eliminating **`20 / 21`** single-pass `no parse` cuts (`21 → 1`).
+  - Added αη-equivalence pool deduplication (`alpha_eta_key` in `resolve.rs`) and completed D69
+    `Register::Expanded` disambiguation in `verbalize.rs` and `analysis.rs` (`gt`/`lt` degrees and
+    standards, `card`, `adv_*_value`/`prep_*_value`, complement links, parenthesized Π-quantifiers
+    in `And`, vacuous `r00*` subject preservation, `adv_*` conjunctive `Lam` scope suffix, and
+    `is_this_var_proj` binder checks), eliminating all **`48 / 48`** D69 `first_collision` cuts while
+    keeping `Register::Surface` byte-identical.
+  - **Key finding on Arm B:** deterministic cleanups raise mechanical landing coverage from `90.7%`
+    to **`99.2%`** (`1,048 / 1,056`, `8` cuts), yet leave corpus-wide pathology rates (`6.6%`
+    `v_t(X, X)`, `18.8%` bare `Entity`) and `50`-claim semantic fidelity (`18.0%` strict, `28.0%`
+    charitable) virtually unchanged (`42 / 50` sampled propositions identical to Arm A).
+- **Contextual reranking (`SenseRanker` + Stage-1 `ReadingRanker` via `jev-latest`, Arm C):**
+  - Bounded `reading_ranker::context_parts` for documents `> 12 KB` / `> 40` priors (`±2,500` chars
+    + 40 most recent priors), capped `TypeSafeDecider` options at `255`, and added 25-sentence
+    checkpointing plus `--sense-model` and `--resume` support in `eigenius-encoding`, `sense_ranker.rs`,
+    and `reading_ranker.rs`. Replay from the recorded `1,046` `ranks.json` and `1,637`
+    `selections.json` draws is 100% deterministic (`0` LLM calls, `0` `Validator` errors).
+  - **What contextual reranking solves:** strict precision among emitted claims rises **+67%
+    relative** (`16.0% → 26.7%`, `18.0% → 26.7%` vs. Arm B), charitable precision rises **+35%
+    relative** (`28.0% → 37.8%`), explicit negation preservation rises `85.8% → 90.9%`, and
+    calibrated `NONE FAITHFUL` abstention (`128` corpus-wide `cut_ambiguous` abstentions; `5 / 50` in
+    sample, `4 / 5` of which were false homograph/sense propositions in Arms A & B) converts silent
+    domain-lexicon gaps into explicit fail-closed `enc:CutItem`s, cutting total false claims emitted
+    in the sample from `36` (`72.0%`) to `28` (`56.0%`).
+  - **Why reranking alone reaches `37.8%` emitted charitable precision rather than `>80%` (decomposition
+    of the `28` residual errors in the `50`-claim sample):**
+    1. **Semantic composition gaps in existing grammar rules (`10 / 50` = `20%` of sample):**
+       constructions that parse (`grammar-gap = 0`) whose combinator/seed recipe erases or distorts
+       meaning across *every* candidate in the forest — post-copular `is never NP` (`never` seeded
+       only as affirmative adverb), negative-implicative `unable to VP` (conjoining affirmative
+       `VP`), comparative object-predicative `make X worse than Y` (`worse than` → `False → False`),
+       `worth <gerund>`, intransitive predicative `reads as NP`, passive ECM + phrasal verb,
+       fractional partitives (`N out of M`), gerund-clause subjects, hyphenated numeral-noun
+       modifiers, and second-person `you` mapped to `speaker`.
+    2. **Ungrounded `lexicon:Entity` fallback & UMLS nominal competition (`8 / 50` = `16%`):**
+       ungrounded `Entity` common/mass-noun fallbacks bypass `SenseRanker` pruning and out-compete
+       Stage-A document-local named entities in CKY/top-12 (`18.8% → 29.7%` bare-`Entity` rate
+       corpus-wide), or `SenseRanker` promotes UMLS clinical-finding nominals / vacuous participles
+       ahead of verbal frames.
+    3. **Discourse `RecencyProposer` + `NoKindClassifier` held fixed (`6 / 50` = `12%`):** bare
+       pronouns and rhetorical-kind demonstratives still bind to nearest type-compatible nouns
+       without `KindClassifier` and salience-aware anaphora proposal ranking.
+    4. **`MAX_ANALYSES = 12` ranker window truncation & missing domain acronym senses (`4 / 50` =
+       `8%`):** `73.2%` of selection pools exceed `12` candidates (`397` unique sentences truncated
+       before `ReadingRanker` sees them), hiding higher-cost faithful parses behind collapsed spines,
+       alongside acronyms absent from UMLS/WordNet where `ReadingRanker` did not abstain.
 
 ## Three kind axes, which a converter must not merge
 

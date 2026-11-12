@@ -142,7 +142,7 @@ fn comparative_standard(e: &Exp, vb: &Vb) -> String {
     let (h, a) = app_spine(e);
     match axiom_local(h) {
         Some(l) if l.starts_with("std_") => "the norm".to_string(),
-        Some(l) if l.starts_with("deg_") && !a.is_empty() => verbalize(a[0], vb),
+        Some(l) if l.starts_with("deg_") && !a.is_empty() => verbalize(a[a.len() - 1], vb),
         _ => verbalize(e, vb),
     }
 }
@@ -535,7 +535,21 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 }
             }
             let op = if d.ends_with("And") { "and" } else { "or" };
-            return format!("{} {op} {}", verbalize(args[0], vb), verbalize(args[1], vb));
+            let lhs = if vb.register == Register::Expanded
+                && matches!(args[0], Exp::Pi(p, _, cod) if !matches!(p, Patt::Unit) && !is_false(cod))
+            {
+                format!("({})", verbalize(args[0], vb))
+            } else {
+                verbalize(args[0], vb)
+            };
+            let rhs = if vb.register == Register::Expanded
+                && matches!(args[1], Exp::Pi(p, _, cod) if !matches!(p, Patt::Unit) && !is_false(cod))
+            {
+                format!("({})", verbalize(args[1], vb))
+            } else {
+                verbalize(args[1], vb)
+            };
+            return format!("{lhs} {op} {rhs}");
         }
     }
     // Negation `A → False`. The Pi branch below catches the `Pi(_, A, False)` readback, but a
@@ -593,8 +607,8 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
     if let Some((a, b)) = as_arrow(sem) {
         return format!("if {}, then {}", verbalize(a, vb), verbalize(b, vb));
     }
-    if let Exp::Sig(_, base, restr) = sem {
-        let np = noun_phrase(base, restr, vb);
+    if let Exp::Sig(binder, base, restr) = sem {
+        let np = noun_phrase(binder, base, restr, vb);
         return format!("{} {np}", article(&np));
     }
     let (head, args) = app_spine(sem);
@@ -660,23 +674,83 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 let (h0, a0) = app_spine(args[0]);
                 let (h1, a1) = app_spine(args[1]);
                 let l0 = axiom_local(h0);
-                if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
-                    if let Some(prep) = relational_degree_preposition(d0) {
-                        if d0 == d1 && a0.len() == 2 && a1.len() == 2 {
-                            let word = if local == "gt" { "more" } else { "less" };
+                let l1 = axiom_local(h1);
+                let word = if local == "gt" { "more" } else { "less" };
+                if let (Some(d0), Some(d1)) = (l0, l1) {
+                    if d0.starts_with("deg_") && d0 == d1 {
+                        if let Some(prep) = relational_degree_preposition(d0) {
+                            if a0.len() == 2 && a1.len() == 2 {
+                                let s0 = verbalize(a0[1], vb);
+                                let lhs = if s0.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("{s0} ")
+                                };
+                                return format!(
+                                    "{lhs}is {word} {} {prep} {} than {}",
+                                    name_atom(d0, vb),
+                                    verbalize(a0[0], vb),
+                                    verbalize(a1[1], vb)
+                                );
+                            }
+                        }
+                        if a0.len() == 1 && a1.len() == 1 {
+                            let s0 = verbalize(a0[0], vb);
+                            let lhs = if s0.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{s0} ")
+                            };
                             return format!(
-                                "{} is {word} {} {prep} {} than {}",
-                                verbalize(a0[1], vb),
+                                "{lhs}is {word} {} than {}",
                                 name_atom(d0, vb),
-                                verbalize(a0[0], vb),
-                                verbalize(a1[1], vb)
+                                verbalize(a1[0], vb)
                             );
                         }
                     }
                 }
-                if let (Some(dl), Some(subj)) = (l0, a0.first()) {
-                    return format!("{} is {}", verbalize(subj, vb), name_atom(dl, vb));
+                if let Some(dl) = l0.filter(|d| d.starts_with("deg_")) {
+                    if let Some(prep) = relational_degree_preposition(dl) {
+                        if a0.len() == 2 {
+                            let subj = verbalize(a0[1], vb);
+                            let adj_comp =
+                                format!("{} {prep} {}", name_atom(dl, vb), verbalize(a0[0], vb));
+                            let rhs = if l1.is_some_and(|r| r.starts_with("std_")) {
+                                adj_comp
+                            } else {
+                                format!(
+                                    "{word} {adj_comp} than {}",
+                                    comparative_standard(args[1], vb)
+                                )
+                            };
+                            return if subj.is_empty() {
+                                rhs
+                            } else {
+                                format!("{subj} is {rhs}")
+                            };
+                        }
+                    }
+                    if let Some(subj_e) = a0.first() {
+                        let subj = verbalize(subj_e, vb);
+                        let adj = name_atom(dl, vb);
+                        let rhs = if l1.is_some_and(|r| r.starts_with("std_")) {
+                            adj
+                        } else {
+                            format!("{word} {adj} than {}", comparative_standard(args[1], vb))
+                        };
+                        return if subj.is_empty() {
+                            rhs
+                        } else {
+                            format!("{subj} is {rhs}")
+                        };
+                    }
                 }
+                let cmp = if local == "gt" {
+                    "greater than"
+                } else {
+                    "less than"
+                };
+                return format!("{} is {cmp} {}", verbalize(args[0], vb), verbalize(args[1], vb));
             }
             ("ge" | "le", 2) => {
                 let (h0, a0) = app_spine(args[0]);
@@ -872,6 +946,15 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     _ => format!("the median of {} over {group}", verbalize(args[0], vb)),
                 };
             }
+            ("card", 2) => {
+                let owner = verbalize(args[1], vb);
+                let np = bare_np(args[0], vb);
+                return if owner.is_empty() {
+                    format!("the number of {np}")
+                } else {
+                    format!("the number of {np} of {owner}")
+                };
+            }
             // The distributive `per` (D95 slice 8d): `prep_per(Y, x, y)` reads `per Y`; `x` and `y` are
             // the variables the count and the universal bind.
             ("prep_per", 3) => return format!("per {}", bare_np(args[0], vb)),
@@ -980,7 +1063,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 [pred, subj] => {
                     if vb.register == Register::Expanded {
                         let applied = apply_pred(pred, subj);
-                        format!("{adv} ({})", verbalize(&applied, vb))
+                        let s = verbalize(subj, vb);
+                        let is_vacuous = matches!(
+                            pred,
+                            Exp::Lam(Patt::Var(v), body)
+                                if !crate::nbe::check::exp_mentions_var(body, v)
+                        );
+                        if is_vacuous && !s.is_empty() {
+                            format!("{adv} [{s}] ({})", verbalize(&applied, vb))
+                        } else {
+                            format!("{adv} ({})", verbalize(&applied, vb))
+                        }
                     } else {
                         let s = verbalize(subj, vb);
                         if s.is_empty() {
@@ -998,11 +1091,30 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // merge — a distributed coordination, or a clausal complement — reached the ⟦…⟧ bracket.
         // The subject is usually a bound restrictor variable (verbalising to ""), giving "in X".
         if let Some((p, subj, obj)) = prep_parts(local, &args, vb) {
-            let subj = verbalize(subj, vb);
-            return if subj.is_empty() {
-                format!("{p} {obj}")
+            let subj_s = verbalize(subj, vb);
+            let scope_suffix = if vb.register == Register::Expanded && local.starts_with("adv_") {
+                let pred = if local.ends_with("_value") {
+                    args.get(2).copied()
+                } else {
+                    args.get(1).copied()
+                };
+                match pred {
+                    Some(pr @ Exp::Lam(_, body))
+                        if body
+                            .as_const_spine()
+                            .is_some_and(|(iri, _, _)| iri.as_str().ends_with("logic:And")) =>
+                    {
+                        format!(" [{}]", verbalize(&apply_pred(pr, &anaphor_atom()), vb))
+                    }
+                    _ => String::new(),
+                }
             } else {
-                format!("{subj} {p} {obj}")
+                String::new()
+            };
+            return if subj_s.is_empty() {
+                format!("{p} {obj}{scope_suffix}")
+            } else {
+                format!("{subj_s} {p} {obj}{scope_suffix}")
             };
         }
         // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
@@ -1428,8 +1540,8 @@ fn indefinite(e: &Exp, vb: &Vb) -> String {
 
 /// The NP text without a leading article (for `the …`).
 fn bare_np(e: &Exp, vb: &Vb) -> String {
-    if let Exp::Sig(_, base, restr) = e {
-        return noun_phrase(base, restr, vb);
+    if let Exp::Sig(binder, base, restr) = e {
+        return noun_phrase(binder, base, restr, vb);
     }
     verbalize(e, vb)
 }
@@ -1440,9 +1552,9 @@ fn bare_np(e: &Exp, vb: &Vb) -> String {
 /// instead — see [`noun_phrase_expanded`]. The two shapes must differ: this function is where
 /// the measured collision lives, because "modifier head" is also how a single concept whose
 /// label happens to be two words comes out.
-fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
+fn noun_phrase(binder: &Patt, base: &Exp, restr: &Exp, vb: &Vb) -> String {
     if vb.register == Register::Expanded {
-        return noun_phrase_expanded(base, restr, vb);
+        return noun_phrase_expanded(binder, base, restr, vb);
     }
     let head = verbalize(base, vb);
     let (mut pre, mut post): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
@@ -1533,7 +1645,7 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
 /// ```
 ///
 /// In `Surface` both are "the exonuclease activity of WRN".
-fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
+fn noun_phrase_expanded(binder: &Patt, base: &Exp, restr: &Exp, vb: &Vb) -> String {
     let head = verbalize(base, vb);
     let mut parts: Vec<String> = Vec::new();
     let mut conj = Vec::new();
@@ -1544,7 +1656,9 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             // The whole point: a compound asserts that SOME relation holds between the head and
             // the modifier, and the parse does not say which. Surface hides that behind
             // juxtaposition — the reading it is competing with names one concept outright.
-            Some(op @ ("compound_kind" | "compound")) if a.len() == 2 => {
+            Some(op @ ("compound_kind" | "compound"))
+                if a.len() == 2 && is_this_var_proj(a[0], binder) =>
+            {
                 let rel = if op == "compound" && is_kind_of_app(a[1]) {
                     "compound-with-kind-entity"
                 } else {
@@ -1553,26 +1667,41 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
                 parts.push(format!("{rel} {} (relation unspecified)", bare_np(a[1], vb)));
             }
             Some(p) if p.starts_with("prep_") => {
-                if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
-                    parts.push(format!("{p} {obj}"));
+                if let Some((p, subj, obj)) = prep_parts(p, &a, vb) {
+                    if is_this_var_proj(subj, binder) {
+                        parts.push(format!("{p} {obj}"));
+                    } else {
+                        parts.push(verbalize(c, vb));
+                    }
+                } else {
+                    parts.push(verbalize(c, vb));
                 }
             }
-            Some("has_quantity") if a.len() == 3 => {
+            Some("has_quantity") if a.len() == 3 && is_this_var_proj(a[0], binder) => {
                 parts.push(format!("has-quantity {}", quantity_text(a[2], a[1])))
             }
-            Some("is_a") if a.len() == 2 => parts.push(format!("is-a {}", bare_np(a[1], vb))),
-            Some("named") if a.len() == 2 => parts.push(format!("named {}", verbalize(a[1], vb))),
-            Some("poss_of") if a.len() == 2 || a.len() == 3 => {
+            Some("is_a") if a.len() == 2 && is_this_var_proj(a[0], binder) => {
+                parts.push(format!("is-a {}", bare_np(a[1], vb)))
+            }
+            Some("named") if a.len() == 2 && is_this_var_proj(a[0], binder) => {
+                parts.push(format!("named {}", verbalize(a[1], vb)))
+            }
+            Some("poss_of")
+                if (a.len() == 2 && is_this_var_proj(a[0], binder))
+                    || (a.len() == 3 && is_this_var_proj(a[1], binder)) =>
+            {
                 parts.push(format!("possessed-by {}", verbalize(a[a.len() - 1], vb)))
             }
-            // An intersective adjective on the head: `a02734544(x)`, «genetic».
-            Some(adj) if is_adjective(adj) && matches!(a.as_slice(), [Exp::Var(_)]) => {
+            // An intersective adjective on the head: `a02734544(x)` or `a02734544(x.1)`, «genetic».
+            Some(adj) if is_adjective(adj) && a.len() == 1 && is_this_var_proj(a[0], binder) => {
                 parts.push(format!("is {}", name_atom(adj, vb)))
             }
-            Some("sole") if a.len() == 1 => parts.push("alone [sole]".to_string()),
+            Some("sole") if a.len() == 1 && is_this_var_proj(a[0], binder) => {
+                parts.push("alone [sole]".to_string())
+            }
             // A counted relation to the head: `has_count(T, λy. prep_X(x, y), q)`, «an interaction
             // between two genetic events» → "between 2 T".
-            Some("has_count") if a.len() == 3 => match counted_relation(a[1], vb) {
+            Some("has_count") if a.len() == 3 => match counted_relation(a[1], binder, vb) {
                 Some(p) => {
                     let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
                     parts.push(format!(
@@ -1589,13 +1718,24 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             // injectivity guard caught it live on «…a stronger mutation phenotype» (D69 §7a).
             Some(cmp @ ("gt" | "lt")) if a.len() == 2 => {
                 let dir = if cmp == "gt" { "greater" } else { "less" };
-                let adj = axiom_local(app_spine(a[0]).0)
-                    .map(|l| name_atom(l, vb))
-                    .unwrap_or_default();
-                parts.push(format!(
-                    "degree-{dir} {adj} than {}",
-                    comparative_standard(a[1], vb)
-                ));
+                let (dh, da) = app_spine(a[0]);
+                if let Some(dl) = axiom_local(dh).filter(|l| {
+                    l.starts_with("deg_")
+                        && da.last().is_some_and(|subj| is_this_var_proj(subj, binder))
+                }) {
+                    let mut adj = name_atom(dl, vb);
+                    if let (Some(prep), [ground, _]) =
+                        (relational_degree_preposition(dl), da.as_slice())
+                    {
+                        adj = format!("{adj} {prep} {}", verbalize(ground, vb));
+                    }
+                    parts.push(format!(
+                        "degree-{dir} {adj} than {}",
+                        comparative_standard(a[1], vb)
+                    ));
+                } else {
+                    parts.push(verbalize(c, vb));
+                }
             }
             _ => parts.push(verbalize(c, vb)),
         }
@@ -1610,12 +1750,15 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
 
 /// The preposition of a count's predicate that relates the head to the counted phrase:
 /// `λy. prep_X(x, y)` → `X`. `None` for any other predicate.
-fn counted_relation<'e>(pred: &'e Exp, vb: &Vb) -> Option<&'e str> {
+fn counted_relation<'e>(pred: &'e Exp, binder: &Patt, vb: &Vb) -> Option<&'e str> {
     let Exp::Lam(Patt::Var(y), body) = pred else {
         return None;
     };
     let (h, a) = app_spine(body);
-    let (p, _, _) = prep_parts(axiom_local(h)?, &a, vb)?;
+    let (p, subj, _) = prep_parts(axiom_local(h)?, &a, vb)?;
+    if !is_this_var_proj(subj, binder) {
+        return None;
+    }
     let mut obj = *a.get(1)?;
     while let Exp::Fst(x) | Exp::Snd(x) = obj {
         obj = x;
@@ -1626,6 +1769,16 @@ fn counted_relation<'e>(pred: &'e Exp, vb: &Vb) -> Option<&'e str> {
 fn is_kind_of_app(e: &Exp) -> bool {
     let (h, a) = app_spine(e);
     axiom_local(h) == Some("kind_of") && a.len() == 1
+}
+
+fn is_this_var_proj(mut e: &Exp, binder: &Patt) -> bool {
+    let Patt::Var(expected) = binder else {
+        return false;
+    };
+    while let Exp::Fst(x) | Exp::Snd(x) = e {
+        e = x;
+    }
+    matches!(e, Exp::Var(v) if v == expected)
 }
 
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
@@ -1698,6 +1851,12 @@ pub enum Function {
     SecondPredicate(String),
     /// The prepositional complement an adjective governs («dependent on WRN»).
     AdjectiveComplement(String),
+    /// A finite clause complement of a reporting verb («show that …»).
+    ClausalComplement,
+    /// A `to`-infinitive VP complement of a subject-control verb («try to …»).
+    InfinitivalComplement,
+    /// A predicative adjective complement of a linking verb («remain essential»).
+    PredicativeComplement,
 }
 
 /// The [`Link`]s of a reading, sorted and deduplicated. Pass names that give each sense atom the
@@ -1795,8 +1954,7 @@ fn conjunction_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &
     flatten_and_exp(e, &mut conj);
     for &c in &conj {
         match adjunct_of(c, &conj, vb, env) {
-            Some((function, obj, hosts)) => {
-                let dependent = head_word(obj, vb, env);
+            Some((function, dependent, walk_obj, hosts)) => {
                 for host in hosts {
                     out.push(Link {
                         function: function.clone(),
@@ -1804,7 +1962,9 @@ fn conjunction_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &
                         host,
                     });
                 }
-                collect_links(obj, vb, env, out);
+                if let Some(obj) = walk_obj {
+                    collect_links(obj, vb, env, out);
+                }
             }
             None => collect_links(c, vb, env, out),
         }
@@ -1825,11 +1985,20 @@ fn adjunct_of<'e>(
     conj: &[&'e Exp],
     vb: &Vb,
     env: &[Binding<'e>],
-) -> Option<(Function, &'e Exp, Vec<String>)> {
+) -> Option<(Function, String, Option<&'e Exp>, Vec<String>)> {
     let (h, a) = app_spine(pp);
-    let p = axiom_local(h)?.strip_prefix("adv_")?;
-    let [obj, _pred, subject_exp] = a.as_slice() else {
-        return None;
+    let raw_p = axiom_local(h)?.strip_prefix("adv_")?;
+    let (p, dependent, walk_obj, subject_exp) = match (raw_p.strip_suffix("_value"), a.as_slice()) {
+        (Some(p), [unit, quantity, _pred, subject_exp]) => {
+            (p, quantity_text(quantity, unit), None, *subject_exp)
+        }
+        (None, [obj, _pred, subject_exp]) => (
+            raw_p,
+            head_word(obj, vb, env),
+            Some(*obj),
+            *subject_exp,
+        ),
+        _ => return None,
     };
     let subject = pretty_term(subject_exp);
     let about = |e: &Exp| pretty_term(e) == subject;
@@ -1852,13 +2021,14 @@ fn adjunct_of<'e>(
     }
     let p = p.to_string();
     if !verbs.is_empty() {
-        Some((Function::Adverbial(p), obj, verbs))
+        Some((Function::Adverbial(p), dependent, walk_obj, verbs))
     } else if !adjectives.is_empty() {
-        Some((Function::PredicateAdverbial(p), obj, adjectives))
+        Some((Function::PredicateAdverbial(p), dependent, walk_obj, adjectives))
     } else if copula {
         Some((
             Function::SecondPredicate(p),
-            obj,
+            dependent,
+            walk_obj,
             vec![head_word(subject_exp, vb, env)],
         ))
     } else {
@@ -1909,6 +2079,22 @@ fn link_of(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding]) -> Option<Link>
             obj,
             head_word(host, vb, env),
         )),
+        [host, unit, quantity]
+            if local
+                .strip_prefix("prep_")
+                .and_then(|s| s.strip_suffix("_value"))
+                .is_some() =>
+        {
+            let p = local
+                .strip_prefix("prep_")
+                .and_then(|s| s.strip_suffix("_value"))
+                .expect("checked above");
+            Some(Link {
+                function: Function::Postmodifier(p.to_string()),
+                dependent: quantity_text(quantity, unit),
+                host: head_word(host, vb, env),
+            })
+        }
         [head, modifier] if matches!(local, "compound_kind" | "compound") => Some(link(
             Function::NounModifier,
             modifier,
@@ -1945,16 +2131,27 @@ fn verb_links(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding], out: &mut Ve
     let verb = atom_word(local, vb);
     let frame = verb_frame(local);
     let last = args.len().saturating_sub(1);
-    for (i, a) in args.iter().enumerate().filter(|(_, a)| is_phrase(a)) {
-        let function = match (i, frame) {
-            (i, _) if i == last => Function::Subject,
-            (0, f) if f == "p" || named_preposition(f).is_some() => Function::PrepositionalObject,
-            (1, "as") => Function::ObjectComplement("as".to_string()),
-            _ => Function::Object,
+    for (i, a) in args.iter().enumerate() {
+        let (function, dependent) = match (i, frame) {
+            (i, _) if i == last && is_phrase(a) => (Function::Subject, head_word(a, vb, env)),
+            (0, "c") => (Function::ClausalComplement, verbalize(a, vb)),
+            (0, "sc") => (Function::InfinitivalComplement, verbalize(a, vb)),
+            (0, "j") => (Function::PredicativeComplement, verbalize(a, vb)),
+            (0, f)
+                if (f == "p" || f == "rel" || named_preposition(f).is_some()) && is_phrase(a) =>
+            {
+                (Function::PrepositionalObject, head_word(a, vb, env))
+            }
+            (1, "as") if is_phrase(a) => (
+                Function::ObjectComplement("as".to_string()),
+                head_word(a, vb, env),
+            ),
+            _ if is_phrase(a) => (Function::Object, head_word(a, vb, env)),
+            _ => continue,
         };
         out.push(Link {
             function,
-            dependent: head_word(a, vb, env),
+            dependent,
             host: verb.clone(),
         });
     }
