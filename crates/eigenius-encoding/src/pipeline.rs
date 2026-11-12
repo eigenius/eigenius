@@ -387,7 +387,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     if args.proposals.is_some() && args.recency {
         return Err("--proposals and --recency are mutually exclusive".to_string());
     }
-    let proposal_recording = matches!(&args.proposals, Some(p) if !p.exists());
+    let proposal_recording = matches!(&args.proposals, Some(p) if !p.exists() || args.resume);
     let inner_proposer: Box<dyn Proposer> = match (&args.proposals, args.recency) {
         (_, true) => {
             eprintln!(
@@ -399,7 +399,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             );
             Box::new(RecencyProposer)
         }
-        (Some(p), false) if p.exists() => {
+        (Some(p), false) if p.exists() && !args.resume => {
             let r = ReplayProposer::load(p).map_err(|e| format!("read {}: {e}", p.display()))?;
             eprintln!("proposals:  REPLAY {} (deterministic, no LLM)", p.display());
             Box::new(r)
@@ -410,19 +410,15 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 let Some(live) = eigenius_kernel::dcg::resolver_llm::AnthropicProposer::from_env()
                 else {
                     return Err(format!(
-                        "--proposals {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is                          unset",
+                        "--proposals {} is in RECORD mode but ANTHROPIC_API_KEY is unset",
                         p.display()
                     ));
                 };
-                eprintln!(
-                    "proposals:  AnthropicProposer (live) — RECORDING to {}",
-                    p.display()
-                );
                 Box::new(live) as Box<dyn Proposer>
             }
             #[cfg(not(feature = "use-llm"))]
             return Err(format!(
-                "--proposals {} does not exist, and this binary has no live proposer (built                  without --features use-llm)",
+                "--proposals {} is in RECORD mode, and this binary has no live proposer (built without --features use-llm)",
                 p.display()
             ));
         }
@@ -430,7 +426,29 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     };
     // The recorder wraps whichever arm (memoizing), so a run always leaves the draw that
     // reproduces it; a replayed draw re-recorded is a no-op copy.
-    let proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
+    let mut proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
+    if proposal_recording {
+        if let Some(p) = &args.proposals {
+            proposer = proposer.with_checkpoint(p.clone());
+            let seeded = if args.resume && p.exists() {
+                proposer
+                    .load_checkpoint(p)
+                    .map_err(|e| format!("resume --proposals {}: {e}", p.display()))?
+            } else {
+                0
+            };
+            eprintln!(
+                "proposals:  AnthropicProposer (live) — {} to {}{}",
+                if seeded > 0 { "RESUMING" } else { "RECORDING" },
+                p.display(),
+                if seeded > 0 {
+                    format!(" ({seeded} checkpointed proposals preloaded)")
+                } else {
+                    String::new()
+                }
+            );
+        }
+    }
     let binding_authority = if args.recency {
         Some("binding_recency")
     } else {
@@ -528,9 +546,10 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // antecedent to a later demonstrative. The kinds arm mirrors every other recorded stage
     // (exists → replay, absent + live → record); `--land-in-loop` without `--kinds` installs the
     // deterministic floor (`NoKindClassifier`: `frame_kind` + `enc:Assertion`).
+    let kind_recording = matches!(&args.kinds, Some(p) if !p.exists() || args.resume);
     let kind_classifier: Option<Box<dyn crate::KindClassifier>> =
         match (&args.kinds, args.land_in_loop) {
-            (Some(p), _) if p.exists() => {
+            (Some(p), _) if p.exists() && !args.resume => {
                 let r = crate::ReplayKindClassifier::load(p)
                     .map_err(|e| format!("read {}: {e}", p.display()))?;
                 eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
@@ -541,19 +560,15 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 {
                     let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
                         return Err(format!(
-                        "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
-                        p.display()
-                    ));
+                            "--kinds {} is in RECORD mode but ANTHROPIC_API_KEY is unset",
+                            p.display()
+                        ));
                     };
-                    eprintln!(
-                        "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
-                        p.display()
-                    );
                     Some(Box::new(c) as Box<dyn crate::KindClassifier>)
                 }
                 #[cfg(not(feature = "use-llm"))]
                 return Err(format!(
-                    "--kinds {} does not exist, and this binary has no live classifier (built \
+                    "--kinds {} is in RECORD mode, and this binary has no live classifier (built \
                      without --features use-llm)",
                     p.display()
                 ));
@@ -570,7 +585,32 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             }
             (None, false) => None,
         };
-    let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
+    let mut kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
+    if kind_recording {
+        if let (Some(rec), Some(p)) = (&mut kind_recorder, &args.kinds) {
+            *rec = std::mem::replace(
+                rec,
+                crate::RecordingKindClassifier::new(Box::new(crate::NoKindClassifier)),
+            )
+            .with_checkpoint(p.clone());
+            let seeded = if args.resume && p.exists() {
+                rec.load_checkpoint(p)
+                    .map_err(|e| format!("resume --kinds {}: {e}", p.display()))?
+            } else {
+                0
+            };
+            eprintln!(
+                "kinds:      AnthropicKindClassifier (live) — {} to {}{}",
+                if seeded > 0 { "RESUMING" } else { "RECORDING" },
+                p.display(),
+                if seeded > 0 {
+                    format!(" ({seeded} checkpointed verdicts preloaded)")
+                } else {
+                    String::new()
+                }
+            );
+        }
+    }
     // The codec's constructor argument names, from the chain this run emits against.
     let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head);
     let print_chain = std::sync::Arc::clone(&head);
@@ -635,8 +675,8 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         eprintln!("proposals:  recorded {n} proposal(s) → {}", p.display());
     }
     // Flush the kind draw before any fail-closed abort below.
-    if let (Some(rec), Some(p)) = (&kind_recorder, &args.kinds) {
-        if !p.exists() {
+    if kind_recording {
+        if let (Some(rec), Some(p)) = (&kind_recorder, &args.kinds) {
             ensure_parent_dir(p)?;
             let n = rec
                 .write(p)

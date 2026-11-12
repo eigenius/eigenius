@@ -470,195 +470,235 @@ impl Parser {
         let mut run_kind: Option<Iri> = None;
         let mut doc_cache = ResolveCache::default();
         let mut out = Vec::with_capacity(sentences.len());
-        for (ordinal, s) in sentences.iter().enumerate() {
-            // SCOPED (D65 §4): the caller's lexicon order is the parse rank's primary key, so a
-            // document formalized against a domain profile ranks that profile's senses first. The
-            // single-sentence `ParseSentence` RPC has taken a scope since D65; the document path
-            // passed `None` unconditionally until D71 §7.1 put the same two fields on the
-            // formalization request, at which point ignoring them would have been a lie.
-            let (closed, open) = self.parse_scoped_open(s, lemmatizer, scope);
-            // Pool = closed ∪ resolved-open, deduplicated modulo η-conversion: two open parses
-            // resolving to the same closed proposition (or an η-expanded `λG#0. f(G#0)` beside
-            // `f`) are ONE reading, preferring the η-normal term when both appear.
-            let mut pool: Vec<Item> = Vec::new();
-            // Per-pool-member binding audits, index-aligned with `pool` (closed readings have
-            // none; resolved-open readings carry theirs to emission when chosen).
-            let mut audits: Vec<Option<ResolutionOutcome>> = Vec::new();
-            let mut seen: BTreeMap<String, usize> = BTreeMap::new();
-            let push_pool = |pool: &mut Vec<Item>,
-                             audits: &mut Vec<Option<ResolutionOutcome>>,
-                             seen: &mut BTreeMap<String, usize>,
-                             item: Item,
-                             audit: Option<ResolutionOutcome>| {
-                let key = alpha_eta_key(item.sem());
-                let is_eta_normal = alpha_key(item.sem()) == key;
-                match seen.get(&key).copied() {
-                    None => {
-                        seen.insert(key, pool.len());
-                        pool.push(item);
-                        audits.push(audit);
+        const PARSE_BATCH: usize = 32;
+        const PARSE_CONCURRENCY: usize = 8;
+        for (batch_idx, batch) in sentences.chunks(PARSE_BATCH).enumerate() {
+            let mut parsed_batch = if batch.len() <= 1 {
+                batch
+                    .iter()
+                    .map(|s| Some(self.parse_scoped_open(s, lemmatizer, scope)))
+                    .collect::<Vec<_>>()
+            } else {
+                let results =
+                    std::sync::Mutex::new((0..batch.len()).map(|_| None).collect::<Vec<_>>());
+                let next = std::sync::atomic::AtomicUsize::new(0);
+                let workers = batch.len().min(PARSE_CONCURRENCY);
+                std::thread::scope(|s_scope| {
+                    for _ in 0..workers {
+                        s_scope.spawn(|| loop {
+                            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if i >= batch.len() {
+                                break;
+                            }
+                            let parsed = self.parse_scoped_open(batch[i], lemmatizer, scope);
+                            results.lock().expect("parse batch results")[i] = Some(parsed);
+                        });
                     }
-                    Some(idx) => {
-                        if is_eta_normal && alpha_key(pool[idx].sem()) != key {
-                            pool[idx] = item;
-                            audits[idx] = audit;
+                });
+                results.into_inner().expect("parse batch results")
+            };
+            for (local_idx, s) in batch.iter().enumerate() {
+                let ordinal = batch_idx * PARSE_BATCH + local_idx;
+                let (closed, open) = parsed_batch[local_idx]
+                    .take()
+                    .expect("every batch slot parsed");
+                // Pool = closed ∪ resolved-open, deduplicated modulo η-conversion: two open parses
+                // resolving to the same closed proposition (or an η-expanded `λG#0. f(G#0)` beside
+                // `f`) are ONE reading, preferring the η-normal term when both appear.
+                let mut pool: Vec<Item> = Vec::new();
+                // Per-pool-member binding audits, index-aligned with `pool` (closed readings have
+                // none; resolved-open readings carry theirs to emission when chosen).
+                let mut audits: Vec<Option<ResolutionOutcome>> = Vec::new();
+                let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+                let push_pool = |pool: &mut Vec<Item>,
+                                 audits: &mut Vec<Option<ResolutionOutcome>>,
+                                 seen: &mut BTreeMap<String, usize>,
+                                 item: Item,
+                                 audit: Option<ResolutionOutcome>| {
+                    let key = alpha_eta_key(item.sem());
+                    let is_eta_normal = alpha_key(item.sem()) == key;
+                    match seen.get(&key).copied() {
+                        None => {
+                            seen.insert(key, pool.len());
+                            pool.push(item);
+                            audits.push(audit);
+                        }
+                        Some(idx) => {
+                            if is_eta_normal && alpha_key(pool[idx].sem()) != key {
+                                pool[idx] = item;
+                                audits[idx] = audit;
+                            }
+                        }
+                    }
+                };
+                for it in closed {
+                    push_pool(&mut pool, &mut audits, &mut seen, it, None);
+                }
+                {
+                    // The proposer gets the SAME document context as the reading ranker (§2.4):
+                    // surrounding text + prior selections. Scoped: it borrows `prior`, which the
+                    // gloss threading below appends to.
+                    let doc_ctx = DocumentContext {
+                        document,
+                        sentence: s,
+                        // The proposer reads no constituent spans.
+                        tokens: &[],
+                        prior_selections: &prior,
+                        // The proposer ranks ANTECEDENTS, not readings; its candidates carry their
+                        // own surfaces, so there is no concept legend to add here.
+                        concepts: &[],
+                    };
+                    let mut sent_cache = BTreeMap::new();
+                    let mut resolved_open = 0usize;
+                    for o in &open {
+                        if resolved_open >= MAX_RESOLVED_OPEN_PER_SENTENCE {
+                            break;
+                        }
+                        if let Some((item, res)) = self.resolve_with_cached(
+                            o,
+                            &doc_ctx,
+                            &candidates,
+                            proposer,
+                            &mut doc_cache,
+                            &mut sent_cache,
+                        ) {
+                            resolved_open += 1;
+                            push_pool(&mut pool, &mut audits, &mut seen, item, Some(res));
                         }
                     }
                 }
-            };
-            for it in closed {
-                push_pool(&mut pool, &mut audits, &mut seen, it, None);
-            }
-            {
-                // The proposer gets the SAME document context as the reading ranker (§2.4):
-                // surrounding text + prior selections. Scoped: it borrows `prior`, which the
-                // gloss threading below appends to.
-                let doc_ctx = DocumentContext {
-                    document,
-                    sentence: s,
-                    // The proposer reads no constituent spans.
-                    tokens: &[],
-                    prior_selections: &prior,
-                    // The proposer ranks ANTECEDENTS, not readings; its candidates carry their
-                    // own surfaces, so there is no concept legend to add here.
-                    concepts: &[],
+                let mut selection = None;
+                let mut resolution = None;
+                let outcome = if pool.len() == 1 {
+                    resolution = audits.pop().expect("len==1");
+                    SentenceOutcome::Encoded(pool.pop().expect("len==1"))
+                } else if pool.len() > 1 {
+                    match ranker.and_then(|r| {
+                        self.select_reading(r, document, s, lemmatizer, &prior, &pool)
+                    }) {
+                        Some((idx, sel)) => {
+                            let item = pool.remove(idx);
+                            resolution = audits.remove(idx);
+                            selection = Some(sel);
+                            SentenceOutcome::Encoded(item)
+                        }
+                        None => {
+                            resolution = audits.into_iter().flatten().next();
+                            SentenceOutcome::Ambiguous(pool)
+                        }
+                    }
+                } else if let Some(o) = open.first() {
+                    if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
+                        eprintln!("  !! UNRESOLVED [{ordinal}] holes={:?}", o.holes);
+                    }
+                    SentenceOutcome::Open(o.clone())
+                } else {
+                    SentenceOutcome::Gap
                 };
-                let mut sent_cache = BTreeMap::new();
-                let mut resolved_open = 0usize;
-                for o in &open {
-                    if resolved_open >= MAX_RESOLVED_OPEN_PER_SENTENCE {
-                        break;
+                // Thread the discourse: the chosen reading's gloss joins the document context of the
+                // later sentences (sequential consistency) and is handed to the lander. Threaded
+                // UNCONDITIONALLY since §2.4 — the anaphora proposer consumes prior selections too.
+                let mut landed: Option<(Resource, String)> = None;
+                if let SentenceOutcome::Encoded(item) = &outcome {
+                    let gloss = match &selection {
+                        Some(sel) => sel.chosen_gloss.clone(),
+                        None => self.reading_gloss(s, lemmatizer, item),
+                    };
+                    if let Some(l) = lander {
+                        landed = l.land(ordinal, s, &gloss, item);
                     }
-                    if let Some((item, res)) = self.resolve_with_cached(
-                        o,
-                        &doc_ctx,
-                        &candidates,
-                        proposer,
-                        &mut doc_cache,
-                        &mut sent_cache,
-                    ) {
-                        resolved_open += 1;
-                        push_pool(&mut pool, &mut audits, &mut seen, item, Some(res));
-                    }
+                    prior.push(PriorSelection { ordinal, gloss });
                 }
-            }
-            let mut selection = None;
-            let mut resolution = None;
-            let outcome = if pool.len() == 1 {
-                resolution = audits.pop().expect("len==1");
-                SentenceOutcome::Encoded(pool.pop().expect("len==1"))
-            } else if pool.len() > 1 {
-                match ranker
-                    .and_then(|r| self.select_reading(r, document, s, lemmatizer, &prior, &pool))
-                {
-                    Some((idx, sel)) => {
-                        let item = pool.remove(idx);
-                        resolution = audits.remove(idx);
-                        selection = Some(sel);
-                        SentenceOutcome::Encoded(item)
+                // The same-kind run: extend on a same-kind landing, restart on a different kind,
+                // break on no landing (consecutiveness is part of the set's meaning).
+                match &landed {
+                    Some((res, _)) => {
+                        let kind = claim_kind(res);
+                        if kind.is_some() && kind == run_kind {
+                            run.push(res.clone());
+                        } else {
+                            run = vec![res.clone()];
+                            run_kind = kind;
+                        }
                     }
                     None => {
-                        resolution = audits.into_iter().flatten().next();
-                        SentenceOutcome::Ambiguous(pool)
+                        run.clear();
+                        run_kind = None;
                     }
                 }
-            } else if let Some(o) = open.first() {
-                if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
-                    eprintln!("  !! UNRESOLVED [{ordinal}] holes={:?}", o.holes);
-                }
-                SentenceOutcome::Open(o.clone())
-            } else {
-                SentenceOutcome::Gap
-            };
-            // Thread the discourse: the chosen reading's gloss joins the document context of the
-            // later sentences (sequential consistency) and is handed to the lander. Threaded
-            // UNCONDITIONALLY since §2.4 — the anaphora proposer consumes prior selections too.
-            let mut landed: Option<(Resource, String)> = None;
-            if let SentenceOutcome::Encoded(item) = &outcome {
-                let gloss = match &selection {
-                    Some(sel) => sel.chosen_gloss.clone(),
-                    None => self.reading_gloss(s, lemmatizer, item),
+                let harvest: Vec<&Exp> = match &outcome {
+                    SentenceOutcome::Encoded(item) => vec![item.sem()],
+                    SentenceOutcome::Ambiguous(items) => items
+                        .iter()
+                        .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                        .map(Item::sem)
+                        .collect(),
+                    SentenceOutcome::Open(_) => open
+                        .iter()
+                        .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
+                        .map(|o| peel_hole_lams(o.item.sem(), o.holes.len()))
+                        .collect(),
+                    SentenceOutcome::Gap => Vec::new(),
                 };
-                if let Some(l) = lander {
-                    landed = l.land(ordinal, s, &gloss, item);
-                }
-                prior.push(PriorSelection { ordinal, gloss });
-            }
-            // The same-kind run: extend on a same-kind landing, restart on a different kind,
-            // break on no landing (consecutiveness is part of the set's meaning).
-            match &landed {
-                Some((res, _)) => {
-                    let kind = claim_kind(res);
-                    if kind.is_some() && kind == run_kind {
-                        run.push(res.clone());
-                    } else {
-                        run = vec![res.clone()];
-                        run_kind = kind;
-                    }
-                }
-                None => {
-                    run.clear();
-                    run_kind = None;
-                }
-            }
-            let harvest: Vec<&Exp> = match &outcome {
-                SentenceOutcome::Encoded(item) => vec![item.sem()],
-                SentenceOutcome::Ambiguous(items) => items
+                let hole_tys: Vec<(&Exp, Option<&Exp>)> = open
                     .iter()
                     .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
-                    .map(Item::sem)
-                    .collect(),
-                SentenceOutcome::Open(_) => open
-                    .iter()
-                    .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
-                    .map(|o| peel_hole_lams(o.item.sem(), o.holes.len()))
-                    .collect(),
-                SentenceOutcome::Gap => Vec::new(),
-            };
-            let hole_tys: Vec<(&Exp, Option<&Exp>)> = open
-                .iter()
-                .take(MAX_RESOLVED_OPEN_PER_SENTENCE)
-                .flat_map(|o| &o.holes)
-                .filter(|h| h.kind == HoleKind::EntityRef && !is_entity_top(&h.ty))
-                .map(|h| (&h.ty, h.count.as_ref()))
-                .collect();
-            if !harvest.is_empty() || !hole_tys.is_empty() || landed.is_some() {
-                let mut fresh = Vec::new();
-                // This sentence's landed claim leads (it IS the sentence), then the grown
-                // same-kind set, then the sem's own referents.
-                if let Some((res, surface)) = landed {
-                    fresh.push(Candidate::Claim {
-                        resource: res,
-                        surface,
-                    });
-                    if run.len() >= 2 {
-                        let kind = run_kind.clone().expect("run has a kind");
-                        // The grown set REPLACES any smaller run of the same kind (its key
-                        // changes as it grows, so the generic dedup below cannot).
-                        candidates.retain(
-                            |c| !matches!(c, Candidate::ClaimSet { kind: k, .. } if *k == kind),
-                        );
-                        let local = kind.as_str().rsplit(':').next().unwrap_or("claim");
-                        fresh.push(Candidate::ClaimSet {
-                            surface: format!("the last {} {} claims, together", run.len(), local),
-                            kind,
-                            members: run.clone(),
+                    .flat_map(|o| &o.holes)
+                    .filter(|h| h.kind == HoleKind::EntityRef && !is_entity_top(&h.ty))
+                    .map(|h| (&h.ty, h.count.as_ref()))
+                    .collect();
+                if !harvest.is_empty() || !hole_tys.is_empty() || landed.is_some() {
+                    let mut fresh = Vec::new();
+                    // This sentence's landed claim leads (it IS the sentence), then the grown
+                    // same-kind set, then the sem's own referents.
+                    if let Some((res, surface)) = landed {
+                        fresh.push(Candidate::Claim {
+                            resource: res,
+                            surface,
                         });
+                        if run.len() >= 2 {
+                            let kind = run_kind.clone().expect("run has a kind");
+                            // The grown set REPLACES any smaller run of the same kind (its key
+                            // changes as it grows, so the generic dedup below cannot).
+                            candidates.retain(
+                                |c| !matches!(c, Candidate::ClaimSet { kind: k, .. } if *k == kind),
+                            );
+                            let local = kind.as_str().rsplit(':').next().unwrap_or("claim");
+                            fresh.push(Candidate::ClaimSet {
+                                surface: format!(
+                                    "the last {} {} claims, together",
+                                    run.len(),
+                                    local
+                                ),
+                                kind,
+                                members: run.clone(),
+                            });
+                        }
                     }
+                    fresh
+                        .extend(self.discourse_candidates_many(s, lemmatizer, &harvest, &hole_tys));
+                    // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
+                    // front (recency is the salience signal); its older entry is dropped.
+                    let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
+                    candidates.retain(|c| !fresh_keys.contains(&c.key()));
+                    fresh.append(&mut candidates);
+                    candidates = fresh;
                 }
-                fresh.extend(self.discourse_candidates_many(s, lemmatizer, &harvest, &hole_tys));
-                // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
-                // front (recency is the salience signal); its older entry is dropped.
-                let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
-                candidates.retain(|c| !fresh_keys.contains(&c.key()));
-                fresh.append(&mut candidates);
-                candidates = fresh;
+                out.push(SentenceResolution {
+                    outcome,
+                    selection,
+                    resolution,
+                });
+                if sentences.len() >= 50
+                    && ((ordinal + 1) % 25 == 0 || ordinal + 1 == sentences.len())
+                {
+                    eprintln!(
+                        "  [progress] discourse loop: {}/{} units processed",
+                        ordinal + 1,
+                        sentences.len()
+                    );
+                }
             }
-            out.push(SentenceResolution {
-                outcome,
-                selection,
-                resolution,
-            });
         }
         out
     }

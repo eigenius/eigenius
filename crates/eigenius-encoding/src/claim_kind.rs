@@ -131,6 +131,7 @@ fn kind_key(sentence: &str, gloss: &str) -> String {
 pub struct RecordingKindClassifier<C: KindClassifier> {
     inner: C,
     log: Mutex<BTreeMap<String, KindRecord>>,
+    checkpoint_path: Option<std::path::PathBuf>,
 }
 
 impl<C: KindClassifier> RecordingKindClassifier<C> {
@@ -138,7 +139,29 @@ impl<C: KindClassifier> RecordingKindClassifier<C> {
         Self {
             inner,
             log: Mutex::new(BTreeMap::new()),
+            checkpoint_path: None,
         }
+    }
+
+    /// Periodically flush recorded verdicts to `path` every 25 new records.
+    pub fn with_checkpoint(mut self, path: std::path::PathBuf) -> Self {
+        self.checkpoint_path = Some(path);
+        self
+    }
+
+    /// Seed the recorder with entries from an existing checkpoint file so an interrupted run
+    /// replays already-recorded verdicts and calls the live inner classifier only on new questions.
+    pub fn load_checkpoint(&self, path: &Path) -> std::io::Result<usize> {
+        if !path.exists() {
+            return Ok(0);
+        }
+        let records: Vec<KindRecord> = serde_json::from_str(&std::fs::read_to_string(path)?)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut log = self.log.lock().expect("kind log");
+        for r in records {
+            log.insert(record_key(&r), r);
+        }
+        Ok(log.len())
     }
 
     /// The recorded verdicts as JSON (sorted by key — deterministic bytes).
@@ -184,19 +207,32 @@ impl<C: KindClassifier> KindClassifier for RecordingKindClassifier<C> {
             };
         }
         let verdict = self.inner.classify(ordinal, sentence, gloss);
-        self.log.lock().expect("kind log").insert(
-            key,
-            KindRecord {
-                sentence: sentence.to_string(),
-                gloss: gloss.to_string(),
-                kinds: verdict
-                    .kinds
-                    .iter()
-                    .map(|k| k.as_str().to_string())
-                    .collect(),
-                rationale: verdict.rationale.clone(),
-            },
-        );
+        let n = {
+            let mut log = self.log.lock().expect("kind log");
+            log.insert(
+                key,
+                KindRecord {
+                    sentence: sentence.to_string(),
+                    gloss: gloss.to_string(),
+                    kinds: verdict
+                        .kinds
+                        .iter()
+                        .map(|k| k.as_str().to_string())
+                        .collect(),
+                    rationale: verdict.rationale.clone(),
+                },
+            );
+            log.len()
+        };
+        if n % 25 == 0 {
+            if let Some(p) = &self.checkpoint_path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = self.write(p);
+                eprintln!("  [checkpoint] kinds: {n} recorded → {}", p.display());
+            }
+        }
         verdict
     }
 }

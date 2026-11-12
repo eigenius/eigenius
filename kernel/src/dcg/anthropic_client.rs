@@ -37,6 +37,11 @@ const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const TOOL_NAME: &str = "emit";
 
+/// Retries after transient HTTP errors (`408`, `429`, `5xx`, `529`) or transport timeouts.
+const ANTHROPIC_FIRST_BACKOFF_MS: u64 = 1000;
+const ANTHROPIC_TRIES: u32 = 6;
+const ANTHROPIC_TIMEOUT_SECS: u64 = 180;
+
 /// **Temperature 0 — pinned, and load-bearing for reproducibility.**
 ///
 /// Every caller here asks the model to *rank* or *classify* (which senses survive the cap, which
@@ -108,24 +113,62 @@ pub async fn anthropic_json(
         }
     }
 
-    let resp = reqwest::Client::new()
-        .post(API_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("anthropic request failed: {e}"))?;
-
-    let status = resp.status();
-    let payload: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("anthropic response not JSON: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("anthropic API {status}: {payload}"));
-    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(ANTHROPIC_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("anthropic client build failed: {e}"))?;
+    let mut wait = ANTHROPIC_FIRST_BACKOFF_MS;
+    let payload: Value = 'retry: {
+        for attempt in 1..=ANTHROPIC_TRIES {
+            let send_res = client
+                .post(API_URL)
+                .header("x-api-key", api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await;
+            let resp = match send_res {
+                Ok(r) => r,
+                Err(e) if attempt < ANTHROPIC_TRIES => {
+                    eprintln!(
+                        "anthropic transport error (attempt {attempt}/{ANTHROPIC_TRIES}, retrying in {wait}ms): {e}"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                    wait *= 2;
+                    continue;
+                }
+                Err(e) => return Err(format!("anthropic request failed: {e}")),
+            };
+            let status = resp.status();
+            let parsed: Result<Value, reqwest::Error> = resp.json().await;
+            let payload = match parsed {
+                Ok(v) => v,
+                Err(e) if attempt < ANTHROPIC_TRIES => {
+                    eprintln!(
+                        "anthropic body decode error (attempt {attempt}/{ANTHROPIC_TRIES}, retrying in {wait}ms): {e}"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                    wait *= 2;
+                    continue;
+                }
+                Err(e) => return Err(format!("anthropic response not JSON: {e}")),
+            };
+            if status.is_success() {
+                break 'retry payload;
+            }
+            let transient = matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504 | 529);
+            if !transient || attempt == ANTHROPIC_TRIES {
+                return Err(format!("anthropic API {status}: {payload}"));
+            }
+            eprintln!(
+                "anthropic API {status} (attempt {attempt}/{ANTHROPIC_TRIES}, retrying in {wait}ms)"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            wait *= 2;
+        }
+        unreachable!("the last attempt returns")
+    };
     if let Some(stop @ ("refusal" | "max_tokens")) =
         payload.get("stop_reason").and_then(Value::as_str)
     {

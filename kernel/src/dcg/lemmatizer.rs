@@ -33,7 +33,7 @@ pub enum Pos {
 /// already in base shape is its own lemma. The lexicon lookup tries each
 /// candidate (and each POS) against its `(lemma, pos) → entries` index, so
 /// morphological ambiguity becomes extra leaf items in the parser's chart.
-pub trait Lemmatizer {
+pub trait Lemmatizer: Send + Sync {
     fn lemmas(&self, surface: &str, pos: Pos) -> Vec<String>;
 
     /// An **unvalidated** regular-plural singular stem for a surface whose singular is outside the
