@@ -1,0 +1,210 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Protein annotations, 3D structural models, residue metrics, and atom contacts (D103 §5.4).
+//
+// Spatial distances in atomic observation predicates carry SI base dimension `units:Quantity(u"m")`
+// (normalised from Ångströms via D93), matching the exact dimensional type emitted by the DCG
+// parser for prose contact-distance statements.
+//
+// Chain-loaded over bootstrap (`core`, `lexicon`, `units`) + `variant`.
+
+namespace core      = "urn:eigenius:core";
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace units     = "urn:eigenius:units";
+namespace variant   = "urn:eigenius:variant";
+namespace structure = "urn:eigenius:structure";
+
+// ── Model source enum ────────────────────────────────────────────────────────────────────────
+
+class structure:ModelSource {
+    description = "Provenance class of a 3D structural model. Closed.";
+}
+
+resource structure:source_pdb : structure:ModelSource {
+    core:short_name  = "pdb";
+    core:description = "Experimental structure deposited in RCSB PDB / PDBe (X-ray, NMR, cryo-EM).";
+}
+
+resource structure:source_alphafold : structure:ModelSource {
+    core:short_name  = "alphafold";
+    core:description = "AlphaFold Protein Structure Database predicted model.";
+}
+
+resource structure:source_docking : structure:ModelSource {
+    core:short_name  = "docking";
+    core:description = "Computational docking complex model.";
+}
+
+resource structure:source_homology : structure:ModelSource {
+    core:short_name  = "homology";
+    core:description = "Template-based homology model.";
+}
+
+// ── Classes ──────────────────────────────────────────────────────────────────────────────────
+
+class structure:ProteinEntry : lexicon:Entity {
+    description = "A canonical protein sequence entry (e.g. UniProtKB accession).";
+    requires structure:uniprot_accession, structure:gene_symbol;
+    recommends structure:sequence_length, core:short_name, core:description;
+}
+
+class structure:ProteinDomain : lexicon:Entity {
+    description = "An annotated structural or functional domain interval on a protein entry.";
+    requires structure:of_protein, structure:domain_name, structure:domain_location;
+    recommends core:short_name, core:description;
+}
+
+class structure:StructureModel : lexicon:Entity {
+    description = "An experimental or predicted 3D structural coordinate model.";
+    requires structure:model_id, structure:model_source;
+    recommends structure:experimental_method, structure:resolution_meters,
+               structure:of_protein, core:short_name, core:description;
+}
+
+class structure:ResidueMetric : lexicon:Entity {
+    description = "Per-residue structural measurements (SASA, relative SASA, pLDDT confidence) in a fixed StructureModel.";
+    requires structure:in_model, structure:residue_location;
+    recommends structure:sasa_sq_meters, structure:relative_sasa, structure:plddt,
+               core:short_name, core:description;
+}
+
+class structure:AtomContact : lexicon:Entity {
+    description = "Minimum inter-atomic contact distance between two residue locations in a fixed StructureModel.";
+    requires structure:in_model, structure:residue_a, structure:residue_b, structure:distance_meters;
+    recommends structure:atom_a, structure:atom_b, structure:includes_backbone,
+               core:short_name, core:description;
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────────────────────
+
+property structure:uniprot_accession : core:string {
+    description = "UniProtKB primary accession.";
+    domain structure:ProteinEntry;
+}
+
+property structure:gene_symbol : core:string {
+    description = "HGNC gene symbol for the protein entry.";
+    domain structure:ProteinEntry;
+}
+
+property structure:sequence_length : core:integer {
+    description = "Canonical amino-acid sequence length.";
+    domain structure:ProteinEntry;
+}
+
+property structure:of_protein : core:resource {
+    description = "The canonical ProteinEntry this domain or structural model belongs to.";
+    class_types structure:ProteinEntry;
+    domain structure:ProteinDomain, structure:StructureModel;
+}
+
+property structure:domain_name : core:string {
+    description = "Short name of the domain or secondary-structure element.";
+    domain structure:ProteinDomain;
+}
+
+property structure:domain_location : core:resource {
+    description = "Residue interval of the domain on the protein reference.";
+    class_types variant:Location;
+    domain structure:ProteinDomain;
+}
+
+property structure:model_id : core:string {
+    description = "Identifier of the structural model (PDB ID or AlphaFold model accession).";
+    domain structure:StructureModel;
+}
+
+property structure:model_source : core:resource {
+    description = "Experimental or computational origin of the structural model.";
+    class_types structure:ModelSource;
+    allows_only structure:source_pdb, structure:source_alphafold, structure:source_docking, structure:source_homology;
+    domain structure:StructureModel;
+}
+
+property structure:experimental_method : core:string {
+    description = "Experimental determination method (e.g. SOLUTION NMR, X-RAY DIFFRACTION) or predictor name.";
+    domain structure:StructureModel;
+}
+
+property structure:resolution_meters : core:rational {
+    description = "Nominal structural resolution in SI meters (exact rational; 1 Å = 10^-10 m).";
+    domain structure:StructureModel;
+}
+
+property structure:in_model : core:resource {
+    description = "The StructureModel in which this residue metric or contact was computed.";
+    class_types structure:StructureModel;
+    domain structure:ResidueMetric, structure:AtomContact;
+}
+
+property structure:residue_location : core:resource {
+    description = "Residue location measured by this ResidueMetric.";
+    class_types variant:Location;
+    domain structure:ResidueMetric;
+}
+
+property structure:sasa_sq_meters : core:rational {
+    description = "Solvent-accessible surface area in square meters (exact rational; 1 Å^2 = 10^-20 m^2).";
+    domain structure:ResidueMetric;
+}
+
+property structure:relative_sasa : core:rational {
+    description = "Relative solvent accessibility (dimensionless fraction in [0, 1]).";
+    domain structure:ResidueMetric;
+}
+
+property structure:plddt : core:rational {
+    description = "Per-residue AlphaFold pLDDT confidence score (0 to 100).";
+    domain structure:ResidueMetric;
+}
+
+property structure:residue_a : core:resource {
+    description = "First residue location in the contact pair.";
+    class_types variant:Location;
+    domain structure:AtomContact;
+}
+
+property structure:residue_b : core:resource {
+    description = "Partner residue location in the contact pair.";
+    class_types variant:Location;
+    domain structure:AtomContact;
+}
+
+property structure:atom_a : core:string {
+    description = "Atom identifier in residue_a (e.g. CD1, CG2).";
+    domain structure:AtomContact;
+}
+
+property structure:atom_b : core:string {
+    description = "Atom identifier in residue_b.";
+    domain structure:AtomContact;
+}
+
+property structure:distance_meters : core:rational {
+    description = "Inter-atomic distance in SI meters (exact rational; e.g. 3.46 Å = 173/500000000000 m).";
+    domain structure:AtomContact;
+}
+
+property structure:includes_backbone : core:boolean {
+    description = "Whether backbone atoms (N, CA, C, O) were admitted when computing this contact.";
+    domain structure:AtomContact;
+}
+
+// ── Atomic observation predicates ────────────────────────────────────────────────────────────
+
+axiom structure:ContactsAtDistance : structure:StructureModel -> variant:Location -> variant:Location -> units:Quantity(u"m") -> Prop
+axiom structure:HasRelativeSasa    : structure:StructureModel -> variant:Location -> units:Quantity(u"1") -> Prop
+axiom structure:HasPlddt           : structure:StructureModel -> variant:Location -> units:Quantity(u"1") -> Prop
+axiom structure:InDomain           : variant:Location -> structure:ProteinDomain -> Prop

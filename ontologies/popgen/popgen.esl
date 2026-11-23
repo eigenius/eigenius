@@ -1,0 +1,234 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Population-genetics datasets, allele-count observations, and regional constraint (D103 §5.3).
+//
+// Every allele count and absence predicate is indexed strictly by `variant:NucleotideAllele`:
+// population sequencing cohorts count genotypes at nucleotide alleles, never protein designations.
+// Transferring a nucleotide count to a protein-level claim requires an explicit bridge (`align`).
+//
+// Chain-loaded over bootstrap (`core`, `lexicon`, `units`) + `variant`.
+
+namespace core    = "urn:eigenius:core";
+namespace lexicon = "urn:eigenius:lexicon";
+namespace units   = "urn:eigenius:units";
+namespace variant = "urn:eigenius:variant";
+namespace popgen  = "urn:eigenius:popgen";
+
+// ── Dataset releases and callsets ────────────────────────────────────────────────────────────
+
+class popgen:CallsetKind {
+    description = "Sequencing callset stratum within a population dataset. Closed.";
+}
+
+resource popgen:callset_exome : popgen:CallsetKind {
+    core:short_name  = "exome";
+    core:description = "Exome sequencing callset.";
+}
+
+resource popgen:callset_genome : popgen:CallsetKind {
+    core:short_name  = "genome";
+    core:description = "Whole-genome sequencing callset.";
+}
+
+resource popgen:callset_joint : popgen:CallsetKind {
+    core:short_name  = "joint";
+    core:description = "Joint exome + genome callset.";
+}
+
+resource popgen:callset_cohort : popgen:CallsetKind {
+    core:short_name  = "cohort";
+    core:description = "Single unified cohort release (no exome/genome split).";
+}
+
+class popgen:DatasetRelease : lexicon:Entity {
+    description = "One versioned population-genetics dataset and callset (e.g. gnomAD v4.1 exomes, All of Us, ToMMo, BRAVO).";
+    requires popgen:dataset_name, popgen:dataset_version, popgen:reference_genome;
+    recommends popgen:callset_kind, core:short_name, core:description;
+}
+
+class popgen:AlleleObservation : lexicon:Entity {
+    description = "Observed allele counts and QC filter status for one variant:NucleotideAllele in a fixed popgen:DatasetRelease.";
+    requires popgen:in_release, popgen:observed_allele;
+    recommends popgen:allele_count, popgen:allele_number, popgen:hemizygous_count,
+               popgen:homozygous_count, popgen:xy_allele_count, popgen:xy_allele_number,
+               popgen:xy_homalt_count, popgen:allele_frequency, popgen:filter_pass,
+               core:short_name, core:description;
+}
+
+class popgen:GeneConstraint : lexicon:Entity {
+    description = "Gene-level loss-of-function and missense constraint metrics in a fixed popgen:DatasetRelease.";
+    requires popgen:in_release, popgen:gene_symbol;
+    recommends popgen:transcript_accession, popgen:pli, popgen:oe_lof, popgen:oe_mis,
+               popgen:obs_mis, popgen:exp_mis, core:short_name, core:description;
+}
+
+class popgen:RegionalConstraintWindow : lexicon:Entity {
+    description = "Regional missense constraint observation over a variant:Location window. Keeps passed_qc and has_no_rmc_evidence separate so 'searched with no constrained region found' is never conflated with a QC failure.";
+    requires popgen:in_release, popgen:window_location;
+    recommends popgen:obs_mis, popgen:exp_mis, popgen:oe_ratio, popgen:p_depletion,
+               popgen:passed_qc, popgen:has_no_rmc_evidence, core:short_name, core:description;
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────────────────────
+
+property popgen:dataset_name : core:string {
+    description = "Name of the population genetics resource (e.g. gnomAD, All of Us, ToMMo, BRAVO).";
+    domain popgen:DatasetRelease;
+}
+
+property popgen:dataset_version : core:string {
+    description = "Exact dataset version string (e.g. v4.1, v4.1.1, freeze8).";
+    domain popgen:DatasetRelease;
+}
+
+property popgen:reference_genome : core:string {
+    description = "Reference genome assembly (e.g. GRCh38, GRCh37).";
+    domain popgen:DatasetRelease;
+}
+
+property popgen:callset_kind : core:resource {
+    description = "Sequencing callset stratum for this dataset release.";
+    class_types popgen:CallsetKind;
+    allows_only popgen:callset_exome, popgen:callset_genome, popgen:callset_joint, popgen:callset_cohort;
+    domain popgen:DatasetRelease;
+}
+
+property popgen:in_release : core:resource {
+    description = "The dataset release from which this observation or constraint record was drawn.";
+    class_types popgen:DatasetRelease;
+    domain popgen:AlleleObservation, popgen:GeneConstraint, popgen:RegionalConstraintWindow;
+}
+
+property popgen:observed_allele : core:resource {
+    description = "The nucleotide allele counted in this observation. Strictly typed as variant:NucleotideAllele.";
+    class_types variant:NucleotideAllele;
+    domain popgen:AlleleObservation;
+}
+
+property popgen:allele_count : core:integer {
+    description = "Observed alternate allele count (AC).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:allele_number : core:integer {
+    description = "Total called allele number at the site (AN).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:hemizygous_count : core:integer {
+    description = "Observed hemizygous carrier count (ac_hemi).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:homozygous_count : core:integer {
+    description = "Observed homozygous carrier count (ac_hom / nhomalt).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:xy_allele_count : core:integer {
+    description = "Alternate allele count among XY samples (AC_XY).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:xy_allele_number : core:integer {
+    description = "Total called allele number among XY samples (AN_XY).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:xy_homalt_count : core:integer {
+    description = "Homozygous alternate genotype count among XY samples (nhomalt_XY).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:allele_frequency : core:rational {
+    description = "Exact rational allele frequency (AF = AC / AN).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:filter_pass : core:boolean {
+    description = "Whether the variant passed all callset QC filters (FILTER=PASS / empty filters array).";
+    domain popgen:AlleleObservation;
+}
+
+property popgen:gene_symbol : core:string {
+    description = "HGNC gene symbol for the constraint record.";
+    domain popgen:GeneConstraint;
+}
+
+property popgen:transcript_accession : core:string {
+    description = "Canonical/MANE transcript accession for the constraint record.";
+    domain popgen:GeneConstraint;
+}
+
+property popgen:pli : core:rational {
+    description = "Probability of loss-of-function intolerance (pLI).";
+    domain popgen:GeneConstraint;
+}
+
+property popgen:oe_lof : core:rational {
+    description = "Observed/expected ratio for predicted loss-of-function variants.";
+    domain popgen:GeneConstraint;
+}
+
+property popgen:oe_mis : core:rational {
+    description = "Observed/expected ratio for missense variants across the gene.";
+    domain popgen:GeneConstraint;
+}
+
+property popgen:window_location : core:resource {
+    description = "Protein or genomic interval covered by the regional constraint window.";
+    class_types variant:Location;
+    domain popgen:RegionalConstraintWindow;
+}
+
+property popgen:obs_mis : core:integer {
+    description = "Observed missense variant count in the gene or regional window.";
+    domain popgen:GeneConstraint, popgen:RegionalConstraintWindow;
+}
+
+property popgen:exp_mis : core:rational {
+    description = "Expected missense variant count under the mutational model.";
+    domain popgen:GeneConstraint, popgen:RegionalConstraintWindow;
+}
+
+property popgen:oe_ratio : core:rational {
+    description = "Observed/expected missense ratio in the regional window.";
+    domain popgen:RegionalConstraintWindow;
+}
+
+property popgen:p_depletion : core:rational {
+    description = "One-sided Poisson/exact p-value for missense depletion in the window.";
+    domain popgen:RegionalConstraintWindow;
+}
+
+property popgen:passed_qc : core:boolean {
+    description = "Dataset RMC passed_qc flag. When false alongside has_no_rmc_evidence=true, denotes searched-with-no-RMC-breaks rather than QC failure.";
+    domain popgen:RegionalConstraintWindow;
+}
+
+property popgen:has_no_rmc_evidence : core:boolean {
+    description = "True when the transcript was searched for regional missense constraint and no significantly depleted break was found.";
+    domain popgen:RegionalConstraintWindow;
+}
+
+// ── Atomic observation predicates ────────────────────────────────────────────────────────────
+
+axiom popgen:ObservedAlleleCount          : popgen:DatasetRelease -> variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+axiom popgen:ObservedAlleleNumber         : popgen:DatasetRelease -> variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+axiom popgen:ObservedHemizygousCount      : popgen:DatasetRelease -> variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+axiom popgen:ObservedAlleleFrequency      : popgen:DatasetRelease -> variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+axiom popgen:AbsentFromDataset            : popgen:DatasetRelease -> variant:NucleotideAllele -> Prop
+axiom popgen:RegionalDepletion            : popgen:DatasetRelease -> variant:Location -> units:Quantity(u"1") -> Prop
+axiom popgen:NoRegionalConstraintEvidence : popgen:DatasetRelease -> variant:Transcript -> Prop

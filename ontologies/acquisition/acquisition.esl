@@ -1,0 +1,151 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Phase-1 network acquisition provenance (D103 §5.1).
+//
+// Models recorded HTTP exchanges and archived response artifacts so that Phase-2
+// offline certification can cite both successful retrievals (HTTP 200 / 206) and
+// negative or error responses (HTTP 401 / 404 / 422, transport failures) as
+// first-class `prov:Activity` and `prov:ObservationTrace` evidence.
+//
+// Chain-loaded over bootstrap (`core`, `prov`).
+
+namespace core        = "urn:eigenius:core";
+namespace prov        = "urn:eigenius:prov";
+namespace acquisition = "urn:eigenius:acquisition";
+
+// ── Acquisition outcome & status provenance enums ────────────────────────────────────────────
+
+class acquisition:Outcome {
+    description = "Outcome category of a recorded network fetch attempt. Closed.";
+}
+
+resource acquisition:outcome_ok : acquisition:Outcome {
+    core:short_name  = "ok";
+    core:description = "The remote endpoint returned a 2xx HTTP response.";
+}
+
+resource acquisition:outcome_http_error : acquisition:Outcome {
+    core:short_name  = "http_error";
+    core:description = "The remote endpoint returned a non-2xx HTTP status (e.g. 400, 401, 404, 422, 5xx).";
+}
+
+resource acquisition:outcome_transport_error : acquisition:Outcome {
+    core:short_name  = "transport_error";
+    core:description = "The request produced no HTTP response (timeout, DNS failure, or connection refused).";
+}
+
+class acquisition:StatusSource {
+    description = "How an archived exchange's HTTP status code was established. Closed.";
+}
+
+resource acquisition:status_observed : acquisition:StatusSource {
+    core:short_name  = "observed";
+    core:description = "Recorded directly from the live HTTP response during Phase-1 acquisition.";
+}
+
+resource acquisition:status_inferred : acquisition:StatusSource {
+    core:short_name  = "inferred";
+    core:description = "Backfilled from response-body structure during archive migration, awaiting live refresh.";
+}
+
+resource acquisition:status_unknown : acquisition:StatusSource {
+    core:short_name  = "unknown";
+    core:description = "Status could not be determined from the migrated archive record.";
+}
+
+// ── HTTP exchange activity & archived artifact ───────────────────────────────────────────────
+
+class acquisition:HttpExchange : prov:Activity {
+    description = "One timestamped Phase-1 HTTP fetch attempt. Subclass of prov:Activity so prov:ObservationTrace can cite it via prov:was_generated_by. Records both successful responses and negative HTTP statuses so absence and endpoint-behavior claims replay deterministically offline.";
+    requires acquisition:url, acquisition:http_method, acquisition:outcome;
+    recommends acquisition:http_status, acquisition:request_body_sha256,
+               acquisition:body_sha256, acquisition:byte_length,
+               acquisition:status_source, prov:started_at, prov:completed_at,
+               core:description;
+}
+
+class acquisition:ArchivedArtifact {
+    description = "An immutable byte artifact stored in the local acquisition archive (data file, cached response body, or archived source manuscript), identified by its content hash and archive path.";
+    requires acquisition:body_sha256, acquisition:relative_path;
+    recommends acquisition:byte_length, acquisition:media_type,
+               acquisition:fetched_by, core:short_name, core:description;
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────────────────────
+
+property acquisition:url : core:string {
+    description = "The exact request URL sent during Phase-1 acquisition.";
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:http_method : core:string {
+    description = "HTTP verb used for the request (e.g. GET, POST, HEAD).";
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:outcome : core:resource {
+    description = "Outcome category of the fetch attempt.";
+    class_types acquisition:Outcome;
+    allows_only acquisition:outcome_ok, acquisition:outcome_http_error, acquisition:outcome_transport_error;
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:http_status : core:integer {
+    description = "HTTP status code returned by the server (e.g. 200, 206, 400, 401, 404, 422). Omitted on transport_error.";
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:status_source : core:resource {
+    description = "Whether the recorded HTTP status was directly observed or inferred during archive migration.";
+    class_types acquisition:StatusSource;
+    allows_only acquisition:status_observed, acquisition:status_inferred, acquisition:status_unknown;
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:request_body_sha256 : core:string {
+    description = "Lowercase hex SHA-256 of the request body (e.g. GraphQL JSON payload) for POST/PUT exchanges.";
+    domain acquisition:HttpExchange;
+}
+
+property acquisition:body_sha256 : core:string {
+    description = "Lowercase hex SHA-256 of the archived response or file bytes.";
+    domain acquisition:HttpExchange, acquisition:ArchivedArtifact;
+}
+
+property acquisition:byte_length : core:integer {
+    description = "Exact byte length of the archived response body or file.";
+    domain acquisition:HttpExchange, acquisition:ArchivedArtifact;
+}
+
+property acquisition:relative_path : core:string {
+    description = "Relative path of the archived file inside the evidence repository.";
+    domain acquisition:ArchivedArtifact;
+}
+
+property acquisition:media_type : core:string {
+    description = "MIME media type of the archived artifact (e.g. application/json, application/xml, text/plain).";
+    domain acquisition:ArchivedArtifact;
+}
+
+property acquisition:fetched_by : core:resource {
+    description = "The HttpExchange activity that retrieved this archived artifact.";
+    class_types acquisition:HttpExchange;
+    domain acquisition:ArchivedArtifact;
+}
+
+// ── Atomic observation predicates ────────────────────────────────────────────────────────────
+
+axiom acquisition:ReturnedStatus : acquisition:HttpExchange -> core:integer -> Prop
+axiom acquisition:FetchFailed    : acquisition:HttpExchange -> Prop
