@@ -690,7 +690,7 @@ impl Parser {
                     resolution,
                 });
                 if sentences.len() >= 50
-                    && ((ordinal + 1) % 25 == 0 || ordinal + 1 == sentences.len())
+                    && ((ordinal + 1).is_multiple_of(25) || ordinal + 1 == sentences.len())
                 {
                     eprintln!(
                         "  [progress] discourse loop: {}/{} units processed",
