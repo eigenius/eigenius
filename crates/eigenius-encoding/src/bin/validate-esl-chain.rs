@@ -28,9 +28,14 @@ use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::validation::Validator;
 
 #[derive(Parser)]
-#[command(about = "Compile and validate an ordered stack of ESL layers over bootstrap")]
+#[command(
+    about = "Compile and validate an ordered stack of ESL layers over bootstrap or a lexicon snapshot"
+)]
 struct Args {
-    /// Ordered ESL layer files to compile and validate on top of bootstrap.
+    /// Optional RocksDB lexicon snapshot to stack on top of (instead of bare bootstrap).
+    #[arg(long)]
+    snapshot: Option<PathBuf>,
+    /// Ordered ESL layer files to compile and validate.
     #[arg(required = true)]
     layers: Vec<PathBuf>,
     /// Maximum validation errors to display per layer before truncating.
@@ -40,14 +45,22 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    let bootstrap = match eigenius_kernel::bootstrap::bootstrap() {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("bootstrap failed: {e:?}");
-            return ExitCode::FAILURE;
-        }
+    let mut head: Arc<Layer> = match &args.snapshot {
+        Some(snap) => match eigenius_encoding::snapshot::open_head(snap) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("snapshot open failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => match eigenius_kernel::bootstrap::bootstrap() {
+            Ok(b) => Arc::clone(b.head()),
+            Err(e) => {
+                eprintln!("bootstrap failed: {e:?}");
+                return ExitCode::FAILURE;
+            }
+        },
     };
-    let mut head: Arc<Layer> = Arc::clone(bootstrap.head());
     let mut total_resources: usize = 0;
 
     for path in &args.layers {
