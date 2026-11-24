@@ -109,6 +109,13 @@ impl<'a> DerivedClaimLander<'a> {
         self
     }
 
+    /// Set the accountable `prov:Agent` IRI stamped onto `prov:was_attributed_to` for each landed
+    /// claim and its `DeclarationTrace` (D72 / D103 §3.2).
+    pub fn with_declared_by(mut self, declared_by: &str) -> Self {
+        self.declared_by = declared_by.to_string();
+        self
+    }
+
     /// The accumulated claim clusters, in landing order (drains the lander).
     pub fn take_landed(&self) -> Vec<GradedClaim> {
         self.landed.take()

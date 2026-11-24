@@ -131,6 +131,7 @@ pub use reading_ranker::{
     decision_questions, CostFirstReadingRanker, DecisionQuestions, DecisionReadingRanker,
     DocumentContext, LiveReadingRanker, PinReadingRanker, PriorSelection, ReadingCandidate,
     ReadingRanker, ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+    SemPinReadingRanker,
 };
 #[cfg(feature = "use-llm")]
 pub use reading_ranker::{

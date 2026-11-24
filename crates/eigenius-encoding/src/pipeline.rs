@@ -57,13 +57,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::emit::DocumentMeta;
-use crate::select::load_pins;
+use crate::select::{load_doc_unit_map, load_pins, load_reading_pins};
 use crate::snapshot::{build_sense_ranker_with_model, open_head_and_backend, CELL_BEAM, SENSE_CAP};
 use clap::Parser as ClapParser;
 use eigenius_kernel::dcg::{
     AugmentOptions, CostFirstReadingRanker, InProcessPipeline, NoAbbreviationProposer, Parser,
     PinReadingRanker, Proposal, ProposeCtx, Proposer, ReadingRanker, RecordingReadingRanker,
-    ReplayProposer, ReplayReadingRanker, SentenceOutcome,
+    ReplayProposer, ReplayReadingRanker, SemPinReadingRanker, SentenceOutcome,
 };
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 use sha2::{Digest, Sha256};
@@ -88,9 +88,16 @@ pub struct Args {
     #[arg(long)]
     source: PathBuf,
     /// Pinned readings: `sentence <TAB> skeleton <TAB> note` — the DECLARED selection arm.
-    /// Exactly one of `--pins` / `--selections` / `--cost-first` is required (unless `--partial`).
+    /// Exactly one of `--pins` / `--selections` / `--cost-first` (or `--reading-pins`) is
+    /// required (unless `--partial`).
     #[arg(long)]
     pins: Option<PathBuf>,
+    /// Sense-resolved reading pins (`reading-adjudications.tsv`: `sentence <TAB> sem <TAB>
+    /// correct [<TAB> evidence [<TAB> basis]]`, D103 §3.1). May be passed standalone (strict
+    /// fail-closed for unpinned units) or combined with `--selections` / `--cost-first` as a
+    /// human-verified overlay during incremental curation.
+    #[arg(long)]
+    reading_pins: Option<PathBuf>,
     /// A reading-selection draw (`selections.json`) — the COMPUTED selection arm
     /// (d63-reading-selection.md). **Exists → REPLAY** (deterministic, no LLM); **absent →
     /// RECORD** a live draw into it (needs `use-llm` + a key) while generating. The record arm
@@ -185,6 +192,19 @@ pub struct Args {
     /// `<ns>:source` Reference into the artifact (the right default for a plain text file).
     #[arg(long)]
     source_ref: Option<String>,
+    /// An existing chain-resident `enc:Document` IRI (D102) for `enc:ReasoningStructure.enc:document`.
+    #[arg(long)]
+    document_iri: Option<String>,
+    /// D102 TSV mapping `1-based ordinal <TAB> enc:DiscourseUnit IRI` so `enc:ScopedUnit.enc:unit`
+    /// and `enc:CutItem.enc:cut_unit` point directly at pre-existing D101 units without minting
+    /// duplicate `unit_{n}` resources.
+    #[arg(long)]
+    doc_unit_map: Option<PathBuf>,
+    /// Accountable `prov:Agent` IRI stamped onto `prov:was_attributed_to` for every emitted
+    /// `enc:EncodedClaim` and `prov:DeclarationTrace` (D72 / D103 §3.2). Defaults to
+    /// `urn:eigenius:prov:agent:unattributed`.
+    #[arg(long)]
+    declared_by: Option<String>,
     /// Where to write the claims layer (units, encoded claims, ProgramTraces, decision points).
     /// Regenerated on every run — this is the layer the prose determines.
     #[arg(long)]
@@ -264,27 +284,56 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     let sha = hex(&Sha256::digest(doc.as_bytes()));
     eprintln!("source: {} (sha256 {sha})", args.source.display());
 
-    // Exactly one selection authority per run — an emission with a mixed or defaulted authority
-    // would be unauditable. The pins double as the emission's byte-stable `Pinned` records.
-    let pins = match (&args.pins, &args.selections, args.cost_first) {
-        (Some(p), None, false) => {
-            let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
-            eprintln!("pins:   {} entries", pins.len());
-            Some(pins)
+    let reading_pins = match &args.reading_pins {
+        Some(p) => {
+            let rp = load_reading_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("reading-pins: {} `correct` entries", rp.len());
+            Some(rp)
         }
-        (None, Some(_), false) | (None, None, true) => None,
-        (None, None, false) if args.partial => {
-            // NO authority — only sole-survivor readings encode; the rest are cuts.
-            eprintln!("selection: NONE (--partial) — sole-survivor readings only");
-            None
-        }
-        _ => return Err(
-            "exactly one of --pins (declared arm) / --selections (computed arm) / --cost-first \
-                 (deterministic offline arm) is required (or --partial with none: sole-survivor \
-                 readings only)"
-                .to_string(),
-        ),
+        None => None,
     };
+    let doc_unit_map = match &args.doc_unit_map {
+        Some(p) => {
+            let m = load_doc_unit_map(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("doc-unit-map: {} unit anchor(s)", m.len());
+            Some(m)
+        }
+        None => None,
+    };
+    let declared_by = args
+        .declared_by
+        .as_deref()
+        .unwrap_or(crate::UNATTRIBUTED_AGENT);
+
+    // Exactly one base selection authority per run — `--reading-pins` may run standalone or
+    // overlay `--selections` / `--cost-first`, but cannot mix with legacy skeleton `--pins`.
+    if args.pins.is_some() && reading_pins.is_some() {
+        return Err(
+            "--pins (skeleton) and --reading-pins (sense-resolved) are mutually exclusive"
+                .to_string(),
+        );
+    }
+    let pins =
+        match (&args.pins, &args.selections, args.cost_first) {
+            (Some(p), None, false) => {
+                let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+                eprintln!("pins:   {} entries", pins.len());
+                Some(pins)
+            }
+            (None, Some(_), false) | (None, None, true) => None,
+            (None, None, false) if reading_pins.is_some() => None,
+            (None, None, false) if args.partial => {
+                // NO authority — only sole-survivor readings encode; the rest are cuts.
+                eprintln!("selection: NONE (--partial) — sole-survivor readings only");
+                None
+            }
+            _ => return Err(
+                "exactly one of --pins (declared arm) / --reading-pins (sense-resolved pins) / \
+                 --selections (computed arm) / --cost-first (deterministic offline arm) is \
+                 required (or --partial with none: sole-survivor readings only)"
+                    .to_string(),
+            ),
+        };
     #[cfg(feature = "use-llm")]
     let mut selection_recording: Option<(
         std::sync::Arc<RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>>,
@@ -377,6 +426,13 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             ));
         }
         _ => unreachable!("guarded by selection-authority check above"),
+    };
+    let ranker: Option<Box<dyn ReadingRanker>> = match reading_pins {
+        Some(rp) => {
+            let map: BTreeMap<String, String> = rp.into_iter().map(|(s, p)| (s, p.sem)).collect();
+            Some(Box::new(SemPinReadingRanker::new(map, ranker)))
+        }
+        None => ranker,
     };
 
     // Anaphora arm (D64/D67 §3), same three-arm discipline as every other recorded stage.
@@ -621,6 +677,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             .with_emission_namespace(&args.ns)
             .with_source(&format!("{} (sha256 {sha})", args.source.display()))
             .with_timestamp(&args.timestamp)
+            .with_declared_by(declared_by)
     });
 
     let glossary_source_text = match &args.glossary_source {
@@ -758,12 +815,10 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             source_path: &args.source.display().to_string(),
             source_sha256: &sha,
             timestamp: &args.timestamp,
-            // No agent is threaded through this surface yet, so the claim names the absence
-            // rather than hiding it behind the program that parsed it (D72).
-            // Supplying a real `prov:Agent` is D71's `land` story: the moment a
-            // formulation becomes an assertion is the moment someone takes responsibility.
-            declared_by: crate::UNATTRIBUTED_AGENT,
+            declared_by,
             source_ref: args.source_ref.as_deref(),
+            document_iri: args.document_iri.as_deref(),
+            doc_unit_map: doc_unit_map.as_ref(),
         },
     })?;
     // The CLI's `--out` decides the encoding; the kernel owns the mapping, so this is the one

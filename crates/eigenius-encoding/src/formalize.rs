@@ -500,6 +500,8 @@ impl DocumentFormalizer for EncodingFormalizer {
                 // formulation becomes an assertion is the moment someone takes responsibility.
                 declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: req.source_ref.as_deref(),
+                document_iri: None,
+                doc_unit_map: None,
             },
         })?;
 

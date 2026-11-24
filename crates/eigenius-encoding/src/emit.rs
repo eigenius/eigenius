@@ -111,14 +111,31 @@ pub struct DocumentMeta<'a> {
     /// existing Reference and emits nothing, so Rule 22's closed-world check does the verifying:
     /// an IRI that names no chain-resident Reference fails the load rather than conjuring one.
     pub source_ref: Option<&'a str>,
+    /// Optional chain-resident `enc:Document` IRI (D102). When `Some(iri)`, the emitted
+    /// `enc:ReasoningStructure.enc:document` points directly at this `enc:Document` rather than
+    /// the fallback `reference:Reference`.
+    pub document_iri: Option<&'a str>,
+    /// Optional D102 mapping from 1-based CNL unit ordinal to a pre-existing chain
+    /// `enc:DiscourseUnit` IRI. Mapped units are cited directly by `enc:ScopedUnit.enc:unit` and
+    /// `enc:CutItem.enc:cut_unit` without minting duplicate `unit_{n}` resources.
+    pub doc_unit_map: Option<&'a std::collections::BTreeMap<usize, String>>,
 }
 
 impl DocumentMeta<'_> {
-    /// The Reference IRI every `enc:source_document` points at — minted or cited.
+    /// The Reference IRI every minted `enc:source_document` points at — minted or cited.
     fn reference_iri(&self) -> String {
         match self.source_ref {
             Some(r) => r.to_string(),
             None => format!("{}:source", self.ns),
+        }
+    }
+
+    /// The IRI that `enc:ReasoningStructure.enc:document` points at (`enc:Document` when supplied
+    /// per D102, else the fallback `reference:Reference`).
+    fn structure_document_iri(&self) -> String {
+        match self.document_iri {
+            Some(d) => d.to_string(),
+            None => self.reference_iri(),
         }
     }
 }
@@ -244,11 +261,21 @@ pub fn emit_resources(
         ..
     } = *meta;
     let doc_iri = meta.reference_iri();
+    let struct_doc_iri = meta.structure_document_iri();
+    let unit_map = meta.doc_unit_map;
+    let needs_minted_ref = meta.source_ref.is_none()
+        && (meta.document_iri.is_none()
+            || sentences
+                .iter()
+                .any(|s| unit_map.and_then(|m| m.get(&s.ordinal)).is_none())
+            || cuts
+                .iter()
+                .any(|c| unit_map.and_then(|m| m.get(&c.ordinal)).is_none()));
 
     let mut out: Vec<Resource> = Vec::new();
     // A minted Reference leads the artifact; a CITED one is already on the chain and must not be
     // re-emitted here — a second definition of an existing IRI is a redefinition, not a reference.
-    if meta.source_ref.is_none() {
+    if needs_minted_ref {
         let mut r = res(&doc_iri, &[&format!("{REF}:Reference")]);
         r.set(
             iri(&format!("{CORE}:description")),
@@ -266,11 +293,15 @@ pub fn emit_resources(
     let mut claim_iris: Vec<Value> = Vec::new();
     for s in sentences {
         let n = s.ordinal;
-        let unit_iri = format!("{ns}:unit_{n}");
         let scoped_iri = format!("{ns}:scoped_{n}");
         let claim_iri = format!("{ns}:claim_{n}");
-
-        out.push(discourse_unit(ns, n, &s.text, s.span, &doc_iri));
+        let unit_iri = match unit_map.and_then(|m| m.get(&n)) {
+            Some(existing) => existing.clone(),
+            None => {
+                out.push(discourse_unit(ns, n, &s.text, s.span, &doc_iri));
+                format!("{ns}:unit_{n}")
+            }
+        };
 
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
@@ -484,8 +515,13 @@ pub fn emit_resources(
     // stating why. `cut_unit` references the unit; no ScopedUnit/claim exists to reference.
     for c in cuts {
         let n = c.ordinal;
-        let unit_iri = format!("{ns}:unit_{n}");
-        out.push(discourse_unit(ns, n, &c.text, c.span, &doc_iri));
+        let unit_iri = match unit_map.and_then(|m| m.get(&n)) {
+            Some(existing) => existing.clone(),
+            None => {
+                out.push(discourse_unit(ns, n, &c.text, c.span, &doc_iri));
+                format!("{ns}:unit_{n}")
+            }
+        };
         let (kind, rationale) = match &c.reason {
             CutReason::Ambiguous { readings } => (
                 "cut_ambiguous",
@@ -539,7 +575,7 @@ pub fn emit_resources(
     structure.set(iri(&format!("{ENC}:claims")), Value::Array(claim_iris));
     structure.set(
         iri(&format!("{ENC}:document")),
-        Value::String(iri(&doc_iri).as_str().to_string()),
+        Value::String(iri(&struct_doc_iri).as_str().to_string()),
     );
     structure.set(
         iri(&format!("{ENC}:source_path")),
@@ -600,7 +636,9 @@ pub fn emit_resources(
     // `prov:used` is `core:resource_array` — the resources an activity consumed, plural.
     activity.set(
         iri(&format!("{PROV}:used")),
-        Value::Array(vec![Value::String(iri(&doc_iri).as_str().to_string())]),
+        Value::Array(vec![Value::String(
+            iri(&struct_doc_iri).as_str().to_string(),
+        )]),
     );
     out.push(activity);
 
@@ -722,6 +760,8 @@ mod tests {
                 timestamp: "2026-08-11T00:00:00Z",
                 declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: None,
+                document_iri: None,
+                doc_unit_map: None,
             },
             glossary,
             s,
@@ -769,6 +809,8 @@ mod tests {
                 timestamp: "2026-08-11T00:00:00Z",
                 declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: None,
+                document_iri: None,
+                doc_unit_map: None,
             },
             &[],
             &[],
@@ -917,6 +959,8 @@ mod tests {
                 timestamp: "2026-08-11T00:00:00Z",
                 declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
+                document_iri: None,
+                doc_unit_map: None,
             },
             &[],
             &s,
@@ -1095,5 +1139,63 @@ mod tests {
                 "a DeclarationTrace names who declared: {t}"
             );
         }
+    }
+
+    #[test]
+    fn d102_document_iri_and_unit_map_anchor_without_minting_duplicates() {
+        let it = item();
+        let s = [sentence(&it, SentenceSelection::Sole)];
+        let mut umap = std::collections::BTreeMap::new();
+        umap.insert(1usize, "urn:eigenius:test:docmodel:u0005".to_string());
+        let json = emit_document(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:anchored",
+                source_path: "cnl.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-11-23T00:00:00Z",
+                declared_by: "urn:eigenius:prov:agent:eigenius_core_team",
+                source_ref: None,
+                document_iri: Some("urn:eigenius:test:docmodel:report"),
+                doc_unit_map: Some(&umap),
+            },
+            &[],
+            &s,
+            &[],
+            &eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+                eigenius_kernel::bootstrap::bootstrap()
+                    .expect("bootstrap")
+                    .head(),
+            ),
+        )
+        .expect("emits");
+        let resources: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
+        assert!(
+            !resources
+                .iter()
+                .any(|r| r["@id"].as_str() == Some("urn:eigenius:test:anchored:source")),
+            "no synthetic Reference minted when document_iri and all unit anchors are supplied"
+        );
+        assert!(
+            !resources
+                .iter()
+                .any(|r| r["@id"].as_str() == Some("urn:eigenius:test:anchored:unit_1")),
+            "no duplicate DiscourseUnit minted when unit 1 is mapped"
+        );
+        let scoped = resources
+            .iter()
+            .find(|r| r["@id"].as_str() == Some("urn:eigenius:test:anchored:scoped_1"))
+            .expect("scoped_1 emitted");
+        assert_eq!(
+            scoped["urn:eigenius:encoding:unit"].as_str(),
+            Some("urn:eigenius:test:docmodel:u0005")
+        );
+        let structure = resources
+            .iter()
+            .find(|r| r["@id"].as_str() == Some("urn:eigenius:test:anchored:structure"))
+            .expect("structure emitted");
+        assert_eq!(
+            structure["urn:eigenius:encoding:document"].as_str(),
+            Some("urn:eigenius:test:docmodel:report")
+        );
     }
 }

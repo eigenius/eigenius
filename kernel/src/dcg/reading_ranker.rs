@@ -247,6 +247,67 @@ impl ReadingRanker for PinReadingRanker {
     }
 }
 
+/// Sense-resolved reading pin selector (D103 §3.1): selects the unique candidate whose exact
+/// pretty-printed `sem` matches the human-adjudicated reading for `ctx.sentence.trim()`.
+///
+/// Unlike [`PinReadingRanker`] (which matches sense-erased skeletons and fails closed on any
+/// sense-level tie), `SemPinReadingRanker` disambiguates both structure and word senses.
+///
+/// Behavior:
+/// - If `ctx.sentence.trim()` is present in `pins`:
+///   - Exactly one candidate with `c.sem == *pin_sem` → selects it.
+///   - Zero or `>= 2` matches → **fails closed (`None`)** (never falls through to an untrusted
+///     fallback when a human pin exists and drifted).
+/// - If `ctx.sentence.trim()` is NOT in `pins`:
+///   - Delegates to `fallback` when provided (enabling incremental section-by-section curation
+///     as an overlay on top of `--selections` or `--cost-first`), or abstains (`None`) in strict
+///     standalone mode.
+pub struct SemPinReadingRanker {
+    /// trimmed sentence → exact normalized `sem` term (`correct` row from adjudication ledger).
+    pins: BTreeMap<String, String>,
+    /// Optional fallback selector for sentences not yet pinned.
+    fallback: Option<Box<dyn ReadingRanker>>,
+}
+
+impl SemPinReadingRanker {
+    pub fn new(pins: BTreeMap<String, String>, fallback: Option<Box<dyn ReadingRanker>>) -> Self {
+        Self { pins, fallback }
+    }
+}
+
+impl ReadingRanker for SemPinReadingRanker {
+    fn model(&self) -> Option<String> {
+        Some("human:reading-pin".to_string())
+    }
+
+    fn select(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        if let Some(pin_sem) = self.pins.get(ctx.sentence.trim()) {
+            let matches: Vec<usize> = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| &c.sem == pin_sem)
+                .map(|(i, _)| i)
+                .collect();
+            return match matches.as_slice() {
+                [one] => Some(ReadingSelection {
+                    chosen: *one,
+                    rationale: "pinned reading (sense-resolved reading-adjudications.tsv)"
+                        .to_string(),
+                    runners_up: Vec::new(),
+                }),
+                _ => None, // fail closed on drift (0 matches) or duplicate sem (>=2 matches)
+            };
+        }
+        self.fallback
+            .as_deref()
+            .and_then(|f| f.select(ctx, candidates))
+    }
+}
+
 /// Deterministic offline reading selector (`--no-llm`): selects the lowest-cost surviving reading
 /// (`forest_rank == 0`) while keeping the default [`ReadingRanker::tells_apart`] contract so D69 §3
 /// presentation injectivity is still enforced before any selection is accepted.
@@ -2254,5 +2315,39 @@ mod decision_ranker_tests {
             Some((0, 1)),
             "D69 presentation collision still blocks CostFirstReadingRanker"
         );
+    }
+
+    #[test]
+    fn sem_pin_ranker_breaks_sense_ties_fails_closed_on_drift_and_delegates_unpinned() {
+        let mut c0 = cand("SAME_SKEL", "sense zero");
+        c0.sem = "v001(a, b)".to_string();
+        c0.forest_rank = 0;
+        let mut c1 = cand("SAME_SKEL", "sense one");
+        c1.sem = "v002(a, b)".to_string();
+        c1.forest_rank = 1;
+        let pool = [c0, c1];
+
+        // 1. Sense-resolved pin breaks a tie where both candidates share the same skeleton.
+        let mut pins = BTreeMap::new();
+        pins.insert(ctx().sentence.trim().to_string(), "v002(a, b)".to_string());
+        let r = SemPinReadingRanker::new(pins, Some(Box::new(CostFirstReadingRanker)));
+        let sel = r.select(&ctx(), &pool).expect("breaks sense tie");
+        assert_eq!(sel.chosen, 1);
+
+        // 2. Drifted pin fails closed even when a fallback ranker is attached.
+        let mut drifted = BTreeMap::new();
+        drifted.insert(ctx().sentence.trim().to_string(), "v999(a, b)".to_string());
+        let r_drift = SemPinReadingRanker::new(drifted, Some(Box::new(CostFirstReadingRanker)));
+        assert!(
+            r_drift.select(&ctx(), &pool).is_none(),
+            "drifted pin must fail closed rather than silently falling back"
+        );
+
+        // 3. Unpinned sentence delegates to fallback when present, or abstains standalone.
+        let r_overlay =
+            SemPinReadingRanker::new(BTreeMap::new(), Some(Box::new(CostFirstReadingRanker)));
+        assert_eq!(r_overlay.select(&ctx(), &pool).expect("fallback").chosen, 0);
+        let r_strict = SemPinReadingRanker::new(BTreeMap::new(), None);
+        assert!(r_strict.select(&ctx(), &pool).is_none());
     }
 }
