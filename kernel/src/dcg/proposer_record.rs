@@ -136,6 +136,7 @@ fn ctx_key(ctx: &ProposeCtx, candidates: &[RecordedProposalCandidate]) -> String
 pub struct RecordingProposer<P: Proposer> {
     inner: P,
     log: Mutex<BTreeMap<String, ProposalRecord>>,
+    checkpoint_path: Option<std::path::PathBuf>,
 }
 
 impl<P: Proposer> RecordingProposer<P> {
@@ -143,7 +144,29 @@ impl<P: Proposer> RecordingProposer<P> {
         Self {
             inner,
             log: Mutex::new(BTreeMap::new()),
+            checkpoint_path: None,
         }
+    }
+
+    /// Periodically flush recorded proposals to `path` every 25 new records.
+    pub fn with_checkpoint(mut self, path: std::path::PathBuf) -> Self {
+        self.checkpoint_path = Some(path);
+        self
+    }
+
+    /// Seed the recorder with entries from an existing checkpoint file so an interrupted run
+    /// replays already-recorded proposals and calls the live inner proposer only on new questions.
+    pub fn load_checkpoint(&self, path: &Path) -> std::io::Result<usize> {
+        if !path.exists() {
+            return Ok(0);
+        }
+        let records: Vec<ProposalRecord> = serde_json::from_str(&std::fs::read_to_string(path)?)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut log = self.log.lock().expect("proposal log");
+        for r in records {
+            log.insert(record_key(&r), r);
+        }
+        Ok(log.len())
     }
 
     /// The recorded proposals as JSON (sorted by key — deterministic bytes).
@@ -196,7 +219,20 @@ impl<P: Proposer> Proposer for RecordingProposer<P> {
             candidates,
             proposal: proposal.clone(),
         };
-        self.log.lock().expect("proposal log").insert(key, record);
+        let n = {
+            let mut log = self.log.lock().expect("proposal log");
+            log.insert(key, record);
+            log.len()
+        };
+        if n.is_multiple_of(25) {
+            if let Some(p) = &self.checkpoint_path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = self.write(p);
+                eprintln!("  [checkpoint] proposals: {n} recorded → {}", p.display());
+            }
+        }
         proposal
     }
 }

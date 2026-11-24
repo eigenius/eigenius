@@ -14,9 +14,50 @@ any detour.
 > (`experiments/parsing/derived/step5/c0*.py`) is hand-authored and unrecoverable if not copied
 > out of band.
 >
-> **entry 7 (`2026-10-10`, updated `2026-11-10`, active). UAB survey step 5 & step 6 — document-level
-> discourse close-out and verbalization verification ([uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md)).
-> Branch `uab-step6-encoding-verification`.**
+> **entry 7 (`2026-10-10`, updated `2026-11-11`, active). UAB survey step 5, step 6 & D71 claim landing —
+> pool reduction, end-to-end claim emission, and 3-way deterministic-vs-reranking evaluation
+> ([uab-xiap-encoding-plan.md](uab-xiap-encoding-plan.md)). Branch `uab-xiap-claim-landing`.**
+>
+> **3-way A/B/C pool reduction, D71 claim landing & reranking evaluation (`2026-11-11`, store
+> `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 / 864`):** Following the
+> **Arm A** deterministic `--cost-first` baseline (`958 / 1,056` = `90.7%` `EncodedClaim`s, `98`
+> `CutItem`s, `5,705` resources, `0` `Validator` errors; `8 / 50` = `16.0%` strict, `14 / 50` = `28.0%`
+> charitable on the fixed `50`-claim stratified sample), completed two controlled follow-up arms in
+> gitignored `experiments/parsing/encoded/`:
+> (1) **Arm B — Cleaned Deterministic (`--cost-first`, `xiap-deterministic-clean/`):** Fixed
+> `SemRecipe::DetRefine` `.1` projection (`Exp::Fst`) on `cat_np` determiners (`22 → 0` D47
+> `LamWithoutAnnotation` cuts in `combinators.rs`), Stage-A `@id` collision disambiguation +
+> `supporting` remapping (`augment.rs`) and closed-class CGEL approximator adverbs (`almost`, `nearly`,
+> `virtually`, `practically` in `category.rs`, `parse/mod.rs`, `seed.rs`; `21 → 1` single-pass
+> `no parse` cuts), αη-equivalence pool deduplication (`alpha_eta_key` in `resolve.rs`), and full D69
+> `Register::Expanded` disambiguation (`verbalize.rs`, `analysis.rs`; `48 → 0` `first_collision` cuts
+> with byte-identical `Surface`). Mechanical coverage rose to **`1,048 / 1,056` (`99.2%`)
+> `EncodedClaim`s** (`8` `CutItem`s = `1` `cut_grammar` + `7` `cut_unresolved`; `445`
+> `AnaphorBinding`s; `253` `LexicalEntry`s; `6,081` resources; `0` `Validator` errors), while
+> corpus-wide pathology rates (`6.6%` `v_t(X, X)`, `18.8%` bare `Entity`) and `50`-claim semantic
+> fidelity (`9 / 50` = **`18.0%` strict**, `14 / 50` = **`28.0%` charitable**) stayed nearly flat —
+> proving deterministic cleanup solves coverage, not semantic selection.
+> (2) **Arm C — Contextual Reranking (`SenseRanker` + Stage-1 `ReadingRanker` via `jev-latest`,
+> `xiap/`):** Added bounded document context (`reading_ranker::context_parts`), `TypeSafeDecider`
+> 255-option cap, 25-sentence checkpointing, `--sense-model`, and `--resume` (`eigenius-encoding`,
+> `sense_ranker.rs`, `reading_ranker.rs`). Across all `1,056` CNL units (`1,046` `ranks.json` + `1,637`
+> `selections.json` draws, 100% deterministic offline replay, `0` `Validator` errors), Arm C emits
+> **`914 / 1,056` (`86.6%`) `EncodedClaim`s**, **`458` `AnaphorBinding`s**, **`5,692` resources**, and
+> **`142` fail-closed `CutItem`s** (`128` `NONE FAITHFUL` ranker abstentions + `3` D69 + `1`
+> `cut_grammar` + `10` `cut_unresolved`). On the exact same `50`-claim sample (`45` emitted, `5`
+> fail-closed cuts — `4 / 5` preventing false homograph/sense claims emitted in Arms A & B), **strict
+> precision rises +67% relative to `12 / 45` (`26.7%`; `24.0%` recall)** and **charitable precision
+> rises +35% relative to `17 / 45` (`37.8%`; `34.0%` recall)**, reducing corrupted emitted claims from
+> `36` (`72.0%`) to `28` (`56.0%` of sample; `62.2%` of emitted) and isolating the four remaining
+> bottlenecks: (a) **semantic composition recipes (`10 / 50` = `20%`)** where every candidate in the
+> parse forest erases/inverts meaning (`is never NP`, `unable to VP`, `make X worse than Y`, `worth
+> <gerund>`, `reads as NP`, passive ECM + phrasal verb, `N out of M`, gerund-clause subjects,
+> hyphenated numeral-noun modifiers, deictic `you`), (b) **ungrounded `lexicon:Entity` & UMLS nominal
+> competition (`8 / 50` = `16%`; `18.8% → 29.7%` bare-`Entity` rate)** where ungrounded `Entity`
+> fallbacks bypass `SenseRanker` pruning and out-compete Stage-A named entities, (c) **discourse
+> `RecencyProposer` + `NoKindClassifier` (`6 / 50` = `12%`)** on bare pronouns and rhetorical-kind
+> demonstratives, and (d) **`MAX_ANALYSES = 12` truncation (`73.2%` of pools, `397` sentences) & OOV
+> domain acronyms (`4 / 50` = `8%`)**.
 >
 > **Step 6 (`2026-11-10`, store `wordnet-umls-hpo-aligned-2026-11-07-systematic`, `38,391 / 20,533 /
 > 864`):** Wired `EIGENIUS_WRN_UNITS_PER_LINE` and `EIGENIUS_VERBALIZE_OUT` into

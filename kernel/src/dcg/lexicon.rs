@@ -444,13 +444,36 @@ impl LexicalIndex {
             let Ok(item) = entry_to_item(&doc, entry) else {
                 continue;
             };
-            overlay.entry(key).or_default().push(LexEntry {
+            let gloss = read_description(entry).or_else(|| {
+                entry
+                    .get(&iri("urn:eigenius:lexicon:sem"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Iri::parse(s).ok())
+                    .and_then(|sem_iri| doc.resolve(&sem_iri))
+                    .and_then(|r| read_description(r.as_ref()))
+            });
+            let raw_form = form.trim().to_string();
+            let lex_entry = LexEntry {
                 item,
                 in_lexicon: read_in_lexicon(entry),
-                gloss: read_description(entry),
+                gloss,
                 sense: read_sense(entry),
-                form: form.trim().to_string(),
-            });
+                form: raw_form.clone(),
+            };
+            let tok_surface = super::preprocess::join_surfaces(&super::preprocess::tokenize(
+                &raw_form,
+                &super::quantity::ProseUnits::none(),
+            ));
+            let tok_key = tok_surface.trim().to_lowercase();
+            overlay
+                .entry(key.clone())
+                .or_default()
+                .push(lex_entry.clone());
+            if !tok_key.is_empty() && tok_key != key {
+                let mut alias = lex_entry;
+                alias.form = tok_surface.trim().to_string();
+                overlay.entry(tok_key).or_default().push(alias);
+            }
         }
         self.overlay = overlay;
         self
@@ -586,11 +609,27 @@ impl LexicalLookup for LexicalIndex {
                 }
             }
         };
-        // Merge the document-augmentation overlay (§6a): a doc's OOV groundings, seeded alongside the
-        // persisted entries so a DB-backed parse sees them without their being committed.
         if let Some(extra) = self.overlay.get(form_lc) {
-            out.extend(extra.iter().cloned());
+            for e in extra {
+                let dup = out
+                    .iter()
+                    .any(|o| o.sense.is_some() && o.sense == e.sense && o.form == e.form);
+                if !dup {
+                    out.push(e.clone());
+                }
+            }
         }
+        // Partition explicit document abbreviation definitions ahead of general lexicon
+        // homographs regardless of whether they arrived via the persisted doc layer (`probe_form`)
+        // or the in-memory `overlay`, while OOV/NER/compound fallbacks remain in trailing order.
+        let (doc_abbrs, rest): (Vec<LexEntry>, Vec<LexEntry>) = out.into_iter().partition(|e| {
+            e.gloss.as_deref().is_some_and(|g| {
+                g.ends_with("(abbreviation defined in this document)")
+                    || g.contains("abbreviation-definition preprocessor")
+            })
+        });
+        let mut out = doc_abbrs;
+        out.extend(rest);
         out
     }
 

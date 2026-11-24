@@ -1,0 +1,117 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Computational variant-effect predictors and MAVE assay records (D103 §5.5).
+//
+// Covers in-silico pathogenicity and splicing scores (dbNSFP / MyVariant, CADD, REVEL,
+// AlphaMissense, SpliceAI) and multiplexed assays of variant effect (MaveDB).
+//
+// Chain-loaded over bootstrap (`core`, `lexicon`, `units`) + `variant`.
+
+namespace core       = "urn:eigenius:core";
+namespace lexicon    = "urn:eigenius:lexicon";
+namespace units      = "urn:eigenius:units";
+namespace variant    = "urn:eigenius:variant";
+namespace predictors = "urn:eigenius:predictors";
+
+// ── Classes ──────────────────────────────────────────────────────────────────────────────────
+
+class predictors:ToolRelease : lexicon:Entity {
+    description = "A versioned computational predictor or assay repository (e.g. CADD v1.7, REVEL via dbNSFP 4.x, SpliceAI, MaveDB).";
+    requires predictors:tool_name, predictors:tool_version;
+    recommends predictors:aggregator, core:short_name, core:description;
+}
+
+class predictors:VariantScore : lexicon:Entity {
+    description = "One predictor output record for a variant:Allele from a fixed ToolRelease.";
+    requires predictors:from_tool, predictors:scored_allele, predictors:metric_name;
+    recommends predictors:raw_score, predictors:rank_score, predictors:categorical_call,
+               core:short_name, core:description;
+}
+
+class predictors:MaveScoreSet : lexicon:Entity {
+    description = "A MaveDB multiplexed functional assay score set targeting a gene.";
+    requires predictors:mavedb_urn, predictors:target_gene;
+    recommends predictors:assay_type, core:short_name, core:description;
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────────────────────
+
+property predictors:tool_name : core:string {
+    description = "Name of the predictor or assay database (e.g. REVEL, CADD, AlphaMissense, SpliceAI, MaveDB).";
+    domain predictors:ToolRelease;
+}
+
+property predictors:tool_version : core:string {
+    description = "Version string of the tool or release.";
+    domain predictors:ToolRelease;
+}
+
+property predictors:aggregator : core:string {
+    description = "Upstream aggregator used to retrieve the score (e.g. MyVariant.info / dbNSFP), if not queried directly.";
+    domain predictors:ToolRelease;
+}
+
+property predictors:from_tool : core:resource {
+    description = "The ToolRelease that produced this score record.";
+    class_types predictors:ToolRelease;
+    domain predictors:VariantScore;
+}
+
+property predictors:scored_allele : core:resource {
+    description = "The variant allele evaluated by the predictor.";
+    class_types variant:Allele;
+    domain predictors:VariantScore;
+}
+
+property predictors:metric_name : core:string {
+    description = "Specific metric or sub-score name (e.g. phred, score, DS_AG, DS_AL, DS_DG, DS_DL).";
+    domain predictors:VariantScore;
+}
+
+property predictors:raw_score : core:rational {
+    description = "Exact rational raw predictor score.";
+    domain predictors:VariantScore;
+}
+
+property predictors:rank_score : core:rational {
+    description = "Exact rational genome-wide rank score (e.g. dbNSFP converted_rankscore in [0, 1]).";
+    domain predictors:VariantScore;
+}
+
+property predictors:categorical_call : core:string {
+    description = "Predictor's own categorical label (e.g. D, T, likely_benign, likely_pathogenic).";
+    domain predictors:VariantScore;
+}
+
+property predictors:mavedb_urn : core:string {
+    description = "MaveDB score-set URN identifier.";
+    domain predictors:MaveScoreSet;
+}
+
+property predictors:target_gene : core:string {
+    description = "HGNC gene symbol targeted by the MAVE assay.";
+    domain predictors:MaveScoreSet;
+}
+
+property predictors:assay_type : core:string {
+    description = "Experimental assay modality (e.g. abundance, binding, survival).";
+    domain predictors:MaveScoreSet;
+}
+
+// ── Atomic observation predicates ────────────────────────────────────────────────────────────
+
+axiom predictors:HasScore           : predictors:ToolRelease -> variant:Allele -> core:string -> units:Quantity(u"1") -> Prop
+axiom predictors:HasCategoricalCall : predictors:ToolRelease -> variant:Allele -> core:string -> Prop
+axiom predictors:NoMaveScoreSet     : predictors:ToolRelease -> core:string -> Prop

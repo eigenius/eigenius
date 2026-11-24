@@ -154,6 +154,8 @@ fn glossary_and_cut_records_load_through_the_kernel() {
             timestamp: "2026-08-12T00:00:00Z",
             declared_by: eigenius_encoding::UNATTRIBUTED_AGENT,
             source_ref: None,
+            document_iri: None,
+            doc_unit_map: None,
         },
         &glossary,
         &[],

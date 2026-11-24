@@ -77,11 +77,21 @@ pub(crate) type Sig = (String, Combinator, bool, bool);
 /// `WRN affects project Achilles.` → 0 apposition readings packed / 8 unpacked. Carrying the bit
 /// restores the exactness the invariant above demands.
 pub(crate) fn node_sig(it: &Item) -> Sig {
-    let key = if super::super::category::cat_has_selectional_slot(it.cat()) {
+    let mut key = if super::super::category::cat_has_selectional_slot(it.cat()) {
         format!("sel:{}", cat_key(it.cat()))
     } else {
         cat_shape(it.cat())
     };
+    // Distinguish `cat_np(Entity, _)` and `cat_np(ProperName, _)` from concrete-class `cat_np`
+    // items (`Gene`, `CellLine`): `Guard::ProperNameExact` (`qualified_name`) and
+    // `Guard::ProperName` (`name`) decide combinator applicability on those two index IRIs.
+    if let Some([Exp::EigonClass(iri), _]) = super::super::category::is_ctor(it.cat(), "cat_np") {
+        match iri.as_str() {
+            "urn:eigenius:lexicon:Entity" => key.push_str(":entity"),
+            "urn:eigenius:lexicon:ProperName" => key.push_str(":pname"),
+            _ => {}
+        }
+    }
     (
         key,
         it.prov(),
@@ -547,6 +557,16 @@ mod tests {
         );
         assert_eq!(f.nodes[id_a].edges.len(), 2);
         assert_eq!(f.nodes.len(), 2, "two distinct signatures ⇒ two nodes");
+    }
+
+    #[test]
+    fn node_sig_distinguishes_entity_and_proper_name_np() {
+        let gene = leaf(cat_np(cls("urn:eigenius:lexicon:Gene")));
+        let entity = leaf(cat_np(cls("urn:eigenius:lexicon:Entity")));
+        let pname = leaf(cat_np(cls("urn:eigenius:lexicon:ProperName")));
+        assert_ne!(node_sig(&entity), node_sig(&pname));
+        assert_ne!(node_sig(&entity), node_sig(&gene));
+        assert_ne!(node_sig(&pname), node_sig(&gene));
     }
 
     #[test]

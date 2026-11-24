@@ -57,7 +57,7 @@ pub use resolve::{
 use super::category::{is_adjective_cat, is_vp_adjunct_prep};
 use super::holes::{freshen_anaphor, hole_base};
 use felicity::{is_finite_clause, FelicitousOutcome};
-use seed::is_lexicalized_adverb;
+use seed::{is_approximator_adverb, is_lexicalized_adverb};
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
@@ -507,6 +507,7 @@ impl Parser {
         // parseable — *known*, not a missing lexeme.
         self.is_derived_adverb(&s_lc)
             || is_lexicalized_adverb(&s_lc)
+            || is_approximator_adverb(&s_lc)
             || self.is_derived_adjective(&s_lc)
     }
 
@@ -1187,6 +1188,25 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
+                if j > i && tokens[i..=j].iter().any(Token::is_code_literal) {
+                    continue;
+                }
+                if i == j
+                    && tokens[i].is_code_literal()
+                    && self
+                        .lex
+                        .entries_for(&tokens[i].surface().trim().to_lowercase())
+                        .iter()
+                        .any(|e| match e.item.sem() {
+                            Exp::EigonResource(r) => r.id().is_some_and(|iri| {
+                                iri.as_str().starts_with("urn:eigenius:doc:lit_")
+                            }),
+                            Exp::Const(iri, _) => iri.as_str().starts_with("urn:eigenius:doc:lit_"),
+                            _ => false,
+                        })
+                {
+                    continue;
+                }
                 let surface = join_surfaces(&tokens[i..=j]);
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();

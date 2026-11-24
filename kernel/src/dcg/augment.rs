@@ -192,6 +192,14 @@ pub enum AugmentOptions {
     DocumentOnly,
     LexiconBacked(Iri),
     LlmBacked,
+    /// Full 10-source Stage-A glossary (`augment_lexicon_backed` + parser-gated `unknown_words`
+    /// over `SegmentedDocument` + apposition named entities, notations, recurrent OOV names,
+    /// code-span literals, productive derivations, hyphenated compounds, fallback entities, and
+    /// optional un-rewritten `source_document` abbreviation extraction).
+    FullGlossary {
+        source_document: Option<String>,
+        corpus_document: Option<String>,
+    },
 }
 
 /// The **`DocumentOnly`** augmentation (Phase 1): from the document's own abbreviation definitions build
@@ -535,6 +543,261 @@ pub fn augment_lexicon_backed(
     }
     aug.missing_oov = still_missing;
     aug
+}
+
+/// The full 10-source Stage-A glossary over `document` and its pre-segmented `units`, mirroring
+/// the Stage-A assembly proven on full-report corpora (`augment_lexicon_backed`, apposition named
+/// entities, notations, recurrent OOV names, code spans, derivations, compounds, fallback OOV
+/// entities, and abbreviation extraction on `source_document` when supplied).
+///
+/// Deduplicates `added` and `supporting` by `@id` and excludes any resource whose `@id` already
+/// resolves on `base`, so committing the glossary layer onto `base` and emitting it into an
+/// artifact never redefines a chain-resident resource or emits duplicate definitions.
+pub fn augment_full_glossary(
+    base: &Arc<Layer>,
+    document: &str,
+    units: Vec<String>,
+    source_document: Option<&str>,
+    proposer: &dyn AbbreviationProposer,
+    category_proposer: &dyn CategoryProposer,
+    lemmatizer: &dyn Lemmatizer,
+) -> LexiconAugmentation {
+    use super::glossary::{
+        code_span_augmentation, compound_augmentation, derivation_augmentation,
+        fallback_augmentation, named_entity_augmentation, notation_augmentation,
+        oov_name_augmentation, SegmentedDocument,
+    };
+    use super::parse::Parser;
+
+    let mut first = augment_lexicon_backed(base, document, proposer, category_proposer, lemmatizer);
+    let seg_doc = SegmentedDocument::new(document, units);
+    let oov: BTreeSet<String> = {
+        let probe = Parser::build(Arc::clone(base));
+        let mut set = BTreeSet::new();
+        for unit in seg_doc.units() {
+            for w in probe.unknown_words(unit, lemmatizer) {
+                set.insert(w.to_lowercase());
+                set.insert(w);
+            }
+        }
+        set
+    };
+
+    let mut aug = LexiconAugmentation {
+        added: Vec::new(),
+        supporting: Vec::new(),
+        missing_oov: std::mem::take(&mut first.missing_oov),
+    };
+    let mut seen_ids: BTreeSet<Iri> = BTreeSet::new();
+    let mut seen_supporting: BTreeMap<Iri, PropertyMapSig> = BTreeMap::new();
+    let mut seen_triples: BTreeSet<(String, String, String)> = BTreeSet::new();
+
+    if let Some(src_text) = source_document {
+        merge_augmentation_batch(
+            &mut aug,
+            augment_document_only(base, src_text, proposer, lemmatizer),
+            base,
+            &mut seen_ids,
+            &mut seen_supporting,
+            &mut seen_triples,
+        );
+    }
+    merge_augmentation_batch(
+        &mut aug,
+        first,
+        base,
+        &mut seen_ids,
+        &mut seen_supporting,
+        &mut seen_triples,
+    );
+    for next in [
+        named_entity_augmentation(base, &seg_doc),
+        notation_augmentation(base, &seg_doc, &oov),
+        oov_name_augmentation(base, &seg_doc, &oov),
+        code_span_augmentation(base, &seg_doc, &oov),
+        derivation_augmentation(base, &seg_doc, &oov),
+        compound_augmentation(base, &seg_doc, &oov),
+    ] {
+        merge_augmentation_batch(
+            &mut aug,
+            next,
+            base,
+            &mut seen_ids,
+            &mut seen_supporting,
+            &mut seen_triples,
+        );
+    }
+
+    let supplied_now: BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    merge_augmentation_batch(
+        &mut aug,
+        fallback_augmentation(base, &seg_doc, &oov, &supplied_now),
+        base,
+        &mut seen_ids,
+        &mut seen_supporting,
+        &mut seen_triples,
+    );
+
+    let supplied_lc: BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.to_lowercase())
+        .collect();
+    aug.missing_oov
+        .retain(|g| !supplied_lc.contains(&g.surface.to_lowercase()));
+    aug
+}
+
+type PropertyMapSig = Vec<(String, Value)>;
+
+fn merge_augmentation_batch(
+    aug: &mut LexiconAugmentation,
+    batch: LexiconAugmentation,
+    base: &Layer,
+    seen_ids: &mut BTreeSet<Iri>,
+    seen_supporting: &mut BTreeMap<Iri, PropertyMapSig>,
+    seen_triples: &mut BTreeSet<(String, String, String)>,
+) {
+    let mut id_remap: BTreeMap<Iri, Iri> = BTreeMap::new();
+    for mut r in batch.supporting {
+        if !id_remap.is_empty() {
+            remap_resource_values(&mut r, &id_remap);
+        }
+        let Some(old_id) = r.id().cloned() else {
+            continue;
+        };
+        if base.resolve(&old_id).is_some() {
+            continue;
+        }
+        let sig = resource_body_signature(&r);
+        if let Some(existing_sig) = seen_supporting.get(&old_id) {
+            if *existing_sig == sig {
+                continue;
+            }
+            let new_id = fresh_disambiguated_iri(&old_id, base, seen_ids);
+            id_remap.insert(old_id, new_id.clone());
+            r.set_id(Some(new_id.clone()));
+            seen_ids.insert(new_id.clone());
+            seen_supporting.insert(new_id, resource_body_signature(&r));
+            aug.supporting.push(r);
+        } else if seen_ids.contains(&old_id) {
+            let new_id = fresh_disambiguated_iri(&old_id, base, seen_ids);
+            id_remap.insert(old_id, new_id.clone());
+            r.set_id(Some(new_id.clone()));
+            seen_ids.insert(new_id.clone());
+            seen_supporting.insert(new_id, sig);
+            aug.supporting.push(r);
+        } else {
+            seen_ids.insert(old_id.clone());
+            seen_supporting.insert(old_id, sig);
+            aug.supporting.push(r);
+        }
+    }
+    for mut b in batch.added {
+        if !id_remap.is_empty() {
+            remap_resource_values(&mut b.proposed, &id_remap);
+            if let Some(g) = &mut b.provenance.grounded_to {
+                if let Some(mapped) = id_remap.get(g) {
+                    *g = mapped.clone();
+                }
+            }
+        }
+        let Some(old_id) = b.proposed.id().cloned() else {
+            continue;
+        };
+        let triple = lexical_entry_triple(&b.proposed);
+        if !seen_triples.insert(triple) {
+            continue;
+        }
+        if base.resolve(&old_id).is_some() || seen_ids.contains(&old_id) {
+            let new_id = fresh_disambiguated_iri(&old_id, base, seen_ids);
+            b.proposed.set_id(Some(new_id.clone()));
+            seen_ids.insert(new_id);
+        } else {
+            seen_ids.insert(old_id);
+        }
+        aug.added.push(b);
+    }
+}
+
+fn fresh_disambiguated_iri(old_id: &Iri, base: &Layer, seen_ids: &BTreeSet<Iri>) -> Iri {
+    let mut n = 2usize;
+    loop {
+        let cand = Iri::parse(&format!("{old_id}_{n}")).expect("disambiguated IRI");
+        if base.resolve(&cand).is_none() && !seen_ids.contains(&cand) {
+            return cand;
+        }
+        n += 1;
+    }
+}
+
+fn resource_body_signature(r: &Resource) -> PropertyMapSig {
+    let mut pairs: Vec<(String, Value)> = r
+        .properties()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    pairs
+}
+
+fn lexical_entry_triple(r: &Resource) -> (String, String, String) {
+    let get = |prop: &str| {
+        Iri::parse(prop)
+            .ok()
+            .and_then(|p| r.get(&p))
+            .map(|v| format!("{v:?}"))
+            .unwrap_or_default()
+    };
+    (
+        get("urn:eigenius:lexicon:form"),
+        get("urn:eigenius:lexicon:cat"),
+        get("urn:eigenius:lexicon:sem"),
+    )
+}
+
+fn remap_resource_values(r: &mut Resource, remap: &BTreeMap<Iri, Iri>) {
+    let props: Vec<(Iri, Value)> = r
+        .properties()
+        .iter()
+        .map(|(k, v)| (k.clone(), remap_value(v, remap)))
+        .collect();
+    for (k, v) in props {
+        r.set(k, v);
+    }
+}
+
+fn remap_value(v: &Value, remap: &BTreeMap<Iri, Iri>) -> Value {
+    if let Some(iri) = v.as_iri() {
+        if let Some(mapped) = remap.get(&iri) {
+            return Value::iri(mapped);
+        }
+    }
+    if let Some(s) = v.as_str() {
+        if let Ok(iri) = Iri::parse(s) {
+            if let Some(mapped) = remap.get(&iri) {
+                return Value::String(mapped.as_str().to_string());
+            }
+        }
+    }
+    if let Some(arr) = v.as_array() {
+        return Value::Array(arr.iter().map(|x| remap_value(x, remap)).collect());
+    }
+    if let Some(emb) = v.as_embedded() {
+        let mut copy = emb.clone();
+        if let Some(id) = copy.id().cloned() {
+            if let Some(mapped) = remap.get(&id) {
+                copy.set_id(Some(mapped.clone()));
+            }
+        }
+        remap_resource_values(&mut copy, remap);
+        return Value::Embedded(Box::new(copy));
+    }
+    v.clone()
 }
 
 // ───────────────────── live Anthropic POS proposer (use-llm feature) ─────────────────────

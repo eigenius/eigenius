@@ -227,7 +227,7 @@ impl CheckCtx {
     /// `type_cache` into the child — class resolutions performed inside
     /// the binder therefore don't propagate back to the parent on exit
     /// (§4.4-D7; sharing the cache instead is the profile-gated item 9).
-    fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, CheckError> {
+    pub(crate) fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, CheckError> {
         let gamma1 = up_gamma(&self.gamma, patt, typ, val)?;
         let rho1 = self.rho.clone().extend(patt.clone(), val.clone());
         Ok(CheckCtx {

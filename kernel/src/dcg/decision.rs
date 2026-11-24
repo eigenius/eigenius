@@ -550,13 +550,31 @@ mod providers {
 
     impl Decider for TypeSafeDecider {
         fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
-            if let Some(q) = choice.questions.iter().find(|q| q.options.len() > 255) {
-                return Err(format!(
-                    "{} options; a TypeSafe choice takes at most 255",
-                    q.options.len()
-                ));
-            }
-            let body = render_typesafe(choice, &self.model);
+            let capped_holder;
+            let active = if choice.questions.iter().any(|q| q.options.len() > 255) {
+                capped_holder = Choice {
+                    context: choice.context.clone(),
+                    questions: choice
+                        .questions
+                        .iter()
+                        .map(|q| {
+                            if q.options.len() > 255 {
+                                Question {
+                                    question: q.question.clone(),
+                                    notes: q.notes.clone(),
+                                    options: q.options[..255].to_vec(),
+                                }
+                            } else {
+                                q.clone()
+                            }
+                        })
+                        .collect(),
+                };
+                &capped_holder
+            } else {
+                choice
+            };
+            let body = render_typesafe(active, &self.model);
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -590,7 +608,7 @@ mod providers {
                 }
                 unreachable!("the last attempt returns")
             })?;
-            checked_all(choice, read_typesafe(&payload, choice.questions.len())?)
+            checked_all(active, read_typesafe(&payload, active.questions.len())?)
         }
 
         fn model(&self) -> &str {

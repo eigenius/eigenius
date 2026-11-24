@@ -56,7 +56,7 @@ use crate::dcg::verbalize::ConceptNote;
 /// complete, since a half-shown structure would make the sense table lie. Dropping is logged and
 /// stated in the prompt; a silent cap would let the model pick "the best of what it saw" and report it
 /// as the best reading (the D62 no-silent-caps rule).
-const MAX_STRUCTURES_SHOWN: usize = 12;
+const MAX_STRUCTURES_SHOWN: usize = 20;
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
 /// skeleton for legibility (the caller orders them), but the choice — and its evaluation — are
@@ -85,6 +85,10 @@ pub struct ReadingCandidate {
     /// The sense each word takes, in sentence order: its derivation's leaves that contribute a
     /// concept. Empty for a reading without one.
     pub senses_at: Vec<SenseAt>,
+    /// 0-based position in the parser's cost-sorted forest (`0` = lowest-cost surviving reading).
+    /// Carried in-memory for deterministic cost-ranked selection without disturbing the serialized
+    /// [`RecordedCandidate`] replay key.
+    pub forest_rank: usize,
 }
 
 /// The senses a reading gives the word (or multiword) at a span: the concepts its leaf contributes.
@@ -243,6 +247,103 @@ impl ReadingRanker for PinReadingRanker {
     }
 }
 
+/// Sense-resolved reading pin selector (D103 §3.1): selects the unique candidate whose exact
+/// pretty-printed `sem` matches the human-adjudicated reading for `ctx.sentence.trim()`.
+///
+/// Unlike [`PinReadingRanker`] (which matches sense-erased skeletons and fails closed on any
+/// sense-level tie), `SemPinReadingRanker` disambiguates both structure and word senses.
+///
+/// Behavior:
+/// - If `ctx.sentence.trim()` is present in `pins`:
+///   - Exactly one candidate with `c.sem == *pin_sem` → selects it.
+///   - Zero or `>= 2` matches → **fails closed (`None`)** (never falls through to an untrusted
+///     fallback when a human pin exists and drifted).
+/// - If `ctx.sentence.trim()` is NOT in `pins`:
+///   - Delegates to `fallback` when provided (enabling incremental section-by-section curation
+///     as an overlay on top of `--selections` or `--cost-first`), or abstains (`None`) in strict
+///     standalone mode.
+pub struct SemPinReadingRanker {
+    /// trimmed sentence → exact normalized `sem` term (`correct` row from adjudication ledger).
+    pins: BTreeMap<String, String>,
+    /// Optional fallback selector for sentences not yet pinned.
+    fallback: Option<Box<dyn ReadingRanker>>,
+}
+
+impl SemPinReadingRanker {
+    pub fn new(pins: BTreeMap<String, String>, fallback: Option<Box<dyn ReadingRanker>>) -> Self {
+        Self { pins, fallback }
+    }
+}
+
+impl ReadingRanker for SemPinReadingRanker {
+    fn model(&self) -> Option<String> {
+        Some("human:reading-pin".to_string())
+    }
+
+    fn select(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        if let Some(pin_sem) = self.pins.get(ctx.sentence.trim()) {
+            let matches: Vec<usize> = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| &c.sem == pin_sem)
+                .map(|(i, _)| i)
+                .collect();
+            return match matches.as_slice() {
+                [one] => Some(ReadingSelection {
+                    chosen: *one,
+                    rationale: "pinned reading (sense-resolved reading-adjudications.tsv)"
+                        .to_string(),
+                    runners_up: Vec::new(),
+                }),
+                _ => None, // fail closed on drift (0 matches) or duplicate sem (>=2 matches)
+            };
+        }
+        self.fallback
+            .as_deref()
+            .and_then(|f| f.select(ctx, candidates))
+    }
+}
+
+/// Deterministic offline reading selector (`--no-llm`): selects the lowest-cost surviving reading
+/// (`forest_rank == 0`) while keeping the default [`ReadingRanker::tells_apart`] contract so D69 §3
+/// presentation injectivity is still enforced before any selection is accepted.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CostFirstReadingRanker;
+
+impl ReadingRanker for CostFirstReadingRanker {
+    fn model(&self) -> Option<String> {
+        Some("deterministic:cost-first".to_string())
+    }
+
+    fn select(
+        &self,
+        _ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        if candidates.is_empty() {
+            return None;
+        }
+        let mut by_rank: Vec<usize> = (0..candidates.len()).collect();
+        by_rank.sort_by_key(|&idx| (candidates[idx].forest_rank, idx));
+        let chosen = by_rank[0];
+        let runners_up = by_rank[1..].to_vec();
+        Some(ReadingSelection {
+            chosen,
+            rationale: format!(
+                "Deterministic cost-ranked selection (--no-llm): lowest-cost surviving reading \
+                 (forest rank {} of {}).",
+                candidates[chosen].forest_rank,
+                candidates.len()
+            ),
+            runners_up,
+        })
+    }
+}
+
 // ───────────────────────── record / replay (reproducibility) ─────────────────────────
 
 /// A recorded selection: the exact question put to the ranker, and the answer it gave.
@@ -339,6 +440,7 @@ fn recorded_candidates(candidates: &[ReadingCandidate]) -> Vec<RecordedCandidate
 pub struct RecordingReadingRanker<R: ReadingRanker> {
     inner: R,
     log: Mutex<BTreeMap<String, SelectionRecord>>,
+    checkpoint_path: Option<std::path::PathBuf>,
 }
 
 impl<R: ReadingRanker> RecordingReadingRanker<R> {
@@ -346,7 +448,30 @@ impl<R: ReadingRanker> RecordingReadingRanker<R> {
         Self {
             inner,
             log: Mutex::new(BTreeMap::new()),
+            checkpoint_path: None,
         }
+    }
+
+    /// Periodically flush recorded selections to `path` every 25 new sentences.
+    pub fn with_checkpoint(mut self, path: std::path::PathBuf) -> Self {
+        self.checkpoint_path = Some(path);
+        self
+    }
+
+    /// Seed the recorder with entries from an existing checkpoint file so an interrupted run
+    /// replays already-recorded selections and calls the live inner ranker only on new questions.
+    pub fn load_checkpoint(&self, path: &Path) -> std::io::Result<usize> {
+        if !path.exists() {
+            return Ok(0);
+        }
+        let records: Vec<SelectionRecord> =
+            serde_json::from_str(&std::fs::read_to_string(path)?)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut log = self.log.lock().expect("selection log");
+        for r in records {
+            log.insert(record_key(&r), r);
+        }
+        Ok(log.len())
     }
 
     /// The recorded selections as JSON (sorted by key — deterministic bytes).
@@ -387,11 +512,22 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
         ctx: &DocumentContext,
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection> {
-        let selection = self.inner.select(ctx, candidates);
-        let model = self.inner.model().unwrap_or_default();
         let recorded = recorded_candidates(candidates);
         let sha = document_sha(ctx.document);
         let key = selection_key(ctx.sentence, &sha, ctx.prior_selections, &recorded);
+        if let Some(existing) = self.log.lock().expect("selection log").get(&key) {
+            return if existing.abstained {
+                None
+            } else {
+                Some(ReadingSelection {
+                    chosen: existing.chosen,
+                    rationale: existing.rationale.clone(),
+                    runners_up: existing.runners_up.clone(),
+                })
+            };
+        }
+        let selection = self.inner.select(ctx, candidates);
+        let model = self.inner.model().unwrap_or_default();
         let record = match &selection {
             Some(s) => SelectionRecord {
                 sentence: ctx.sentence.to_string(),
@@ -416,7 +552,20 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
                 model,
             },
         };
-        self.log.lock().expect("selection log").insert(key, record);
+        let n = {
+            let mut log = self.log.lock().expect("selection log");
+            log.insert(key, record);
+            log.len()
+        };
+        if n.is_multiple_of(25) {
+            if let Some(p) = &self.checkpoint_path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = self.write(p);
+                eprintln!("  [checkpoint] selections: {n} recorded → {}", p.display());
+            }
+        }
         selection
     }
 
@@ -884,15 +1033,46 @@ impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
 }
 
 /// What every decision of a sentence is about: the document, the readings already selected for
-/// earlier sentences, and the sentence — named as the questions refer to them.
+/// earlier sentences, and the sentence — named as the questions refer to them. For multi-hundred-
+/// sentence reports (`> 12 KB` or `> 40` prior selections), bounds the rendered prompt window
+/// around the target sentence and the 40 most recent selections so per-sentence prompt size stays
+/// O(1) while [`SelectionRecord`] replay keys remain exact.
 fn context_parts(ctx: &DocumentContext) -> Vec<(String, String)> {
-    let prior: Vec<String> = ctx
-        .prior_selections
+    const MAX_DOC_PROMPT_BYTES: usize = 12_000;
+    const DOC_HALF_WINDOW: usize = 2_500;
+    const MAX_PRIOR_PROMPT: usize = 40;
+
+    let doc_trimmed = ctx.document.trim();
+    let doc_text = if doc_trimmed.len() <= MAX_DOC_PROMPT_BYTES {
+        doc_trimmed.to_string()
+    } else {
+        let needle = ctx.sentence.trim();
+        match doc_trimmed.find(needle) {
+            Some(pos) => {
+                let start = doc_trimmed.floor_char_boundary(pos.saturating_sub(DOC_HALF_WINDOW));
+                let end = doc_trimmed.ceil_char_boundary(
+                    (pos + needle.len() + DOC_HALF_WINDOW).min(doc_trimmed.len()),
+                );
+                doc_trimmed[start..end].trim().to_string()
+            }
+            None => {
+                let end = doc_trimmed.floor_char_boundary(DOC_HALF_WINDOW * 2);
+                doc_trimmed[..end].trim().to_string()
+            }
+        }
+    };
+
+    let prior_slice = if ctx.prior_selections.len() > MAX_PRIOR_PROMPT {
+        &ctx.prior_selections[ctx.prior_selections.len() - MAX_PRIOR_PROMPT..]
+    } else {
+        ctx.prior_selections
+    };
+    let prior: Vec<String> = prior_slice
         .iter()
         .map(|p| format!("sentence {}: \"{}\"", p.ordinal, p.gloss))
         .collect();
     vec![
-        (DOCUMENT.into(), ctx.document.trim().to_string()),
+        (DOCUMENT.into(), doc_text),
         (EARLIER.into(), prior.join("\n")),
         (SENTENCE.into(), ctx.sentence.trim().to_string()),
     ]
@@ -1500,6 +1680,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: i,
             })
             .collect()
     }
@@ -1617,6 +1798,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: 0,
             },
             ReadingCandidate {
                 skeleton: "see(§)(we, man_with(telescope))".to_string(),
@@ -1626,6 +1808,7 @@ mod tests {
                 links: Vec::new(),
                 predication: None,
                 senses_at: Vec::new(),
+                forest_rank: 1,
             },
         ];
         let ctx = DocumentContext {
@@ -1758,6 +1941,7 @@ mod d69b_tests {
             links: Vec::new(),
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -1840,6 +2024,7 @@ mod two_call_tests {
             links,
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -2003,6 +2188,7 @@ mod decision_ranker_tests {
             links: Vec::new(),
             predication: None,
             senses_at: Vec::new(),
+            forest_rank: 0,
         }
     }
 
@@ -2100,5 +2286,68 @@ mod decision_ranker_tests {
             r.select(&ctx(), &c).is_none(),
             "an answer naming no option abstains"
         );
+    }
+
+    #[test]
+    fn cost_first_ranker_picks_lowest_forest_rank_and_keeps_d69_injectivity() {
+        let mut c0 = cand("A_alphabetically_first", "gloss a");
+        c0.forest_rank = 2;
+        let mut c1 = cand("Z_lowest_cost", "gloss z");
+        c1.forest_rank = 0;
+        let mut c2 = cand("M_middle", "gloss m");
+        c2.forest_rank = 1;
+        let pool = [c0, c1, c2];
+        assert_eq!(first_collision(&pool, &CostFirstReadingRanker), None);
+        let sel = CostFirstReadingRanker.select(&ctx(), &pool).expect("chose");
+        assert_eq!(
+            sel.chosen, 1,
+            "picks forest_rank == 0 despite skeleton re-ordering"
+        );
+        assert_eq!(sel.runners_up, vec![2, 0]);
+        assert_eq!(
+            CostFirstReadingRanker.model().as_deref(),
+            Some("deterministic:cost-first")
+        );
+
+        let dup_pool = [cand("A", "identical gloss"), cand("A", "identical gloss")];
+        assert_eq!(
+            first_collision(&dup_pool, &CostFirstReadingRanker),
+            Some((0, 1)),
+            "D69 presentation collision still blocks CostFirstReadingRanker"
+        );
+    }
+
+    #[test]
+    fn sem_pin_ranker_breaks_sense_ties_fails_closed_on_drift_and_delegates_unpinned() {
+        let mut c0 = cand("SAME_SKEL", "sense zero");
+        c0.sem = "v001(a, b)".to_string();
+        c0.forest_rank = 0;
+        let mut c1 = cand("SAME_SKEL", "sense one");
+        c1.sem = "v002(a, b)".to_string();
+        c1.forest_rank = 1;
+        let pool = [c0, c1];
+
+        // 1. Sense-resolved pin breaks a tie where both candidates share the same skeleton.
+        let mut pins = BTreeMap::new();
+        pins.insert(ctx().sentence.trim().to_string(), "v002(a, b)".to_string());
+        let r = SemPinReadingRanker::new(pins, Some(Box::new(CostFirstReadingRanker)));
+        let sel = r.select(&ctx(), &pool).expect("breaks sense tie");
+        assert_eq!(sel.chosen, 1);
+
+        // 2. Drifted pin fails closed even when a fallback ranker is attached.
+        let mut drifted = BTreeMap::new();
+        drifted.insert(ctx().sentence.trim().to_string(), "v999(a, b)".to_string());
+        let r_drift = SemPinReadingRanker::new(drifted, Some(Box::new(CostFirstReadingRanker)));
+        assert!(
+            r_drift.select(&ctx(), &pool).is_none(),
+            "drifted pin must fail closed rather than silently falling back"
+        );
+
+        // 3. Unpinned sentence delegates to fallback when present, or abstains standalone.
+        let r_overlay =
+            SemPinReadingRanker::new(BTreeMap::new(), Some(Box::new(CostFirstReadingRanker)));
+        assert_eq!(r_overlay.select(&ctx(), &pool).expect("fallback").chosen, 0);
+        let r_strict = SemPinReadingRanker::new(BTreeMap::new(), None);
+        assert!(r_strict.select(&ctx(), &pool).is_none());
     }
 }

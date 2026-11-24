@@ -231,10 +231,42 @@ fn slug(s: &str) -> String {
 /// `e_instability`)? An abbreviation inherits its long form's head-noun countability, so a `mass`
 /// head (`microsatellite instability` → `instability`) licenses the bare-singular-mass subject.
 fn form_is_mass(layer: &Arc<Layer>, lemma: &str) -> bool {
-    entries_for_form(layer, lemma)
+    let sense_prop = Iri::parse("urn:eigenius:lexicon:sense").ok();
+    let rank_prop = Iri::parse("urn:eigenius:lexicon:sense_rank").ok();
+    let nom_entries: Vec<(bool, i64, Exp)> = entries_for_form(layer, lemma)
         .iter()
-        .filter_map(|r| entry_cat(layer, r))
-        .any(|cat| cat_is_mass(&cat))
+        .filter_map(|r| {
+            let cat = entry_cat(layer, r)?;
+            if !matches!(&cat, Exp::InductiveCtor(_, name, args) if name == "cat_n" && args.len() == 2) {
+                return None;
+            }
+            let is_umls = sense_prop
+                .as_ref()
+                .and_then(|p| r.get(p))
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.starts_with("umls:"));
+            let rank = rank_prop
+                .as_ref()
+                .and_then(|p| r.get(p))
+                .and_then(Value::as_integer)
+                .unwrap_or(0);
+            Some((is_umls, rank, cat))
+        })
+        .collect();
+    if nom_entries.is_empty() {
+        return false;
+    }
+    let has_non_umls = nom_entries.iter().any(|(is_umls, _, _)| !*is_umls);
+    let min_rank = nom_entries
+        .iter()
+        .filter(|(is_umls, _, _)| !has_non_umls || !*is_umls)
+        .map(|(_, r, _)| *r)
+        .min()
+        .unwrap_or(0);
+    nom_entries
+        .iter()
+        .filter(|(is_umls, r, _)| (!has_non_umls || !*is_umls) && *r == min_rank)
+        .all(|(_, _, cat)| cat_is_mass(cat))
 }
 
 /// Decode a `lexicon:LexicalEntry`'s `cat` property back to a category `Exp` (the D47 type mirror).
@@ -359,8 +391,44 @@ pub fn abbreviation_resources(
         p("urn:eigenius:lexicon:sense"),
         Value::String(format!("doc:{key}")),
     );
+    if !binding.long_form.trim().is_empty()
+        && !binding
+            .long_form
+            .trim()
+            .eq_ignore_ascii_case(binding.abbr.trim())
+    {
+        e.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "{} (abbreviation defined in this document)",
+                binding.long_form.trim()
+            )),
+        );
+    }
 
-    Some(vec![e])
+    let mut out = vec![e.clone()];
+    let tok_surface = super::preprocess::join_surfaces(&super::preprocess::tokenize(
+        binding.abbr,
+        &super::quantity::ProseUnits::none(),
+    ));
+    let tok_trimmed = tok_surface.trim();
+    if !tok_trimmed.is_empty() && !tok_trimmed.eq_ignore_ascii_case(binding.abbr.trim()) {
+        if let Ok(tok_iri) = Iri::parse(&format!("{}:e_{key}_tok", binding.doc_ns)) {
+            let mut e_tok = e;
+            e_tok.set_id(Some(tok_iri));
+            e_tok.set(
+                p("urn:eigenius:lexicon:form"),
+                Value::String(tok_trimmed.to_string()),
+            );
+            e_tok.set(
+                p("urn:eigenius:lexicon:sense"),
+                Value::String(format!("doc:{key}_tok")),
+            );
+            out.push(e_tok);
+        }
+    }
+
+    Some(out)
 }
 
 /// The full document glossary for a set of extracted definitions: for each, **ground** the
@@ -378,11 +446,13 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
             Some(c) => c.to_string(),
             None => {
                 // Grounding miss → a fresh doc-local class rooted at Entity (Declared, ungrounded).
-                let fresh = format!("urn:eigenius:doc:class_{}", slug(&d.short_form));
+                let local = format!("class_{}", slug(&d.short_form));
+                let fresh = format!("urn:eigenius:doc:{local}");
                 if let Ok(ci) = Iri::parse(&fresh) {
                     let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
                     let mut cls = Resource::new(ci);
                     cls.set(p(wk::IS_A), Value::Array(vec![Value::iri(&p(wk::CLASS))]));
+                    cls.set(p(wk::SHORT_NAME), Value::String(local));
                     cls.set(
                         p(wk::PARENT_CLASSES),
                         Value::Array(vec![Value::String(
@@ -455,17 +525,39 @@ pub fn is_apposition_head(layer: &Arc<Layer>, form: &str) -> bool {
 /// entry with a resolvable `sem`.
 fn common_noun_concept(layer: &Arc<Layer>, form: &str) -> Option<Iri> {
     let sem_prop = Iri::parse("urn:eigenius:lexicon:sem").ok()?;
+    let sense_prop = Iri::parse("urn:eigenius:lexicon:sense").ok();
+    let rank_prop = Iri::parse("urn:eigenius:lexicon:sense_rank").ok();
+    let mut cands: Vec<(bool, i64, Iri)> = Vec::new();
     for r in entries_for_form(layer, form) {
         let is_cat_n = entry_cat(layer, &r)
             .is_some_and(|c| matches!(&c, Exp::InductiveCtor(_, n, _) if n == "cat_n"));
         if !is_cat_n {
             continue;
         }
-        if let Some(Value::String(s)) = r.get(&sem_prop) {
-            return Iri::parse(s).ok();
-        }
+        let Some(Value::String(s)) = r.get(&sem_prop) else {
+            continue;
+        };
+        let Ok(iri) = Iri::parse(s) else {
+            continue;
+        };
+        let is_umls = sense_prop
+            .as_ref()
+            .and_then(|p| r.get(p))
+            .and_then(Value::as_str)
+            .is_some_and(|sv| sv.starts_with("umls:"));
+        let rank = rank_prop
+            .as_ref()
+            .and_then(|p| r.get(p))
+            .and_then(Value::as_integer)
+            .unwrap_or(0);
+        cands.push((is_umls, rank, iri));
     }
-    None
+    let has_non_umls = cands.iter().any(|(is_umls, _, _)| !*is_umls);
+    cands
+        .into_iter()
+        .filter(|(is_umls, _, _)| !has_non_umls || !*is_umls)
+        .min_by_key(|(_, rank, _)| *rank)
+        .map(|(_, _, iri)| iri)
 }
 
 /// **Named-entity augmentation** — recognize `<head> <Name>` appositions in `document`
@@ -1544,7 +1636,7 @@ pub fn code_span_augmentation(
         if key.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
-        if !is_pipeline_gap(oov, tok) {
+        if !is_pipeline_gap(oov, tok) && span.trim() != tok {
             continue;
         }
         let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:lit_{key}")) else {
@@ -1826,7 +1918,19 @@ pub fn compound_augmentation(
             continue;
         }
         supporting.extend(extra);
-        for proposed in entries {
+        let p_desc = Iri::parse(wk::DESCRIPTION).expect("valid well-known iri");
+        let p_rank =
+            Iri::parse("urn:eigenius:lexicon:sense_rank").expect("valid lexicon sense_rank iri");
+        for mut proposed in entries {
+            proposed.set(
+                p_desc.clone(),
+                Value::String(format!(
+                    "Compound of known parts ({} parts, head {:?})",
+                    parts.len(),
+                    head_part
+                )),
+            );
+            proposed.set(p_rank.clone(), Value::Integer(4));
             added.push(LexicalBinding {
                 proposed,
                 provenance: Provenance {

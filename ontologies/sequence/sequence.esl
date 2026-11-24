@@ -1,0 +1,150 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Transcript annotations, evolutionary conservation, base-editing windows, and dbSNP records
+// (D103 §5.6).
+//
+// Chain-loaded over bootstrap (`core`, `lexicon`, `units`) + `variant`.
+
+namespace core     = "urn:eigenius:core";
+namespace lexicon  = "urn:eigenius:lexicon";
+namespace units    = "urn:eigenius:units";
+namespace variant  = "urn:eigenius:variant";
+namespace sequence = "urn:eigenius:sequence";
+
+// ── Classes ──────────────────────────────────────────────────────────────────────────────────
+
+class sequence:TranscriptAnnotation : lexicon:Entity {
+    description = "Structural sequence metadata for a variant:Transcript (MANE Select flag, CDS length, exon count).";
+    requires sequence:of_transcript;
+    recommends sequence:mane_select, sequence:cds_length, sequence:exon_count,
+               core:short_name, core:description;
+}
+
+class sequence:OrthologConservation : lexicon:Entity {
+    description = "Evolutionary conservation summary for a variant:Location across a taxonomic clade alignment.";
+    requires sequence:at_location, sequence:clade, sequence:species_count, sequence:conserved_count;
+    recommends sequence:alignment_source, core:short_name, core:description;
+}
+
+class sequence:EditingWindow : lexicon:Entity {
+    description = "A programmable genome-editing window on a transcript, specifying editor, protospacer, PAM, target nucleotide allele, and co-editable bystander alleles.";
+    requires sequence:of_transcript, sequence:editor_name, sequence:protospacer_seq,
+             sequence:pam_seq, sequence:target_allele;
+    recommends sequence:bystander_alleles, core:short_name, core:description;
+}
+
+class sequence:DbSnpRecord : lexicon:Entity {
+    description = "A dbSNP reference cluster record linking an rsID to a variant:NucleotideAllele.";
+    requires sequence:rsid, sequence:dbsnp_allele;
+    recommends sequence:reference_genome, core:short_name, core:description;
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────────────────────
+
+property sequence:of_transcript : core:resource {
+    description = "The RefSeq/Ensembl transcript annotated or targeted.";
+    class_types variant:Transcript;
+    domain sequence:TranscriptAnnotation, sequence:EditingWindow;
+}
+
+property sequence:mane_select : core:boolean {
+    description = "Whether the transcript is designated MANE Select.";
+    domain sequence:TranscriptAnnotation;
+}
+
+property sequence:cds_length : core:integer {
+    description = "Coding DNA sequence length in nucleotides (including stop codon where noted).";
+    domain sequence:TranscriptAnnotation;
+}
+
+property sequence:exon_count : core:integer {
+    description = "Number of exons in the transcript.";
+    domain sequence:TranscriptAnnotation;
+}
+
+property sequence:at_location : core:resource {
+    description = "Residue or genomic position whose conservation is measured.";
+    class_types variant:Location;
+    domain sequence:OrthologConservation;
+}
+
+property sequence:clade : core:string {
+    description = "Taxonomic clade over which conservation is computed (e.g. mammals, primates, vertebrates).";
+    domain sequence:OrthologConservation;
+}
+
+property sequence:species_count : core:integer {
+    description = "Total number of orthologous species evaluated in the alignment.";
+    domain sequence:OrthologConservation;
+}
+
+property sequence:conserved_count : core:integer {
+    description = "Number of species sharing the reference residue at this position.";
+    domain sequence:OrthologConservation;
+}
+
+property sequence:alignment_source : core:string {
+    description = "Source alignment database and release (e.g. Ensembl Compara).";
+    domain sequence:OrthologConservation;
+}
+
+property sequence:editor_name : core:string {
+    description = "Name of the base or prime editor architecture.";
+    domain sequence:EditingWindow;
+}
+
+property sequence:protospacer_seq : core:string {
+    description = "5'-to-3' protospacer nucleotide sequence.";
+    domain sequence:EditingWindow;
+}
+
+property sequence:pam_seq : core:string {
+    description = "PAM nucleotide motif adjacent to the protospacer.";
+    domain sequence:EditingWindow;
+}
+
+property sequence:target_allele : core:resource {
+    description = "Intended edit or pathogenic target nucleotide allele in the editing window.";
+    class_types variant:NucleotideAllele;
+    domain sequence:EditingWindow;
+}
+
+property sequence:bystander_alleles : core:resource_array {
+    description = "Co-editable bystander nucleotide alleles within the editing window.";
+    class_types variant:NucleotideAllele;
+    domain sequence:EditingWindow;
+}
+
+property sequence:rsid : core:string {
+    description = "dbSNP reference SNP cluster identifier (e.g. rs123456).";
+    domain sequence:DbSnpRecord;
+}
+
+property sequence:dbsnp_allele : core:resource {
+    description = "Nucleotide allele associated with the rsID.";
+    class_types variant:NucleotideAllele;
+    domain sequence:DbSnpRecord;
+}
+
+property sequence:reference_genome : core:string {
+    description = "Reference genome assembly for the dbSNP record.";
+    domain sequence:DbSnpRecord;
+}
+
+// ── Atomic observation predicates ────────────────────────────────────────────────────────────
+
+axiom sequence:ConservedInClade    : variant:Location -> core:string -> units:Quantity(u"1") -> Prop
+axiom sequence:CoEditableBystander : sequence:EditingWindow -> variant:NucleotideAllele -> Prop
+axiom sequence:HasRsId             : variant:NucleotideAllele -> core:string -> Prop

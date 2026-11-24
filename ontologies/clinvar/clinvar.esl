@@ -49,3 +49,110 @@ data clinvar:NotListed : clinvar:Release -> variant:Allele -> Prop {
 data clinvar:ListedAs : clinvar:Release -> variant:Allele -> clinical:AcmgTier -> Prop {
     description = "The release lists the allele with the germline classification. ClinVar's classification values include the five ACMG/AMP tiers and others (conflicting classifications, risk factor, drug response), which are not modelled.";
 }
+
+// ── Structured variation records and review status (D103 §5.2) ───────────────────────────────
+
+class clinvar:ReviewStatus {
+    description = "ClinVar germline review status tier (0 to 4 stars). Closed.";
+}
+
+resource clinvar:no_assertion_provided : clinvar:ReviewStatus {
+    core:short_name  = "no_assertion_provided";
+    core:description = "0 stars: no assertion provided.";
+}
+
+resource clinvar:no_assertion_criteria_provided : clinvar:ReviewStatus {
+    core:short_name  = "no_assertion_criteria_provided";
+    core:description = "0 stars: assertion provided without assertion criteria.";
+}
+
+resource clinvar:single_submitter : clinvar:ReviewStatus {
+    core:short_name  = "single_submitter";
+    core:description = "1 star: criteria provided, single submitter.";
+}
+
+resource clinvar:conflicting_classifications : clinvar:ReviewStatus {
+    core:short_name  = "conflicting_classifications";
+    core:description = "1 star: criteria provided, conflicting classifications.";
+}
+
+resource clinvar:multiple_submitters_no_conflicts : clinvar:ReviewStatus {
+    core:short_name  = "multiple_submitters_no_conflicts";
+    core:description = "2 stars: criteria provided, multiple submitters, no conflicts.";
+}
+
+resource clinvar:reviewed_by_expert_panel : clinvar:ReviewStatus {
+    core:short_name  = "reviewed_by_expert_panel";
+    core:description = "3 stars: reviewed by ClinGen/variant curation expert panel.";
+}
+
+resource clinvar:practice_guideline : clinvar:ReviewStatus {
+    core:short_name  = "practice_guideline";
+    core:description = "4 stars: practice guideline.";
+}
+
+class clinvar:VariationRecord : lexicon:Entity {
+    description = "One ClinVar VCV variation record observed in a fixed clinvar:Release, carrying its accession, allele, classification tier, review status, star count, submitter count, and conflict flag.";
+    requires clinvar:vcv_accession, clinvar:record_release, clinvar:record_allele;
+    recommends clinvar:vcv_version, clinvar:classification, clinvar:review_status,
+               clinvar:star_rating, clinvar:submitter_count, clinvar:has_conflict,
+               core:short_name, core:description;
+}
+
+property clinvar:vcv_accession : core:string {
+    description = "ClinVar VCV accession without version suffix (e.g. VCV000000001).";
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:vcv_version : core:integer {
+    description = "Integer version number of the VCV record (e.g. 4 for VCV000000001.4).";
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:record_release : core:resource {
+    description = "The ClinVar release in which this variation record was observed.";
+    class_types clinvar:Release;
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:record_allele : core:resource {
+    description = "The variant allele this ClinVar variation record describes.";
+    class_types variant:Allele;
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:classification : core:resource {
+    description = "Germline ACMG/AMP classification tier when the record carries one of the five standard tiers.";
+    class_types clinical:AcmgTier;
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:review_status : core:resource {
+    description = "ClinVar review status governing the record's star rating.";
+    class_types clinvar:ReviewStatus;
+    allows_only clinvar:no_assertion_provided, clinvar:no_assertion_criteria_provided,
+                clinvar:single_submitter, clinvar:conflicting_classifications,
+                clinvar:multiple_submitters_no_conflicts, clinvar:reviewed_by_expert_panel,
+                clinvar:practice_guideline;
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:star_rating : core:integer {
+    description = "ClinVar review-status star rating (0 through 4).";
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:submitter_count : core:integer {
+    description = "Number of clinical submitters contributing to this VCV record.";
+    domain clinvar:VariationRecord;
+}
+
+property clinvar:has_conflict : core:boolean {
+    description = "Whether the record carries conflicting interpretations of pathogenicity.";
+    domain clinvar:VariationRecord;
+}
+
+axiom clinvar:HasReviewStatus   : clinvar:Release -> variant:Allele -> clinvar:ReviewStatus -> Prop
+axiom clinvar:HasReviewStars    : clinvar:Release -> variant:Allele -> core:integer -> Prop
+axiom clinvar:HasSubmitterCount : clinvar:Release -> variant:Allele -> core:integer -> Prop
+axiom clinvar:HasConflict       : clinvar:Release -> variant:Allele -> Prop

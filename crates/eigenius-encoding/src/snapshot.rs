@@ -93,13 +93,28 @@ pub fn build_sense_ranker(
     ),
     String,
 > {
+    build_sense_ranker_with_model(ranks, None, false)
+}
+
+/// Like [`build_sense_ranker`], with an optional explicit model override and resume flag for RECORD mode.
+pub fn build_sense_ranker_with_model(
+    ranks: &Option<PathBuf>,
+    sense_model: Option<&str>,
+    resume: bool,
+) -> Result<
+    (
+        Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
+        Recording,
+    ),
+    String,
+> {
     let Some(path) = ranks else {
         // Cap-only. Legitimate, but it is a DIFFERENT experiment: with no ranker there is no sense
         // ELIMINATION at all, so the reading set is not the one the pins were verified against.
         eprintln!("contextual reranker: none — cap-only (pins may not match)");
         return Ok((None, Recording::None));
     };
-    if path.exists() {
+    if path.exists() && !resume {
         let replay = ReplaySenseRanker::load(path)
             .map_err(|e| format!("--ranks {} could not be read: {e}", path.display()))?;
         eprintln!(
@@ -108,7 +123,7 @@ pub fn build_sense_ranker(
         );
         return Ok((Some(Box::new(replay)), Recording::None));
     }
-    record(path.clone())
+    record(path.clone(), sense_model, resume)
 }
 
 /// The lazy parser over a resumed head: on-demand `lexicon:form` index probes (the only tractable
@@ -159,6 +174,8 @@ impl Recording {
 #[cfg(feature = "use-llm")]
 fn record(
     path: PathBuf,
+    sense_model: Option<&str>,
+    resume: bool,
 ) -> Result<
     (
         Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
@@ -166,18 +183,42 @@ fn record(
     ),
     String,
 > {
-    let Some(live) = eigenius_kernel::dcg::live_sense_ranker_from_env() else {
+    let live = match sense_model.filter(|m| !m.is_empty()) {
+        Some(m) => eigenius_kernel::dcg::sense_ranker::live_sense_ranker(
+            &eigenius_kernel::dcg::model_config::ModelConfig::requested(
+                m,
+                eigenius_kernel::dcg::model_config::DEFAULT_MODEL,
+                0,
+            ),
+        ),
+        None => eigenius_kernel::dcg::live_sense_ranker_from_env(),
+    };
+    let Some(live) = live else {
         return Err(format!(
             "--ranks {} does not exist (RECORD mode) but the sense model's API key is unset",
             path.display()
         ));
     };
-    eprintln!(
-        "contextual reranker: {} (live) — RECORDING to {}",
-        live.model().unwrap_or_default(),
-        path.display()
+    let model_name = live.model().unwrap_or_default();
+    let rec = std::sync::Arc::new(
+        eigenius_kernel::dcg::RecordingSenseRanker::new(live).with_checkpoint(path.clone()),
     );
-    let rec = std::sync::Arc::new(eigenius_kernel::dcg::RecordingSenseRanker::new(live));
+    let seeded = if resume && path.exists() {
+        rec.load_checkpoint(&path)
+            .map_err(|e| format!("resume --ranks {}: {e}", path.display()))?
+    } else {
+        0
+    };
+    eprintln!(
+        "contextual reranker: {model_name} (live) — {} to {}{}",
+        if seeded > 0 { "RESUMING" } else { "RECORDING" },
+        path.display(),
+        if seeded > 0 {
+            format!(" ({seeded} checkpointed rankings preloaded)")
+        } else {
+            String::new()
+        }
+    );
     let boxed: Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync> =
         Box::new(ArcRanker(std::sync::Arc::clone(&rec)));
     Ok((Some(boxed), Recording::Live(rec, path)))
@@ -189,6 +230,8 @@ fn record(
 #[cfg(not(feature = "use-llm"))]
 fn record(
     path: PathBuf,
+    _sense_model: Option<&str>,
+    _resume: bool,
 ) -> Result<
     (
         Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
