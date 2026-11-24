@@ -361,7 +361,7 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
             log.insert(rank_key(sentence, context, words), rec);
             log.len()
         };
-        if n % 25 == 0 {
+        if n.is_multiple_of(25) {
             if let Some(p) = &self.checkpoint_path {
                 if let Some(parent) = p.parent() {
                     let _ = std::fs::create_dir_all(parent);

@@ -224,7 +224,7 @@ impl<C: KindClassifier> KindClassifier for RecordingKindClassifier<C> {
             );
             log.len()
         };
-        if n % 25 == 0 {
+        if n.is_multiple_of(25) {
             if let Some(p) = &self.checkpoint_path {
                 if let Some(parent) = p.parent() {
                     let _ = std::fs::create_dir_all(parent);

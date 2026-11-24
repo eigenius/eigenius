@@ -131,6 +131,31 @@ pub fn load_doc_unit_map(path: &Path) -> std::io::Result<BTreeMap<usize, String>
     Ok(out)
 }
 
+/// Load a pin file: `sentence <TAB> skeleton [<TAB> note]`, `#` comments, blank lines ignored.
+pub fn load_pins(path: &Path) -> std::io::Result<BTreeMap<String, Pin>> {
+    let text = std::fs::read_to_string(path)?;
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut cols = line.split('\t');
+        let (Some(sentence), Some(skeleton)) = (cols.next(), cols.next()) else {
+            continue;
+        };
+        let sentence = sentence.trim().to_string();
+        out.insert(
+            sentence.clone(),
+            Pin {
+                sentence,
+                skeleton: skeleton.trim().to_string(),
+                note: cols.next().unwrap_or("").trim().to_string(),
+            },
+        );
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,29 +186,4 @@ mod tests {
         .unwrap();
         assert!(load_reading_pins(&bad_path).is_err());
     }
-}
-
-/// Load a pin file: `sentence <TAB> skeleton [<TAB> note]`, `#` comments, blank lines ignored.
-pub fn load_pins(path: &Path) -> std::io::Result<BTreeMap<String, Pin>> {
-    let text = std::fs::read_to_string(path)?;
-    let mut out = BTreeMap::new();
-    for line in text.lines() {
-        if line.trim().is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut cols = line.split('\t');
-        let (Some(sentence), Some(skeleton)) = (cols.next(), cols.next()) else {
-            continue;
-        };
-        let sentence = sentence.trim().to_string();
-        out.insert(
-            sentence.clone(),
-            Pin {
-                sentence,
-                skeleton: skeleton.trim().to_string(),
-                note: cols.next().unwrap_or("").trim().to_string(),
-            },
-        );
-    }
-    Ok(out)
 }
