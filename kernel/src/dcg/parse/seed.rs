@@ -3013,7 +3013,12 @@ impl Parser {
                             entity_sem_cost,
                         ));
                     }
-                    if !out.iter().any(|it| is_ctor(it.cat(), "cat_n").is_some()) {
+                    let np_is_entity = matches!(
+                        is_ctor(np_it.cat(), "cat_np"),
+                        Some([Exp::EigonClass(iri), _])
+                            if iri.as_str() == "urn:eigenius:lexicon:Entity"
+                    );
+                    if np_is_entity && !out.iter().any(|it| is_ctor(it.cat(), "cat_n").is_some()) {
                         let named_iri = Iri::parse("urn:eigenius:ontology:named")
                             .ok()
                             .filter(|i| self.grammar.layer.resolve(i).is_some());
@@ -5189,12 +5194,13 @@ pub(super) fn apply_sense_cap(
     // Walk the sorted entries and keep every entry whose sense is among the first `eff` DISTINCT
     // senses. An entry with no sense label (the closed class, test fixtures) is kept: it has no
     // sense to count and the cap has never been the right instrument for it.
+    let has_open = entries.iter().any(is_open_class_entry);
     let mut kept_senses: BTreeSet<&str> = BTreeSet::new();
     let mut keep: Vec<bool> = Vec::with_capacity(entries.len());
     for e in entries.iter() {
         let k = match e.sense.as_deref() {
             None | Some("unit:postmod" | "supp:open") => true,
-            _ if ranks.is_none() && is_closed_class_entry(e) => true,
+            _ if ranks.is_none() && has_open && is_closed_class_entry(e) => true,
             Some(s) if kept_senses.contains(s) => true,
             Some(s) if kept_senses.len() < eff => {
                 kept_senses.insert(s);
